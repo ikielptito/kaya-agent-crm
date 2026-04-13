@@ -230,6 +230,37 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .btn-primary:hover { opacity: 0.88; }
 .btn-primary.samba { background: var(--samba); }
 
+
+/* DISCOVER TABS */
+.discover-tabs { display: flex; border-bottom: 1px solid var(--sand3); margin-bottom: 16px; }
+.discover-tab { padding: 9px 16px; font-size: 12px; font-weight: 500; color: var(--ink3); cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.12s; white-space: nowrap; }
+.discover-tab:hover { color: var(--ink); }
+.discover-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.discover-tab-pane { display: none; }
+.discover-tab-pane.active { display: block; }
+
+/* Facebook settings */
+.fb-settings { background: var(--sand); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px; }
+.fb-settings-title { font-size: 11px; font-weight: 600; color: var(--ink3); margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+.fb-settings-body { display: none; }
+.fb-settings-body.open { display: block; }
+.fb-cookie-input { width: 100%; background: white; border: 1px solid var(--sand3); border-radius: 5px; padding: 6px 10px; font-family: monospace; font-size: 11px; color: var(--ink2); outline: none; margin-bottom: 6px; }
+.fb-cookie-input:focus { border-color: var(--accent-mid); }
+
+.group-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; max-height: 220px; overflow-y: auto; }
+.group-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--sand3); border-radius: 6px; cursor: pointer; transition: all 0.1s; background: white; }
+.group-item:hover { border-color: var(--accent-mid); }
+.group-item.selected { border-color: var(--accent); background: var(--accent-light); }
+.group-item.selected.samba { border-color: var(--samba); background: var(--samba-light); }
+.group-check { width: 16px; height: 16px; border: 1.5px solid var(--sand3); border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; flex-shrink: 0; transition: all 0.1s; }
+.group-item.selected .group-check { background: var(--accent); border-color: var(--accent); }
+.group-item.selected.samba .group-check { background: var(--samba); border-color: var(--samba); }
+.group-name { font-size: 12px; color: var(--ink); flex: 1; }
+.group-select-all { font-size: 11px; color: var(--accent-mid); cursor: pointer; text-decoration: underline; margin-bottom: 8px; display: inline-block; }
+
+.days-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 12px; color: var(--ink2); }
+.days-select { height: 30px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 5px; padding: 0 8px; font-family: Geist,sans-serif; font-size: 12px; color: var(--ink); outline: none; appearance: none; cursor: pointer; }
+
 /* DISCOVER PANEL */
 .discover-overlay { display: none; position: fixed; inset: 0; background: rgba(26,24,20,0.45); z-index: 300; align-items: flex-start; justify-content: flex-end; backdrop-filter: blur(2px); }
 .discover-overlay.open { display: flex; }
@@ -365,24 +396,138 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <div style="display:flex;align-items:flex-start;justify-content:space-between">
         <div>
           <div class="discover-title" id="discoverTitle">Discover agents</div>
-          <div class="discover-sub">Scrapes Google Maps for real estate agents in Bali</div>
+          <div class="discover-sub" id="discoverSub">Scrape Facebook groups or Google Maps for agent posts</div>
         </div>
         <button class="drawer-close" onclick="closeDiscoverPanel()">✕</button>
       </div>
+      <div class="discover-tabs" style="margin-top:12px">
+        <div class="discover-tab active" id="tab-gmaps" onclick="switchDiscoverTab('gmaps')">Google Maps</div>
+        <div class="discover-tab" id="tab-facebook" onclick="switchDiscoverTab('facebook')">Facebook Groups</div>
+      </div>
     </div>
     <div class="discover-body">
-      <div class="section-label" style="margin-bottom:8px">Target area</div>
-      <div class="area-grid">
-        <div class="area-card selected" id="area-canggu" onclick="toggleArea('canggu')">
-          <div class="area-card-title">Canggu / Pererenan</div>
-          <div class="area-card-sub">Berawa, Batu Bolong, Echo Beach</div>
+
+      <!-- GOOGLE MAPS TAB -->
+      <div class="discover-tab-pane active" id="pane-gmaps">
+        <div class="section-label" style="margin-bottom:8px">Target area</div>
+        <div class="area-grid">
+          <div class="area-card selected" id="area-canggu" onclick="toggleArea('canggu')">
+            <div class="area-card-title">Canggu / Pererenan</div>
+            <div class="area-card-sub">Berawa, Batu Bolong, Echo Beach</div>
+          </div>
+          <div class="area-card" id="area-uluwatu" onclick="toggleArea('uluwatu')">
+            <div class="area-card-title">Uluwatu / Bukit</div>
+            <div class="area-card-sub">Ungasan, Pecatu, Jimbaran</div>
+          </div>
         </div>
-        <div class="area-card" id="area-uluwatu" onclick="toggleArea('uluwatu')">
-          <div class="area-card-title">Uluwatu / Bukit</div>
-          <div class="area-card-sub">Ungasan, Pecatu, Jimbaran</div>
-        </div>
+        <button class="discover-run-btn" id="discoverRunBtn" onclick="runDiscover()">Search Google Maps</button>
       </div>
-      <button class="discover-run-btn" id="discoverRunBtn" onclick="runDiscover()">Search Google Maps</button>
+
+      <!-- FACEBOOK TAB -->
+      <div class="discover-tab-pane" id="pane-facebook">
+
+        <!-- Cookie settings -->
+        <div class="fb-settings">
+          <div class="fb-settings-title" onclick="toggleFbSettings()">
+            <span>Facebook session cookies</span>
+            <span id="fbSettingsArrow" style="font-size:10px">▼ Edit</span>
+          </div>
+          <div class="fb-settings-body" id="fbSettingsBody">
+            <div class="field-label" style="margin-bottom:3px">c_user</div>
+            <input class="fb-cookie-input" id="fbCuser" placeholder="501364122" value="501364122">
+            <div class="field-label" style="margin-bottom:3px">xs</div>
+            <input class="fb-cookie-input" id="fbXs" placeholder="xs value..." value="40%3A7ZXqGZG2HrXyKg%3A2%3A1776069038%3A-1%3A-1%3A%3AAczbb9HEJahUpWM5UFzIlw_YJxcB98JsDvPuTjhWQg">
+            <div style="font-size:10px;color:var(--ink4);margin-top:4px">These expire every few weeks. Get from browser DevTools → Application → Cookies → facebook.com</div>
+          </div>
+        </div>
+
+        <!-- Days selector -->
+        <div class="days-row">
+          <span>Scan posts from the last</span>
+          <select class="days-select" id="fbDays">
+            <option value="7" selected>7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+          </select>
+        </div>
+
+        <!-- Group lists -->
+        <div id="fbGroupSection">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <div class="section-label" id="fbGroupLabel">KAYA Sales groups</div>
+            <span class="group-select-all" onclick="selectAllGroups()">Select all</span>
+          </div>
+          <div class="group-list" id="fbGroupListKaya">
+            <div class="group-item selected" onclick="toggleGroup(this)" data-group="Villas in Bali"><div class="group-check">✓</div><div class="group-name">Villas in Bali</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Villas Rental and Villas Sale"><div class="group-check">✓</div><div class="group-name">Bali Villas Rental and Villas Sale</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="CANGGU BALI PROPERTY"><div class="group-check">✓</div><div class="group-name">CANGGU BALI PROPERTY</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Houses and Land"><div class="group-check">✓</div><div class="group-name">Bali Houses and Land</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BALI VILLAS & LAND FOR SALE/RENT IN BALI"><div class="group-check">✓</div><div class="group-name">BALI VILLAS & LAND FOR SALE/RENT IN BALI</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali PROPERTY market"><div class="group-check">✓</div><div class="group-name">Bali PROPERTY market</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Rental Freehold and Leasehold Villa & Land"><div class="group-check">✓</div><div class="group-name">Rental Freehold and Leasehold Villa & Land</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Free Post Bali Property For Sale Leasehold"><div class="group-check">✓</div><div class="group-name">Free Post Bali Property For Sale Leasehold</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Property info, Sale/leasehold"><div class="group-check">✓</div><div class="group-name">Bali Property info, Sale/leasehold</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali's Best Villas, Houses & Land For Rent & Sale"><div class="group-check">✓</div><div class="group-name">Bali's Best Villas, Houses & Land For Rent & Sale</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BALI PROPERTY INFO | LAND & VILLAS"><div class="group-check">✓</div><div class="group-name">BALI PROPERTY INFO | LAND & VILLAS</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Villas for rent & sell"><div class="group-check">✓</div><div class="group-name">Bali Villas for rent & sell</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Villas, Land & Businesses for Sale"><div class="group-check">✓</div><div class="group-name">Bali Villas, Land & Businesses for Sale</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="SESEH PERERENAN VILLAS"><div class="group-check">✓</div><div class="group-name">SESEH PERERENAN VILLAS</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Villa Bali Agent"><div class="group-check">✓</div><div class="group-name">Villa Bali Agent</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="bali land for sale"><div class="group-check">✓</div><div class="group-name">bali land for sale</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Canggu housing & accommodation"><div class="group-check">✓</div><div class="group-name">Bali Canggu housing & accommodation</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BALI BUY & SELL"><div class="group-check">✓</div><div class="group-name">BALI BUY & SELL</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali buy + sell"><div class="group-check">✓</div><div class="group-name">Bali buy + sell</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali buy and sale"><div class="group-check">✓</div><div class="group-name">Bali buy and sale</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Canggu Community Housing, Villas, Land"><div class="group-check">✓</div><div class="group-name">Canggu Community Housing, Villas, Land</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BINGIN-ULUWATU VILLA/LAND for RENT"><div class="group-check">✓</div><div class="group-name">BINGIN-ULUWATU VILLA/LAND for RENT</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Uluwatu Land & Villas: Ulu, Bingin, Padang"><div class="group-check">✓</div><div class="group-name">Uluwatu Land & Villas: Ulu, Bingin, Padang</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="JIMBARAN ULUWATU BUKIT COMMUNITY"><div class="group-check">✓</div><div class="group-name">JIMBARAN ULUWATU BUKIT COMMUNITY</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Uluwatu Community Housing - Buy rent Villa"><div class="group-check">✓</div><div class="group-name">Uluwatu Community Housing - Buy rent Villa</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Villa/House/GuestHouse for Rent & Sell Jimbaran"><div class="group-check">✓</div><div class="group-name">Villa/House/GuestHouse for Rent & Sell Jimbaran</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="bingin Uluwatu rent land and villas"><div class="group-check">✓</div><div class="group-name">bingin Uluwatu rent land and villas</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Uluwatu Bingun Ungasan Long Term Villa Rentals"><div class="group-check">✓</div><div class="group-name">Uluwatu Bingun Ungasan Long Term Villa Rentals</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BALI LUXURY VILLAS RENT & SALE"><div class="group-check">✓</div><div class="group-name">BALI LUXURY VILLAS RENT & SALE</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Land for Sale, Freehold and Leasehold"><div class="group-check">✓</div><div class="group-name">Bali Land for Sale, Freehold and Leasehold</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Bali Properties | Villas & Land"><div class="group-check">✓</div><div class="group-name">Bali Properties | Villas & Land</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="House, Villa, land and Property for sale in Bali"><div class="group-check">✓</div><div class="group-name">House, Villa, land and Property for sale in Bali</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BALI PROPERTIES | Villas & Land"><div class="group-check">✓</div><div class="group-name">BALI PROPERTIES | Villas & Land</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="BUY, SELL & RENT PROPERTY IN BALI"><div class="group-check">✓</div><div class="group-name">BUY, SELL & RENT PROPERTY IN BALI</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Pererenan housing real-estate"><div class="group-check">✓</div><div class="group-name">Pererenan housing real-estate</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="Canggu, Krobokan, Seminyak, Pererenan"><div class="group-check">✓</div><div class="group-name">Canggu, Krobokan, Seminyak, Pererenan</div></div>
+<div class="group-item selected" onclick="toggleGroup(this)" data-group="CANGGU HOUSE, VILLA SHARES, MONTHLY RENT"><div class="group-check">✓</div><div class="group-name">CANGGU HOUSE, VILLA SHARES, MONTHLY RENT</div></div>
+          </div>
+          <div class="group-list" id="fbGroupListSamba" style="display:none">
+            <div class="group-item selected samba" onclick="toggleGroup(this)" data-group="BALI LONG TERM Yearly/Monthly Rentals"><div class="group-check">✓</div><div class="group-name">BALI LONG TERM Yearly/Monthly Rentals</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Cheap Villa Rental In Bali"><div class="group-check">✓</div><div class="group-name">Cheap Villa Rental In Bali</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Long Term Villa Rentals"><div class="group-check">✓</div><div class="group-name">Bali Long Term Villa Rentals</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Villa - House Rental"><div class="group-check">✓</div><div class="group-name">Bali Villa - House Rental</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Canggu Villa, Housing For Rent Yearly"><div class="group-check">✓</div><div class="group-name">Canggu Villa, Housing For Rent Yearly</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="YourVilla-Bali"><div class="group-check">✓</div><div class="group-name">YourVilla-Bali</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="LAST MINUTE VILLAS FOR RENT IN SEMINYAK"><div class="group-check">✓</div><div class="group-name">LAST MINUTE VILLAS FOR RENT IN SEMINYAK</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="SEMINYAK KEROBOKAN UMALAS BALI VILLAS"><div class="group-check">✓</div><div class="group-name">SEMINYAK KEROBOKAN UMALAS BALI VILLAS</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="CANGGU HOUSE Kerobokan Umalas"><div class="group-check">✓</div><div class="group-name">CANGGU HOUSE Kerobokan Umalas</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Canggu Housing Rent & Sale"><div class="group-check">✓</div><div class="group-name">Canggu Housing Rent & Sale</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali MONTHLY YEARLY Rental villas"><div class="group-check">✓</div><div class="group-name">Bali MONTHLY YEARLY Rental villas</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Monthly Villa & Apartment Rentals"><div class="group-check">✓</div><div class="group-name">Bali Monthly Villa & Apartment Rentals</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="HOUSE FOR RENT In BALi"><div class="group-check">✓</div><div class="group-name">HOUSE FOR RENT In BALi</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Daily / Monthly / Yearly Villas in Bali"><div class="group-check">✓</div><div class="group-name">Daily / Monthly / Yearly Villas in Bali</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali short & long term rentals"><div class="group-check">✓</div><div class="group-name">Bali short & long term rentals</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Cheap House Rental Bali"><div class="group-check">✓</div><div class="group-name">Cheap House Rental Bali</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="BALI VILLA LONG TERM Yearly/Monthly"><div class="group-check">✓</div><div class="group-name">BALI VILLA LONG TERM Yearly/Monthly</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali House Apartment Villa for RENT"><div class="group-check">✓</div><div class="group-name">Bali House Apartment Villa for RENT</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="BALI RENTAL ROOMS & VILLAS"><div class="group-check">✓</div><div class="group-name">BALI RENTAL ROOMS & VILLAS</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Cheap Rentals - not more than 25mill/month"><div class="group-check">✓</div><div class="group-name">Bali Cheap Rentals - not more than 25mill/month</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Cheap Rentals Canggu, Umalas"><div class="group-check">✓</div><div class="group-name">Bali Cheap Rentals Canggu, Umalas</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="Bali Monthly Room, Apartment, Villa For Rent"><div class="group-check">✓</div><div class="group-name">Bali Monthly Room, Apartment, Villa For Rent</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="BALI VILLA LONG TERM Yearly/Monthly"><div class="group-check">✓</div><div class="group-name">BALI VILLA LONG TERM Yearly/Monthly</div></div>
+<div class="group-item selected samba" onclick="toggleGroup(this)" data-group="SESEH MUNGGU COMMUNITY"><div class="group-check">✓</div><div class="group-name">SESEH MUNGGU COMMUNITY</div></div>
+          </div>
+        </div>
+
+        <button class="discover-run-btn" id="fbRunBtn" onclick="runFacebookScrape()" style="margin-top:4px">Scan Facebook Groups</button>
+      </div>
+
+      <!-- SHARED STATUS + RESULTS -->
       <div class="discover-status" id="discoverStatus">
         <div class="spinner" id="discoverSpinner"></div>
         <span id="discoverStatusText">Starting search...</span>
@@ -867,14 +1012,215 @@ function quickAdd() {
 }
 
 // DISCOVER
+
+// DISCOVER TAB SWITCHING
+function switchDiscoverTab(tab) {
+  document.getElementById('tab-gmaps').classList.toggle('active', tab === 'gmaps');
+  document.getElementById('tab-facebook').classList.toggle('active', tab === 'facebook');
+  document.getElementById('pane-gmaps').classList.toggle('active', tab === 'gmaps');
+  document.getElementById('pane-facebook').classList.toggle('active', tab === 'facebook');
+  // Reset results when switching
+  document.getElementById('discoverResults').innerHTML = '';
+  document.getElementById('discoverFooter').style.display = 'none';
+  document.getElementById('discoverStatus').classList.remove('show');
+}
+
+// FACEBOOK SETTINGS TOGGLE
+function toggleFbSettings() {
+  const body = document.getElementById('fbSettingsBody');
+  const arrow = document.getElementById('fbSettingsArrow');
+  body.classList.toggle('open');
+  arrow.textContent = body.classList.contains('open') ? '▲ Close' : '▼ Edit';
+}
+
+// GROUP SELECTION
+function toggleGroup(el) {
+  const isSamba = pipeline === 'samba';
+  el.classList.toggle('selected');
+  if (isSamba) el.classList.toggle('samba', el.classList.contains('selected'));
+  const check = el.querySelector('.group-check');
+  check.textContent = el.classList.contains('selected') ? '✓' : '';
+}
+
+function selectAllGroups() {
+  const isSamba = pipeline === 'samba';
+  const list = document.getElementById(isSamba ? 'fbGroupListSamba' : 'fbGroupListKaya');
+  list.querySelectorAll('.group-item').forEach(el => {
+    el.classList.add('selected');
+    if (isSamba) el.classList.add('samba');
+    el.querySelector('.group-check').textContent = '✓';
+  });
+}
+
+// FACEBOOK SCRAPER
+const FB_ACTOR = 'apify~facebook-groups-scraper';
+
+async function runFacebookScrape() {
+  const isSamba = pipeline === 'samba';
+  const cuser = document.getElementById('fbCuser').value.trim();
+  const xs = document.getElementById('fbXs').value.trim();
+  const days = parseInt(document.getElementById('fbDays').value);
+
+  if (!cuser || !xs) {
+    alert('Please enter your Facebook cookies first (click "Facebook session cookies" to expand).');
+    return;
+  }
+
+  const listId = isSamba ? 'fbGroupListSamba' : 'fbGroupListKaya';
+  const selectedGroups = [];
+  document.getElementById(listId).querySelectorAll('.group-item.selected').forEach(el => {
+    selectedGroups.push(el.dataset.group);
+  });
+
+  if (selectedGroups.length === 0) {
+    alert('Please select at least one group.');
+    return;
+  }
+
+  const btn = document.getElementById('fbRunBtn');
+  const status = document.getElementById('discoverStatus');
+  const statusText = document.getElementById('discoverStatusText');
+  const resultsDiv = document.getElementById('discoverResults');
+  const footer = document.getElementById('discoverFooter');
+
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  status.classList.add('show');
+  resultsDiv.innerHTML = '';
+  footer.style.display = 'none';
+  discoverResults = [];
+  selectedResults = new Set();
+
+  statusText.textContent = 'Starting Facebook scraper...';
+
+  // Calculate date range
+  const since = new Date();
+  since.setDate(since.getDate() - days);
+  const sinceStr = since.toISOString().split('T')[0];
+
+  try {
+    const startRes = await fetch(
+      'https://api.apify.com/v2/acts/' + FB_ACTOR + '/runs?token=' + APIFY_TOKEN,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          startUrls: selectedGroups.slice(0, 10).map(g => ({
+            url: 'https://www.facebook.com/groups/search/?q=' + encodeURIComponent(g),
+            label: 'GROUP'
+          })),
+          maxPosts: 50,
+          maxPostDate: sinceStr,
+          cookies: [
+            { name: 'c_user', value: cuser, domain: '.facebook.com' },
+            { name: 'xs', value: decodeURIComponent(xs), domain: '.facebook.com' },
+          ],
+          scrapeAbout: false,
+          scrapeReviews: false,
+          scrapeMembers: false,
+        })
+      }
+    );
+
+    if (!startRes.ok) {
+      const err = await startRes.text();
+      throw new Error('Failed to start scraper: ' + startRes.status + ' ' + err.slice(0,200));
+    }
+
+    const runId = (await startRes.json()).data.id;
+    statusText.textContent = 'Scanning ' + selectedGroups.length + ' groups... (2-5 mins)';
+
+    // Poll
+    let done = false, attempts = 0;
+    while (!done && attempts < 90) {
+      await new Promise(r => setTimeout(r, 5000));
+      attempts++;
+      const poll = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + APIFY_TOKEN)).json();
+      statusText.textContent = 'Scanning groups... (' + (attempts * 5) + 's elapsed)';
+      if (poll.data.status === 'SUCCEEDED') done = true;
+      else if (['FAILED','ABORTED'].includes(poll.data.status)) throw new Error('Scraper failed: ' + poll.data.status);
+    }
+    if (!done) throw new Error('Timed out after 7.5 minutes');
+
+    statusText.textContent = 'Extracting phone numbers from posts...';
+
+    const items = await (await fetch(
+      'https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?token=' + APIFY_TOKEN + '&limit=500'
+    )).json();
+
+    // Extract WA/phone numbers from post text
+    const phoneRegex = /(?:wa(?:\.me)?[:/\s]*|whatsapp[:\s]*|hp[:\s]*|telp?[:\s]*|contact[:\s]*|[\+]?62|08)\s*[\d\s\-\.]{8,15}/gi;
+    const cleanPhone = (raw) => {
+      let n = raw.replace(/[^\d]/g,'');
+      if (n.startsWith('08')) n = '62' + n.slice(1);
+      if (n.startsWith('8') && n.length >= 9) n = '62' + n;
+      return n.length >= 10 && n.length <= 15 ? n : null;
+    };
+
+    const seen = new Set();
+    const existingPhones = new Set(agents.map(a => a.wa_num).filter(Boolean));
+    discoverResults = [];
+
+    items.forEach(post => {
+      const text = (post.text || post.postText || '') + ' ' + (post.authorName || '');
+      const matches = text.match(phoneRegex) || [];
+      const authorName = post.authorName || post.username || '';
+      const postUrl = post.url || post.postUrl || '';
+      const groupName = post.groupName || post.pageUrl || '';
+
+      matches.forEach(raw => {
+        const phone = cleanPhone(raw);
+        if (!phone) return;
+        const key = phone + '|' + authorName;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const isDuplicate = existingPhones.has(phone);
+        discoverResults.push({
+          name: authorName,
+          phone,
+          address: groupName,
+          website: postUrl,
+          rating: '',
+          reviews: 0,
+          isDuplicate,
+          source: 'Facebook',
+          snippet: text.slice(0, 120),
+        });
+      });
+    });
+
+    discoverResults.sort((a,b) => a.isDuplicate !== b.isDuplicate ? (a.isDuplicate ? 1 : -1) : 0);
+    const newCount = discoverResults.filter(r => !r.isDuplicate).length;
+    statusText.textContent = 'Found ' + newCount + ' new numbers across ' + selectedGroups.length + ' groups';
+    discoverResults.forEach((r,i) => { if (!r.isDuplicate) selectedResults.add(i); });
+    renderDiscoverResults();
+    footer.style.display = 'flex';
+
+  } catch(err) {
+    statusText.textContent = 'Error: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Try again';
+    return;
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Scan Facebook Groups';
+}
+
 function openDiscoverPanel() {
   const isSamba = pipeline === 'samba';
   document.getElementById('discoverTitle').textContent = isSamba ? 'Discover rental agents' : 'Discover sales agents';
   document.getElementById('discoverRunBtn').className = 'discover-run-btn' + (isSamba ? ' samba' : '');
+  document.getElementById('fbRunBtn').className = 'discover-run-btn' + (isSamba ? ' samba' : '');
   document.getElementById('discoverSpinner').className = 'spinner' + (isSamba ? ' samba' : '');
   document.querySelectorAll('.area-card.selected').forEach(c => { if (isSamba) c.classList.add('samba'); else c.classList.remove('samba'); });
   document.getElementById('discoverImportBtn').className = 'discover-import-btn' + (isSamba ? ' samba' : '');
+  document.getElementById('fbGroupLabel').textContent = isSamba ? 'Samba Rentals groups' : 'KAYA Sales groups';
+  document.getElementById('fbGroupListKaya').style.display = isSamba ? 'none' : 'flex';
+  document.getElementById('fbGroupListSamba').style.display = isSamba ? 'flex' : 'none';
   document.getElementById('discoverOverlay').classList.add('open');
+  // Reset to Google Maps tab
+  switchDiscoverTab('gmaps');
 }
 function closeDiscoverPanel() { document.getElementById('discoverOverlay').classList.remove('open'); }
 function closeDiscoverOutside(e) { if (e.target === document.getElementById('discoverOverlay')) closeDiscoverPanel(); }
@@ -962,7 +1308,8 @@ function renderDiscoverResults() {
       <div class="result-check">${sel?'✓':''}</div>
       <div class="result-info">
         <div class="result-name">${r.name}</div>
-        <div class="result-meta">${r.address||'Bali'}${r.rating?' · '+r.rating+' ★ ('+r.reviews+')':''}</div>
+        <div class="result-meta">${r.source === 'Facebook' ? (r.address || 'Facebook group') : (r.address||'Bali')}${r.rating?' · '+r.rating+' ★ ('+r.reviews+')':''}</div>
+        ${r.snippet ? `<div class="result-meta" style="color:var(--ink4);font-style:italic;font-size:10px;margin-top:2px">${r.snippet.slice(0,80)}...</div>` : ''}
         ${r.phone?`<div class="result-phone">+${r.phone}</div>`:`<div class="result-meta" style="color:var(--ink4);font-style:italic">No phone found</div>`}
       </div>
       ${r.isDuplicate?'<span class="result-dup-badge">Already in CRM</span>':''}
@@ -1003,8 +1350,13 @@ function importSelected() {
     if (!r || r.isDuplicate) return;
     if (r.phone && existingPhones.has(r.phone)) return;
     if (r.phone) existingPhones.add(r.phone);
-    agents.push({ id: nextId++, name: '', agency: r.name, wa_url: r.phone?'https://wa.me/'+r.phone:'',
-      wa_num: r.phone||'', alt_contact: '', notes: r.website?'Website: '+r.website:'',
+    const agentName = r.source === 'Facebook' ? r.name : '';
+    const agencyName = r.source === 'Facebook' ? '' : r.name;
+    const notes = r.source === 'Facebook'
+      ? 'Source: Facebook | ' + (r.snippet || '').slice(0,80)
+      : (r.website ? 'Website: ' + r.website : '');
+    agents.push({ id: nextId++, name: agentName, agency: agencyName, wa_url: r.phone?'https://wa.me/'+r.phone:'',
+      wa_num: r.phone||'', alt_contact: '', notes,
       projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
       samba: { status: 'Not contacted', notes: '' }
     });
