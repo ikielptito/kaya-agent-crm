@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --sand: #f5f2ed;
+  --sand2: #ede9e2;
+  --sand3: #e0dbd2;
+  --ink: #1a1814;
+  --ink2: #4a4540;
+  --ink3: #8a8278;
+  --ink4: #b8b2a8;
+
+  --kaya: #2d5a3d;
+  --kaya-light: #e8f0eb;
+  --kaya-mid: #4a8a5e;
+  --samba: #8b4513;
+  --samba-light: #f5ede6;
+  --samba-mid: #c4722a;
+
+  --accent: #2d5a3d;
+  --accent-light: #e8f0eb;
+  --accent-mid: #4a8a5e;
+  --wa: #128c47;
+  --wa-light: #e6f5ec;
+
+  --s0-bg: #f0eee8; --s0-text: #9a9488; --s0-dot: #c8c2b8;
+  --s1-bg: #e8f0f8; --s1-text: #3a6898; --s1-dot: #5a8ec8;
+  --s2-bg: #eef6f0; --s2-text: #2d6840; --s2-dot: #4a9860;
+  --s3-bg: #fdf4e3; --s3-text: #8a6010; --s3-dot: #c89028;
+  --s4-bg: #f5eef8; --s4-text: #6a3898; --s4-dot: #9a58c8;
+  --s5-bg: #e3f5ee; --s5-text: #1a6848; --s5-dot: #28a868;
+
+  --radius: 12px;
+  --radius-sm: 7px;
+}
+
+body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--ink); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+
+/* HEADER */
+.header { background: white; border-bottom: 1px solid var(--sand3); padding: 0 24px; display: flex; align-items: center; gap: 16px; height: 56px; position: sticky; top: 0; z-index: 100; }
+
+.brand { display: flex; align-items: baseline; gap: 8px; flex-shrink: 0; }
+.brand-name { font-family: 'Instrument Serif', serif; font-size: 18px; color: var(--ink); }
+.brand-sep { width: 1px; height: 14px; background: var(--sand3); }
+.brand-sub { font-size: 11px; color: var(--ink3); font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* PIPELINE TOGGLE */
+.pipeline-toggle { display: flex; background: var(--sand); border-radius: 8px; padding: 3px; gap: 2px; flex-shrink: 0; }
+.pipeline-btn { padding: 5px 14px; border-radius: 6px; border: none; font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--ink3); background: transparent; }
+.pipeline-btn.active-kaya { background: var(--kaya); color: white; }
+.pipeline-btn.active-samba { background: var(--samba); color: white; }
+.pipeline-btn:not(.active-kaya):not(.active-samba):hover { color: var(--ink); background: var(--sand2); }
+
+.header-controls { display: flex; align-items: center; gap: 8px; flex: 1; }
+.search-wrap { flex: 1; max-width: 260px; position: relative; }
+.search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink4); font-size: 13px; pointer-events: none; }
+.search { width: 100%; height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 7px; padding: 0 10px 0 30px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s, background 0.15s; }
+.search:focus { background: white; border-color: var(--accent-mid); }
+.search::placeholder { color: var(--ink4); }
+
+.btn-discover { height: 34px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; transition: all 0.12s; flex-shrink: 0; }
+.btn-discover:hover { background: var(--accent); color: white; }
+.btn-discover.samba-mode { background: var(--samba-light); border-color: var(--samba-mid); color: var(--samba); }
+.btn-discover.samba-mode:hover { background: var(--samba); color: white; }
+
+.btn-add { height: 34px; padding: 0 14px; background: var(--accent); border: none; border-radius: 7px; font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
+.btn-add:hover { opacity: 0.88; }
+.btn-add.samba-mode { background: var(--samba); }
+
+/* SUMMARY BAR */
+.summary-bar { background: white; border-bottom: 1px solid var(--sand3); padding: 8px 24px; display: flex; align-items: center; gap: 6px; overflow-x: auto; flex-wrap: wrap; }
+.stat-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 500; cursor: pointer; border: 1.5px solid transparent; transition: all 0.12s; white-space: nowrap; }
+.stat-chip:hover { opacity: 0.8; }
+.stat-chip.active { border-color: currentColor; }
+.stat-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* QUICK ADD BAR */
+.quick-add-bar { background: white; border-bottom: 1px solid var(--sand3); padding: 8px 24px; display: flex; align-items: center; gap: 8px; }
+.quick-add-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink4); white-space: nowrap; flex-shrink: 0; }
+.quick-add-input { height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 0 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s; }
+.quick-add-input:focus { background: white; border-color: var(--accent-mid); }
+.quick-add-input::placeholder { color: var(--ink4); }
+.quick-add-input.wa { width: 175px; }
+.quick-add-input.name { width: 150px; }
+.quick-add-input.agency { width: 160px; }
+.quick-add-sep { font-size: 11px; color: var(--ink4); flex-shrink: 0; }
+.quick-add-btn { height: 34px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
+.quick-add-btn:hover { opacity: 0.88; }
+.quick-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.quick-add-feedback { font-size: 12px; color: var(--accent-mid); flex-shrink: 0; opacity: 0; transition: opacity 0.2s; }
+.quick-add-feedback.show { opacity: 1; }
+
+/* PROJECT TABS (KAYA) */
+.proj-bar { background: white; border-bottom: 1px solid var(--sand3); padding: 0 24px; display: flex; align-items: center; overflow-x: auto; }
+.proj-tab { padding: 11px 14px; font-size: 12px; font-weight: 500; color: var(--ink3); cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap; transition: all 0.12s; display: flex; align-items: center; gap: 5px; }
+.proj-tab:hover { color: var(--ink); }
+.proj-tab.active { color: var(--kaya); border-bottom-color: var(--kaya); }
+.proj-tab.active.samba { color: var(--samba); border-bottom-color: var(--samba); }
+.proj-tab-count { background: var(--sand2); border-radius: 10px; padding: 1px 6px; font-size: 10px; color: var(--ink3); }
+.proj-tab.active .proj-tab-count { background: var(--accent-light); color: var(--kaya); }
+.proj-tab.active.samba .proj-tab-count { background: var(--samba-light); color: var(--samba); }
+
+/* RESULTS BAR */
+.results-bar { padding: 10px 24px 6px; display: flex; align-items: center; justify-content: space-between; }
+.results-count { font-size: 12px; color: var(--ink3); }
+.view-toggle { display: flex; gap: 4px; }
+.view-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; border: 1px solid var(--sand3); background: white; cursor: pointer; color: var(--ink3); font-size: 14px; transition: all 0.12s; }
+.view-btn.active { background: var(--accent); border-color: var(--accent); color: white; }
+.view-btn.active.samba { background: var(--samba); border-color: var(--samba); }
+
+/* CARD GRID */
+.card-grid { padding: 4px 24px 40px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.card-grid.list-mode { grid-template-columns: 1fr; }
+
+/* AGENT CARD */
+.agent-card { background: white; border: 1px solid var(--sand3); border-radius: var(--radius); overflow: hidden; cursor: pointer; transition: box-shadow 0.15s, transform 0.12s, border-color 0.15s; }
+.agent-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.07); transform: translateY(-1px); }
+
+.card-top { padding: 14px 16px 10px; display: flex; align-items: flex-start; gap: 10px; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--sand2); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; font-size: 15px; color: var(--ink2); flex-shrink: 0; font-style: italic; }
+.card-info { flex: 1; min-width: 0; }
+.card-name { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-name.unnamed { color: var(--ink3); font-weight: 400; font-style: italic; }
+.card-agency { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+
+.wa-pill { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; background: var(--wa-light); color: var(--wa); border-radius: 20px; font-size: 11px; font-weight: 600; text-decoration: none; flex-shrink: 0; transition: background 0.12s; }
+.wa-pill:hover { background: #d4eddf; }
+.wa-pill.none { background: var(--sand); color: var(--ink4); pointer-events: none; }
+.wa-pill svg { width: 12px; height: 12px; }
+
+/* KAYA coverage */
+.coverage-section { padding: 0 16px 10px; }
+.coverage-label { font-size: 10px; color: var(--ink4); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 6px; }
+.proj-dots { display: flex; flex-direction: column; gap: 4px; }
+.proj-dot-row { display: flex; align-items: center; gap: 6px; }
+.proj-dot-label { font-size: 11px; color: var(--ink3); width: 108px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-status-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 10px; font-size: 10px; font-weight: 500; flex-shrink: 0; }
+.pdot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.proj-link-icon { margin-left: auto; color: var(--ink4); font-size: 10px; text-decoration: none; flex-shrink: 0; }
+.proj-link-icon:hover { color: var(--kaya); }
+
+/* SAMBA coverage */
+.samba-coverage { padding: 0 16px 10px; }
+.samba-status-row { display: flex; align-items: center; gap: 8px; }
+.samba-status-label { font-size: 11px; color: var(--ink3); }
+
+/* DUAL BADGE (for All view) */
+.dual-badges { display: flex; gap: 6px; padding: 0 16px 10px; flex-wrap: wrap; }
+.pipeline-badge { display: flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 500; }
+.pipeline-badge.kaya-badge { background: var(--kaya-light); color: var(--kaya); }
+.pipeline-badge.samba-badge { background: var(--samba-light); color: var(--samba); }
+
+/* CARD FOOTER */
+.card-footer { padding: 8px 16px; border-top: 1px solid var(--sand2); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-notes { font-size: 11px; color: var(--ink3); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.listed-count { font-size: 11px; font-weight: 600; color: var(--s5-text); background: var(--s5-bg); padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
+
+/* EMPTY */
+.empty-state { grid-column: 1 / -1; text-align: center; padding: 60px 20px; color: var(--ink3); }
+.empty-state h3 { font-size: 15px; margin-bottom: 6px; }
+
+/* DRAWER */
+.overlay { display: none; position: fixed; inset: 0; background: rgba(26,24,20,0.45); z-index: 200; align-items: flex-start; justify-content: flex-end; backdrop-filter: blur(2px); }
+.overlay.open { display: flex; }
+.drawer { background: white; width: 500px; max-width: 100vw; height: 100vh; overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,0.12); display: flex; flex-direction: column; }
+.drawer-header { padding: 18px 22px 14px; border-bottom: 1px solid var(--sand2); display: flex; align-items: flex-start; gap: 12px; position: sticky; top: 0; background: white; z-index: 10; }
+.drawer-avatar { width: 42px; height: 42px; border-radius: 50%; background: var(--sand2); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif', serif; font-size: 16px; font-style: italic; color: var(--ink2); flex-shrink: 0; }
+.drawer-title-wrap { flex: 1; }
+.drawer-name { font-size: 16px; font-weight: 600; color: var(--ink); }
+.drawer-agency { font-size: 12px; color: var(--ink3); margin-top: 2px; }
+.drawer-close { background: var(--sand); border: none; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink2); font-size: 15px; transition: background 0.12s; flex-shrink: 0; }
+.drawer-close:hover { background: var(--sand2); }
+.drawer-body { padding: 18px 22px; flex: 1; }
+.drawer-footer { padding: 12px 22px; border-top: 1px solid var(--sand2); display: flex; gap: 8px; justify-content: flex-end; position: sticky; bottom: 0; background: white; }
+
+.section-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink4); margin-bottom: 10px; }
+
+.pipeline-section { border-radius: var(--radius-sm); border: 1px solid var(--sand3); padding: 14px; margin-bottom: 16px; }
+.pipeline-section.kaya-section { border-color: #c8ddd0; background: #fafcfb; }
+.pipeline-section.samba-section { border-color: #e8cdb8; background: #fdf8f5; }
+.pipeline-section-title { font-size: 12px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.pipeline-section-title.kaya { color: var(--kaya); }
+.pipeline-section-title.samba { color: var(--samba); }
+.pipeline-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
+.form-full { grid-column: 1 / -1; }
+.field-label { font-size: 11px; color: var(--ink3); margin-bottom: 4px; font-weight: 500; }
+.field-input, .field-select, .field-textarea { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 7px 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.12s; }
+.field-input:focus, .field-select:focus, .field-textarea:focus { background: white; border-color: var(--accent-mid); }
+.field-select { appearance: none; cursor: pointer; }
+.field-textarea { resize: vertical; min-height: 60px; }
+
+/* Project table */
+.proj-table { border: 1px solid var(--sand3); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 14px; }
+.proj-table-row { display: grid; grid-template-columns: 130px 1fr 28px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--sand2); transition: background 0.1s; }
+.proj-table-row:last-child { border-bottom: none; }
+.proj-table-row:hover { background: var(--sand); }
+.proj-table-name { font-size: 12px; font-weight: 500; color: var(--ink2); display: flex; align-items: center; gap: 5px; }
+.personal-badge { font-size: 9px; background: var(--sand2); color: var(--ink4); padding: 1px 5px; border-radius: 4px; }
+.proj-table-status select { background: none; border: none; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink2); cursor: pointer; outline: none; width: 100%; }
+.proj-table-link { display: flex; align-items: center; justify-content: center; color: var(--ink4); font-size: 13px; cursor: pointer; border-radius: 4px; transition: color 0.12s; }
+.proj-table-link:hover { color: var(--kaya); }
+.url-row { display: none; padding: 0 12px 9px; border-bottom: 1px solid var(--sand2); background: var(--sand); }
+.url-row.open { display: block; }
+.url-row:last-child { border-bottom: none; }
+
+/* Samba status */
+.samba-status-select { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 8px 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; appearance: none; cursor: pointer; margin-bottom: 10px; }
+.samba-status-select:focus { background: white; border-color: var(--samba-mid); }
+
+/* WA section */
+.wa-section { background: var(--sand); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px; }
+.wa-msg-preview { font-size: 12px; color: var(--ink2); line-height: 1.65; white-space: pre-wrap; font-family: 'Geist', sans-serif; }
+.wa-open-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 7px 13px; background: var(--wa); color: white; border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: opacity 0.12s; }
+.wa-open-btn:hover { opacity: 0.88; }
+.wa-open-btn.disabled { background: var(--sand3); color: var(--ink3); pointer-events: none; }
+
+.btn-secondary { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; transition: border-color 0.12s; }
+.btn-secondary:hover { border-color: var(--ink3); }
+.btn-primary { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
+.btn-primary:hover { opacity: 0.88; }
+.btn-primary.samba { background: var(--samba); }
+
+/* DISCOVER PANEL */
+.discover-overlay { display: none; position: fixed; inset: 0; background: rgba(26,24,20,0.45); z-index: 300; align-items: flex-start; justify-content: flex-end; backdrop-filter: blur(2px); }
+.discover-overlay.open { display: flex; }
+.discover-panel { background: white; width: 540px; max-width: 100vw; height: 100vh; overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,0.12); display: flex; flex-direction: column; }
+.discover-header { padding: 18px 22px 14px; border-bottom: 1px solid var(--sand2); position: sticky; top: 0; background: white; z-index: 10; }
+.discover-title { font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.discover-sub { font-size: 12px; color: var(--ink3); }
+.discover-body { padding: 18px 22px; flex: 1; }
+
+.area-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+.area-card { border: 1.5px solid var(--sand3); border-radius: var(--radius-sm); padding: 11px 13px; cursor: pointer; transition: all 0.12s; }
+.area-card:hover { border-color: var(--accent-mid); }
+.area-card.selected { border-color: var(--accent); background: var(--accent-light); }
+.area-card.selected.samba { border-color: var(--samba); background: var(--samba-light); }
+.area-card-title { font-size: 13px; font-weight: 500; color: var(--ink); }
+.area-card-sub { font-size: 11px; color: var(--ink3); margin-top: 2px; }
+
+.discover-run-btn { width: 100%; height: 38px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; margin-bottom: 16px; }
+.discover-run-btn:hover { opacity: 0.88; }
+.discover-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.discover-run-btn.samba { background: var(--samba); }
+
+.discover-status { font-size: 12px; color: var(--ink3); margin-bottom: 10px; display: none; align-items: center; gap: 8px; }
+.discover-status.show { display: flex; }
+.spinner { width: 13px; height: 13px; border: 2px solid var(--sand3); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; flex-shrink: 0; }
+.spinner.samba { border-top-color: var(--samba); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.results-list { display: flex; flex-direction: column; gap: 8px; }
+.result-card { border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 11px 13px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; transition: all 0.12s; }
+.result-card.selected { border-color: var(--accent); background: var(--accent-light); }
+.result-card.selected.samba { border-color: var(--samba); background: var(--samba-light); }
+.result-card.duplicate { opacity: 0.45; pointer-events: none; }
+.result-check { width: 17px; height: 17px; border: 1.5px solid var(--sand3); border-radius: 4px; flex-shrink: 0; margin-top: 1px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: white; background: white; transition: all 0.12s; }
+.result-card.selected .result-check { background: var(--accent); border-color: var(--accent); }
+.result-card.selected.samba .result-check { background: var(--samba); border-color: var(--samba); }
+.result-info { flex: 1; min-width: 0; }
+.result-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.result-meta { font-size: 11px; color: var(--ink3); margin-top: 2px; }
+.result-phone { font-size: 11px; color: var(--accent-mid); font-family: monospace; margin-top: 3px; }
+.result-dup-badge { font-size: 10px; background: var(--sand2); color: var(--ink3); padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
+
+.discover-footer { padding: 12px 22px; border-top: 1px solid var(--sand2); display: flex; gap: 8px; align-items: center; position: sticky; bottom: 0; background: white; }
+.discover-import-btn { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
+.discover-import-btn:hover { opacity: 0.88; }
+.discover-import-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.discover-import-btn.samba { background: var(--samba); }
+.discover-cancel-btn { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; }
+.discover-cancel-btn:hover { border-color: var(--ink3); }
+.discover-select-all { font-size: 12px; color: var(--accent-mid); cursor: pointer; text-decoration: underline; margin-left: auto; }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sand3); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="brand">
+    <span class="brand-name" id="brandName">KAYA</span>
+    <span class="brand-sep"></span>
+    <span class="brand-sub" id="brandSub">Sales CRM</span>
+  </div>
+  <div class="pipeline-toggle">
+    <button class="pipeline-btn active-kaya" id="btnKaya" onclick="setPipeline('kaya')">KAYA Sales</button>
+    <button class="pipeline-btn" id="btnSamba" onclick="setPipeline('samba')">Samba Rentals</button>
+  </div>
+  <div class="header-controls">
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="render()">
+    </div>
+    <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
+    <button class="btn-add" id="addBtn" onclick="openAddModal()">+ Add agent</button>
+  </div>
+</header>
+
+<div class="summary-bar" id="summaryBar"></div>
+
+<div class="quick-add-bar">
+  <span class="quick-add-label">Quick add</span>
+  <input class="quick-add-input wa" type="text" id="qaWa" placeholder="WhatsApp number (628...)" oninput="qaValidate()" onkeydown="qaKeydown(event)">
+  <span class="quick-add-sep">+</span>
+  <input class="quick-add-input name" type="text" id="qaName" placeholder="Name (optional)" onkeydown="qaKeydown(event)">
+  <span class="quick-add-sep">+</span>
+  <input class="quick-add-input agency" type="text" id="qaAgency" placeholder="Agency (optional)" onkeydown="qaKeydown(event)">
+  <button class="quick-add-btn" id="qaBtn" onclick="quickAdd()" disabled>Add</button>
+  <span class="quick-add-feedback" id="qaFeedback"></span>
+</div>
+
+<div class="proj-bar" id="projBar"></div>
+
+<div class="results-bar">
+  <span class="results-count" id="resultsCount"></span>
+  <select id="sortSelect" onchange="render()" style="height:28px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
+    <option value="default">Sort: Default</option>
+    <option value="activity">Sort: Most active</option>
+    <option value="name">Sort: Name A-Z</option>
+    <option value="agency">Sort: Agency A-Z</option>
+  </select>
+  <div class="view-toggle">
+    <button class="view-btn active" id="gridBtn" onclick="setView('grid')">⊞</button>
+    <button class="view-btn" id="listBtn" onclick="setView('list')">☰</button>
+  </div>
+</div>
+
+<div class="card-grid" id="cardGrid"></div>
+
+<!-- AGENT DRAWER -->
+<div class="overlay" id="overlay" onclick="closeOverlay(event)">
+  <div class="drawer">
+    <div class="drawer-header">
+      <div class="drawer-avatar" id="drawerAvatar"></div>
+      <div class="drawer-title-wrap">
+        <div class="drawer-name" id="drawerName"></div>
+        <div class="drawer-agency" id="drawerAgency"></div>
+      </div>
+      <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-footer">
+      <button class="btn-secondary" onclick="closeDrawer()">Cancel</button>
+      <button class="btn-primary" id="drawerSaveBtn" onclick="saveDrawer()">Save changes</button>
+    </div>
+  </div>
+</div>
+
+<!-- DISCOVER PANEL -->
+<div class="discover-overlay" id="discoverOverlay" onclick="closeDiscoverOutside(event)">
+  <div class="discover-panel">
+    <div class="discover-header">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+        <div>
+          <div class="discover-title" id="discoverTitle">Discover agents</div>
+          <div class="discover-sub">Scrapes Google Maps for real estate agents in Bali</div>
+        </div>
+        <button class="drawer-close" onclick="closeDiscoverPanel()">✕</button>
+      </div>
+    </div>
+    <div class="discover-body">
+      <div class="section-label" style="margin-bottom:8px">Target area</div>
+      <div class="area-grid">
+        <div class="area-card selected" id="area-canggu" onclick="toggleArea('canggu')">
+          <div class="area-card-title">Canggu / Pererenan</div>
+          <div class="area-card-sub">Berawa, Batu Bolong, Echo Beach</div>
+        </div>
+        <div class="area-card" id="area-uluwatu" onclick="toggleArea('uluwatu')">
+          <div class="area-card-title">Uluwatu / Bukit</div>
+          <div class="area-card-sub">Ungasan, Pecatu, Jimbaran</div>
+        </div>
+      </div>
+      <button class="discover-run-btn" id="discoverRunBtn" onclick="runDiscover()">Search Google Maps</button>
+      <div class="discover-status" id="discoverStatus">
+        <div class="spinner" id="discoverSpinner"></div>
+        <span id="discoverStatusText">Starting search...</span>
+      </div>
+      <div id="discoverResults" class="results-list"></div>
+    </div>
+    <div class="discover-footer" id="discoverFooter" style="display:none">
+      <button class="discover-cancel-btn" onclick="closeDiscoverPanel()">Cancel</button>
+      <button class="discover-import-btn" id="discoverImportBtn" onclick="importSelected()">Import selected</button>
+      <span class="discover-select-all" onclick="selectAllResults()">Select all</span>
+    </div>
+  </div>
+</div>
+
+<script>
+const APIFY_TOKEN = 'apify_api_VYbaODK7ioien89N6AWBmwamYQnEyg4DANou';
+const APIFY_ACTOR = 'compass~crawler-google-places';
+
+const KAYA_PROJECTS = ['Clay House','Tropicana Valley','Palem Kembar','Sabit House','LaneHAUS'];
+const PERSONAL = ['LaneHAUS'];
+const KAYA_STATUSES = ['Not contacted','Contacted','Responded','Listing agreed','Agreement signed','Listed'];
+const SAMBA_STATUSES = ['Not contacted','Contacted','Responded','Agreement sent','Active'];
+
+const S_CFG = {
+  'Not contacted':    { bg:'var(--s0-bg)', text:'var(--s0-text)', dot:'var(--s0-dot)', short:'None' },
+  'Contacted':        { bg:'var(--s1-bg)', text:'var(--s1-text)', dot:'var(--s1-dot)', short:'Contacted' },
+  'Responded':        { bg:'var(--s2-bg)', text:'var(--s2-text)', dot:'var(--s2-dot)', short:'Responded' },
+  'Listing agreed':   { bg:'var(--s3-bg)', text:'var(--s3-text)', dot:'var(--s3-dot)', short:'Agreed' },
+  'Agreement signed': { bg:'var(--s4-bg)', text:'var(--s4-text)', dot:'var(--s4-dot)', short:'Signed' },
+  'Listed':           { bg:'var(--s5-bg)', text:'var(--s5-text)', dot:'var(--s5-dot)', short:'Listed' },
+  'Agreement sent':   { bg:'var(--s4-bg)', text:'var(--s4-text)', dot:'var(--s4-dot)', short:'Agr. sent' },
+  'Active':           { bg:'var(--s5-bg)', text:'var(--s5-text)', dot:'var(--s5-dot)', short:'Active' },
+};
+
+const KAYA_MSG = name => {
+  const n = name && name.trim() ? name.trim() : 'there';
+  return `Hey ${n}, hope you're well!\n\nWanted to touch base -- we've got some updates across our projects and wanted to make sure you have the latest info. A few things have moved on quite a bit since we last spoke.\n\nAre you still actively listing properties in Bali?`;
+};
+
+const SAMBA_MSG = name => {
+  const n = name && name.trim() ? name.trim() : 'there';
+  return `Hey ${n}, hope you're well!\n\nI'm Ikiel from Samba Realty -- we manage a portfolio of 14 villas and apartments across Canggu, Pererenan, and Seminyak. We work with agents on 10% commission per booking.\n\nWe have a live availability checker you can use anytime to see what's free and share directly with clients: https://sambarentals.vercel.app\n\nInterested in sending clients our way?`;
+};
+
+const AREA_QUERIES = {
+  canggu: [
+    'real estate agent Canggu Bali','property agent Pererenan Bali',
+    'villa agent Berawa Bali','real estate agency Canggu Bali',
+    'agen properti Canggu Bali','property consultant Canggu Bali',
+  ],
+  uluwatu: [
+    'real estate agent Uluwatu Bali','property agent Ungasan Bali',
+    'villa agent Bukit Bali','real estate agency Uluwatu Bali',
+    'agen properti Uluwatu Bali','property consultant Bukit Bali',
+  ]
+};
+
+let pipeline = 'kaya';
+let activeStatusFilter = '';
+let activeProjFilter = 'All';
+let viewMode = 'grid';
+let editingId = null;
+let selectedAreas = new Set(['canggu']);
+let discoverResults = [];
+let selectedResults = new Set();
+
+let agents = [{"id": 1, "name": "Lisa Comsatun", "agency": "Seven Stones", "wa_url": "https://wa.me/6287880000440", "wa_num": "6287880000440", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://realestate.sevenstonesindonesia.com/property/exclusive-off-plan-studio-apartments-in-cepaka-bali/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 2, "name": "Imanuel Joseph", "agency": "Bali Home Immo", "wa_url": "https://wa.me/6282147069607", "wa_num": "6282147069607", "alt_contact": "", "notes": "https://www.bali-home-immo.com/realestate-property/for-sale/villa/leasehold/tanah-lot-area/off-plan-1-bedroom-modern-apartment-for-sale-in-cepaka-rf6225a", "projects": {"Clay House": {"status": "Listed", "url": "https://www.bali-home-immo.com/realestate-property/for-sale/villa/leasehold/tanah-lot-area/off-plan-1-bedroom-modern-apartment-for-sale-in-cepaka-rf6225b"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 3, "name": "Arya", "agency": "Propertia", "wa_url": "https://wa.me/6287862103616", "wa_num": "6287862103616", "alt_contact": "Arya", "notes": "Refused to list because no demand cepaka, different listing manager will reach out", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 4, "name": "Radu", "agency": "Kibarer", "wa_url": "https://wa.me/6285737317774", "wa_num": "6285737317774", "alt_contact": "Aurelia", "notes": "Refused to list because needs 70% completion", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 5, "name": "Vass", "agency": "", "wa_url": "https://wa.me/6281339712406", "wa_num": "6281339712406", "alt_contact": "", "notes": "17/03 pending site visit", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 20, "activity_tier": "Medium"}, {"id": 6, "name": "Diana", "agency": "M Real Estate", "wa_url": "https://wa.me/62881037229554", "wa_num": "62881037229554", "alt_contact": "", "notes": "https://www.instagram.com/p/DHQDxZON1qG/?igsh=YWk0aXNkcGNsMTls", "projects": {"Clay House": {"status": "Listed", "url": "https://www.mrealestatebali.com/properties/theclayhouseapartments"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 7, "name": "Suci", "agency": "Mata Property Bali", "wa_url": "https://wa.me/628113930589", "wa_num": "628113930589", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://matapropertybali.com/property/elegant-studio-apartments-in-cepaka-tabanan/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 8, "name": "Carol", "agency": "inpro", "wa_url": "https://wa.me/6285934484591", "wa_num": "6285934484591", "alt_contact": "", "notes": "17/03 already share with property with clients and agreement and listing going up this week, 04/04 followed up, listed on their social media accounts, still waiting on listing...", "projects": {"Clay House": {"status": "Agreement signed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 35, "activity_tier": "Medium"}, {"id": 9, "name": "Mirah", "agency": "Suasa Real Estate", "wa_url": "https://wa.me/6289688009183", "wa_num": "6289688009183", "alt_contact": "Ariny", "notes": "no offplan", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": -5, "activity_tier": "Inactive"}, {"id": 10, "name": "Anna", "agency": "Bali Exception", "wa_url": "https://wa.me/6287744010796", "wa_num": "6287744010796", "alt_contact": "", "notes": "17/03 agreed to list, followed up", "projects": {"Clay House": {"status": "Listing agreed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 11, "name": "Ary", "agency": "Canggu Property Investment", "wa_url": "https://wa.me/6287899126868", "wa_num": "6287899126868", "alt_contact": "", "notes": "17/03 No Listing found, followed up, 04/04 requested listing", "projects": {"Clay House": {"status": "Listed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 65, "activity_tier": "High"}, {"id": 12, "name": "Kadek", "agency": "Exotiq", "wa_url": "https://wa.me/6281337982419", "wa_num": "6281337982419", "alt_contact": "", "notes": "refused to list, too small to list", "projects": {"Clay House": {"status": "Listed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 55, "activity_tier": "Medium"}, {"id": 13, "name": "Clare", "agency": "Bali Real Estate Consultants", "wa_url": "https://wa.me/6285759159190", "wa_num": "6285759159190", "alt_contact": "Putri Ayu", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://balirealestateconsultants.com/property/limited-unit-charming-studio-apartments-in-serene-cepaka/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 14, "name": "Mia/wayan", "agency": "Harcourts", "wa_url": "https://wa.me/6281329997917", "wa_num": "6281329997917", "alt_contact": "", "notes": "17/03 No Listing found. Agreed to list, followed up, 04/04 followed up", "projects": {"Clay House": {"status": "Listing agreed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 15, "name": "", "agency": "Ten Bali Property", "wa_url": "https://wa.me/6282146558974", "wa_num": "6282146558974", "alt_contact": "", "notes": "17/03 followed up, reviewing info, 04/04 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 16, "name": "Yasmin", "agency": "Bali Finest", "wa_url": "https://wa.me/6281246528703", "wa_num": "6281246528703", "alt_contact": "", "notes": "17/03 followed up, 04/04 followed up only does rental", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": -5, "activity_tier": "Inactive"}, {"id": 17, "name": "Amrin", "agency": "Property Murah Bali", "wa_url": "https://wa.me/628114200048", "wa_num": "628114200048", "alt_contact": "", "notes": "17/03 followed up. 04/04 followed up no response at all", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": -5, "activity_tier": "Inactive"}, {"id": 18, "name": "Nico Perrin", "agency": "KLS Bali Estate", "wa_url": "https://wa.me/6282341298894", "wa_num": "6282341298894", "alt_contact": "", "notes": "17/03 agreed to list, followed up, 04/04 followed up", "projects": {"Clay House": {"status": "Listing agreed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 20, "name": "Mark Reed", "agency": "Geonet Property & Finance Group", "wa_url": "https://wa.me/6281703384554", "wa_num": "6281703384554", "alt_contact": "62 851-6145-5385", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 21, "name": "", "agency": "Bali Essential Properties", "wa_url": "https://wa.me/6281353895911", "wa_num": "6281353895911", "alt_contact": "", "notes": "17/03 followed up, agreed to list, waiting on agreement, 04/04 followed up on listing status", "projects": {"Clay House": {"status": "Agreement signed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 35, "activity_tier": "Medium"}, {"id": 22, "name": "Rayana", "agency": "Endless Villa Bali", "wa_url": "https://wa.me/6285190125788", "wa_num": "6285190125788", "alt_contact": "", "notes": "No offplan", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": -5, "activity_tier": "Inactive"}, {"id": 23, "name": "", "agency": "Ian Lubis (only does freehold)", "wa_url": "https://wa.me/6281238071189", "wa_num": "6281238071189", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 24, "name": "Lisa Susilawati", "agency": "Bali Life Pro", "wa_url": "https://wa.me/628174702427", "wa_num": "628174702427", "alt_contact": "813-3792-8484", "notes": "17/03 followed up, contacted alternate contact, signed agreeement waiting on listing, 04/04 followed up on listing status, said listing agent Rati will be in touch", "projects": {"Clay House": {"status": "Agreement signed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 35, "activity_tier": "Medium"}, {"id": 26, "name": "Abi", "agency": "The Bali Villa", "wa_url": "https://wa.me/6281336888219", "wa_num": "6281336888219", "alt_contact": "", "notes": "17/03 followed up, 04/04 followed up on listing status", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 20, "activity_tier": "Medium"}, {"id": 27, "name": "Jesse Michelle", "agency": "Infinite Bali", "wa_url": "https://wa.me/6282219727745", "wa_num": "6282219727745", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 28, "name": "jack", "agency": "Central 2000 property", "wa_url": "https://wa.me/6288219534159", "wa_num": "6288219534159", "alt_contact": "Jack 62 812-8888-8238", "notes": "17/03 contacted, agreed to list, 04/04 followed up", "projects": {"Clay House": {"status": "Listing agreed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 29, "name": "Mark", "agency": "The Baliners", "wa_url": "https://wa.me/6281337947062", "wa_num": "6281337947062", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://thebaliners.com/property/tb-3476/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 30, "name": "", "agency": "Jaya murti property", "wa_url": "", "wa_num": "", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 31, "name": "Nono", "agency": "Bali Realty", "wa_url": "https://wa.me/6281936097093", "wa_num": "6281936097093", "alt_contact": "", "notes": "agreed to list, followed up 17/03, 04/04 followed up on listing status", "projects": {"Clay House": {"status": "Listing agreed", "url": "https://www.balirealty.com/properties/premium-off-plan-studio-apartment-in-cepaka-fully-furnished-four-units-available-2678/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 45, "activity_tier": "Medium"}, {"id": 32, "name": "", "agency": "Annie Dean Properties", "wa_url": "https://wa.me/6281339455009", "wa_num": "6281339455009", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 33, "name": "", "agency": "Villas of Bali", "wa_url": "https://wa.me/6282111598787", "wa_num": "6282111598787", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 34, "name": "Alvin", "agency": "Raja villa property", "wa_url": "https://wa.me/6282113558383", "wa_num": "6282113558383", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 35, "name": "", "agency": "Paradise property group", "wa_url": "https://wa.me/6281353678113", "wa_num": "6281353678113", "alt_contact": "Mimi +62 878-6002-8391", "notes": "reached out to alternate contact 17/03", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 36, "name": "Fitriana", "agency": "Bali Sweet Property", "wa_url": "https://wa.me/6282266536834", "wa_num": "6282266536834", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 37, "name": "", "agency": "The Balinese Villa Agency", "wa_url": "https://wa.me/6281337947062", "wa_num": "6281337947062", "alt_contact": "", "notes": "only do villas", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": -5, "activity_tier": "Inactive"}, {"id": 38, "name": "Cikha", "agency": "Happy Estate Bali", "wa_url": "", "wa_num": "", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 39, "name": "Rafika", "agency": "Rhopa estates", "wa_url": "", "wa_num": "", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 40, "name": "", "agency": "Real Aesthete", "wa_url": "https://wa.me/6282110088080", "wa_num": "6282110088080", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": "https://realaesthetebali.com/property/exclusive-off-plan-studio-apartements-in-cepaka/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 30, "activity_tier": "Medium"}, {"id": 41, "name": "Putri Ayu", "agency": "Bali Real Estate Consultant", "wa_url": "https://wa.me/6281999271809", "wa_num": "6281999271809", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://balirealestateconsultants.com/property/limited-unit-charming-studio-apartments-in-serene-cepaka/ (duplicate)"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 42, "name": "", "agency": "Bali Treasure Properties", "wa_url": "https://wa.me/6285100152013", "wa_num": "6285100152013", "alt_contact": "", "notes": "Doesn't do apartments", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 43, "name": "", "agency": "Ray White Canggu", "wa_url": "https://wa.me/62818681111", "wa_num": "62818681111", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "https://www.raywhite.co.id/properti/461023/leasehold-exclusive-studio-apartments-in-bali"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 75, "activity_tier": "High"}, {"id": 44, "name": "", "agency": "Bali Bumi Real Estate Agency", "wa_url": "https://wa.me/6281239143437", "wa_num": "6281239143437", "alt_contact": "", "notes": "Only does nusa penida", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 45, "name": "", "agency": "Bali Exception Real Estate", "wa_url": "https://wa.me/6281237750988", "wa_num": "6281237750988", "alt_contact": "", "notes": "Duplicate, already talking with Anna", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 46, "name": "", "agency": "Bali Villa Sale", "wa_url": "https://wa.me/62818108808", "wa_num": "62818108808", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 47, "name": "", "agency": "Bali Luxury Estate", "wa_url": "https://wa.me/6287862310826", "wa_num": "6287862310826", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 48, "name": "", "agency": "Bali Realty Holiday Villas", "wa_url": "https://wa.me/6287736198684", "wa_num": "6287736198684", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 49, "name": "Bea", "agency": "Noba Villas", "wa_url": "https://wa.me/34621061735", "wa_num": "34621061735", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Responded", "url": "https://nobavillas.com/properties/coconut-house/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 30, "activity_tier": "Medium"}, {"id": 50, "name": "Adhi", "agency": "", "wa_url": "https://wa.me/6285536550594", "wa_num": "6285536550594", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 51, "name": "", "agency": "Anton Persebara'igir", "wa_url": "https://wa.me/6281529066110", "wa_num": "6281529066110", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 52, "name": "", "agency": "LaChance Real Estate", "wa_url": "https://wa.me/6281339593736", "wa_num": "6281339593736", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 53, "name": "Tom", "agency": "", "wa_url": "https://wa.me/33663496620", "wa_num": "33663496620", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 54, "name": "Nindy", "agency": "Independent", "wa_url": "https://wa.me/6282266016611", "wa_num": "6282266016611", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Listed", "url": "has no website"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 55, "activity_tier": "Medium"}, {"id": 55, "name": "Ganesha", "agency": "Ganesha", "wa_url": "https://wa.me/6282112342288", "wa_num": "6282112342288", "alt_contact": "", "notes": "17/03 followed up", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 56, "name": "Ada", "agency": "Property Murah Bali Real Estate Agent", "wa_url": "https://wa.me/6287865631461", "wa_num": "6287865631461", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 57, "name": "", "agency": "Devata Agung Property", "wa_url": "https://wa.me/6283114968671", "wa_num": "6283114968671", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 58, "name": "", "agency": "Papan Property", "wa_url": "https://wa.me/6281378888188", "wa_num": "6281378888188", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 59, "name": "", "agency": "Belkin Group Indonesia", "wa_url": "https://wa.me/6281280010109", "wa_num": "6281280010109", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 60, "name": "", "agency": "Abirama Properties Bali", "wa_url": "https://wa.me/6281339881868", "wa_num": "6281339881868", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 61, "name": "", "agency": "Listings Bali", "wa_url": "https://wa.me/6282247663578", "wa_num": "6282247663578", "alt_contact": "Lorenzo", "notes": "17/03 contacted, put in contact with listing agent lorenzo", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 20, "activity_tier": "Medium"}, {"id": 62, "name": "", "agency": "Balitecture Realty", "wa_url": "https://wa.me/628113909045", "wa_num": "628113909045", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 63, "name": "Reni", "agency": "Warisan", "wa_url": "https://wa.me/6281139904443", "wa_num": "6281139904443", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 64, "name": "Sofiyah", "agency": "The Bali Homes", "wa_url": "https://wa.me/81233293709", "wa_num": "81233293709", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 65, "name": "", "agency": "Ocean Real Estate", "wa_url": "https://wa.me/6282342141089", "wa_num": "6282342141089", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 66, "name": "", "agency": "Property Canggu", "wa_url": "https://wa.me/6281236011142", "wa_num": "6281236011142", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 67, "name": "", "agency": "NF Group", "wa_url": "https://wa.me/6281130988881", "wa_num": "6281130988881", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 68, "name": "Bambang", "agency": "Brighton", "wa_url": "https://wa.me/6285101339652", "wa_num": "6285101339652", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 69, "name": "", "agency": "We Provide Property", "wa_url": "https://wa.me/628111561902", "wa_num": "628111561902", "alt_contact": "", "notes": "17/03 listing agreement signed", "projects": {"Clay House": {"status": "Listed", "url": "https://weprovidepropertybali.com/property/leasehold/200/luxury-studio-apartments-in-cepaka-bali-leasehold.    /       https://weprovidepropertybali.com/property/leasehold/201/chic-studio-apartments-in-cepaka-bali-leasehold"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 85, "activity_tier": "High"}, {"id": 70, "name": "", "agency": "Bali Private Agency", "wa_url": "https://wa.me/6282144207287", "wa_num": "6282144207287", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 71, "name": "", "agency": "Karisma Property", "wa_url": "https://wa.me/6282339789307", "wa_num": "6282339789307", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 72, "name": "", "agency": "Seejee Property Bali", "wa_url": "https://wa.me/6282266311604", "wa_num": "6282266311604", "alt_contact": "", "notes": "17/03 contacted, requested site visit", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 20, "activity_tier": "Medium"}, {"id": 73, "name": "", "agency": "The Agency Bali", "wa_url": "https://wa.me/62811370390", "wa_num": "62811370390", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 74, "name": "", "agency": "New Life Bali", "wa_url": "", "wa_num": "", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 75, "name": "", "agency": "Bali Immobilier", "wa_url": "https://wa.me/6281311311205", "wa_num": "6281311311205", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 76, "name": "", "agency": "Blue Beach Bali", "wa_url": "https://wa.me/6287818225646", "wa_num": "6287818225646", "alt_contact": "", "notes": "filled out listing agreement, 17/03 followed up, 04/04 confirmed listing is being made", "projects": {"Clay House": {"status": "Agreement signed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 35, "activity_tier": "Medium"}, {"id": 77, "name": "", "agency": "Oniriq", "wa_url": "https://wa.me/6282339825879", "wa_num": "6282339825879", "alt_contact": "", "notes": "17/03 contacted, doesn't like area", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 78, "name": "Chris", "agency": "Bali Bound", "wa_url": "https://wa.me/6282144511556", "wa_num": "6282144511556", "alt_contact": "", "notes": "agreed to list, 17/03 followed up", "projects": {"Clay House": {"status": "Listing agreed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 79, "name": "", "agency": "Xclusive Property", "wa_url": "https://wa.me/6281238888897", "wa_num": "6281238888897", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 80, "name": "", "agency": "Luxindo Property", "wa_url": "https://wa.me/6282340064654", "wa_num": "6282340064654", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 81, "name": "", "agency": "BVR Property (Bali Villa Realty)", "wa_url": "https://wa.me/628113976689", "wa_num": "628113976689", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 82, "name": "", "agency": "Fullers Properties", "wa_url": "https://wa.me/6281928686777", "wa_num": "6281928686777", "alt_contact": "", "notes": "17/03 contacted, visit scheduled 26/03, agreement signed and waiting for listing", "projects": {"Clay House": {"status": "Agreement signed", "url": "https://fullersproperties.com/property/upcoming-one-bedroom-high-roi-studio-apartment-located-in-peaceful-area-for-lease-in-cepaka/"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 55, "activity_tier": "Medium"}, {"id": 83, "name": "", "agency": "Domina Bali (Domnabali)", "wa_url": "https://wa.me/6281916266812", "wa_num": "6281916266812", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 85, "name": "Putu", "agency": "BetterPlace Bali", "wa_url": "https://wa.me/6281377732003", "wa_num": "6281377732003", "alt_contact": "62 811-3830-6831", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Agreement signed", "url": "https://betterplace.cc/buy/properties/BPHL01862"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 45, "activity_tier": "Medium"}, {"id": 86, "name": "", "agency": "Optimum Bali", "wa_url": "https://wa.me/6285338002448", "wa_num": "6285338002448", "alt_contact": "Sales Optimum Bali", "notes": "17/03 contacted, contacted Sales", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 87, "name": "", "agency": "Uma di Bali Properties", "wa_url": "https://wa.me/6285936135136", "wa_num": "6285936135136", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 88, "name": "", "agency": "Bali Coconut Living", "wa_url": "https://wa.me/6281933031707", "wa_num": "6281933031707", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 89, "name": "", "agency": "Epic Property Bali", "wa_url": "https://wa.me/6281999199277", "wa_num": "6281999199277", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 90, "name": "", "agency": "Heritage Bali Real Estate", "wa_url": "https://wa.me/6282144559478", "wa_num": "6282144559478", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 91, "name": "", "agency": "Zehava Bali Enterprise", "wa_url": "https://wa.me/6281999124525", "wa_num": "6281999124525", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 92, "name": "", "agency": "Sky Realty Bali", "wa_url": "https://wa.me/6281999971591", "wa_num": "6281999971591", "alt_contact": "", "notes": "CLOSED", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 93, "name": "Nora", "agency": "Yolla Realty", "wa_url": "https://wa.me/6282266220431", "wa_num": "6282266220431", "alt_contact": "", "notes": "17/03 contacted", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 94, "name": "Surya wan", "agency": "", "wa_url": "https://wa.me/62811388730", "wa_num": "62811388730", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 96, "name": "", "agency": "", "wa_url": "https://wa.me/6282340794039", "wa_num": "6282340794039", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 97, "name": "Agus Soplo", "agency": "", "wa_url": "https://wa.me/6281246769421", "wa_num": "6281246769421", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Responded", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 10, "activity_tier": "Low"}, {"id": 98, "name": "Maaalv", "agency": "", "wa_url": "https://wa.me/6281946252577", "wa_num": "6281946252577", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 99, "name": "Andre", "agency": "", "wa_url": "https://wa.me/6281212231168", "wa_num": "6281212231168", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 100, "name": "Reynaldo", "agency": "", "wa_url": "https://wa.me/628118828826", "wa_num": "628118828826", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 101, "name": "", "agency": "", "wa_url": "https://wa.me/6281353740227", "wa_num": "6281353740227", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 102, "name": "HaikalMuhamad", "agency": "", "wa_url": "https://wa.me/6287857519385", "wa_num": "6287857519385", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 103, "name": "Casenta Property", "agency": "", "wa_url": "https://wa.me/6281388881553", "wa_num": "6281388881553", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Agreement signed", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 25, "activity_tier": "Medium"}, {"id": 104, "name": "Daffa, Arya", "agency": "", "wa_url": "https://wa.me/6287819526083", "wa_num": "6287819526083", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 105, "name": "P", "agency": "", "wa_url": "https://wa.me/6281353339995", "wa_num": "6281353339995", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 106, "name": "Makz", "agency": "", "wa_url": "https://wa.me/6281337747234", "wa_num": "6281337747234", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 107, "name": "E!", "agency": "", "wa_url": "https://wa.me/6285891796739", "wa_num": "6285891796739", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 108, "name": "Yoga", "agency": "", "wa_url": "https://wa.me/628873307215", "wa_num": "628873307215", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 109, "name": "BBV", "agency": "", "wa_url": "https://wa.me/6281338963138", "wa_num": "6281338963138", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": "wants to visit"}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 110, "name": "", "agency": "Connect Group", "wa_url": "https://wa.me/628993319020", "wa_num": "628993319020", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 111, "name": "Bayu Abiyasa", "agency": "", "wa_url": "https://wa.me/6287777767878", "wa_num": "6287777767878", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 112, "name": "", "agency": "", "wa_url": "https://wa.me/6288987331981", "wa_num": "6288987331981", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 113, "name": "V", "agency": "", "wa_url": "https://wa.me/6281318038788", "wa_num": "6281318038788", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 114, "name": "", "agency": "", "wa_url": "https://wa.me/62881038136293", "wa_num": "62881038136293", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 5, "activity_tier": "Low"}, {"id": 115, "name": "", "agency": "", "wa_url": "https://wa.me/6281287405762", "wa_num": "6281287405762", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 116, "name": "", "agency": "", "wa_url": "https://wa.me/6281353388779", "wa_num": "6281353388779", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 117, "name": "", "agency": "", "wa_url": "https://wa.me/6287888214498", "wa_num": "6287888214498", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 118, "name": "", "agency": "", "wa_url": "https://wa.me/6281389505089", "wa_num": "6281389505089", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 119, "name": "", "agency": "", "wa_url": "https://wa.me/6281228822558", "wa_num": "6281228822558", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"id": 120, "name": "Angela", "agency": "", "wa_url": "https://wa.me/6287778096222", "wa_num": "6287778096222", "alt_contact": "", "notes": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Oktrisia", "agency": "Bali HomeImmo", "wa_num": "6281337348987", "wa_url": "https://wa.me/6281337348987", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 122, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Helen", "agency": "Helen Property", "wa_num": "6285899999778", "wa_url": "https://wa.me/6285899999778", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 123, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Dewi Sukersa", "agency": "", "wa_num": "6289605219696", "wa_url": "https://wa.me/6289605219696", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 124, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "C Home", "wa_num": "6289605105555", "wa_url": "https://wa.me/6289605105555", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 125, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Mohammad", "agency": "", "wa_num": "62881038476066", "wa_url": "https://wa.me/62881038476066", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 126, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ayunara", "agency": "", "wa_num": "6285706555051", "wa_url": "https://wa.me/6285706555051", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 127, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Jorge Smeagol", "agency": "", "wa_num": "6287852317848", "wa_url": "https://wa.me/6287852317848", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 128, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Septi Lupita", "agency": "Luxo", "wa_num": "6287842218077", "wa_url": "https://wa.me/6287842218077", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": ""}, "id": 129, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Nick", "agency": "", "wa_num": "6285903766744", "wa_url": "https://wa.me/6285903766744", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 130, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "We Provide Property Bali", "wa_num": "6281339786810", "wa_url": "https://wa.me/6281339786810", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 131, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "6598807504", "wa_url": "https://wa.me/6598807504", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 132, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "I Made Agus Iryawan", "agency": "", "wa_num": "62817359353", "wa_url": "https://wa.me/62817359353", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 133, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Danny", "agency": "", "wa_num": "628113999335", "wa_url": "https://wa.me/628113999335", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 134, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Baliluxe Properties", "wa_num": "6285755232479", "wa_url": "https://wa.me/6285755232479", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 135, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Christian Mandala", "agency": "", "wa_num": "6281235690822", "wa_url": "https://wa.me/6281235690822", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 136, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Suci", "agency": "Bali Essential Properties", "wa_num": "6281353374085", "wa_url": "https://wa.me/6281353374085", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 137, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Arya", "agency": "ray white", "wa_num": "6281237548212", "wa_url": "https://wa.me/6281237548212", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 138, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Maxime", "agency": "Skedus", "wa_num": "6285190181604", "wa_url": "https://wa.me/6285190181604", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 139, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Gungwah Property", "wa_num": "628873032349", "wa_url": "https://wa.me/628873032349", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 140, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Tash", "agency": "", "wa_num": "6281213462021", "wa_url": "https://wa.me/6281213462021", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 141, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Anaelle Duran", "agency": "", "wa_num": "628135344502", "wa_url": "https://wa.me/628135344502", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 142, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Emilie Pavageau", "agency": "", "wa_num": "6281999044510", "wa_url": "https://wa.me/6281999044510", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 143, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Michael Go", "agency": "", "wa_num": "6288989364386", "wa_url": "https://wa.me/6288989364386", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 144, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Luxo Property", "wa_num": "6282313524101", "wa_url": "https://wa.me/6282313524101", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 145, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Rani", "agency": "Bali Ultimate Office", "wa_num": "6282266626419", "wa_url": "https://wa.me/6282266626419", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 146, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Cikha Ayu L", "agency": "", "wa_num": "6281353002766", "wa_url": "https://wa.me/6281353002766", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 147, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Toby", "agency": "", "wa_num": "6281237104775", "wa_url": "https://wa.me/6281237104775", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 148, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Lina", "agency": "Bali Home Immo", "wa_num": "6281138312514", "wa_url": "https://wa.me/6281138312514", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 149, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Yusuf", "agency": "", "wa_num": "6281312392566", "wa_url": "https://wa.me/6281312392566", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 150, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ion", "agency": "Skedus Estate", "wa_num": "6285716482119", "wa_url": "https://wa.me/6285716482119", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 151, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Chitra", "agency": "", "wa_num": "6287885581726", "wa_url": "https://wa.me/6287885581726", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 152, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "6281917915344", "wa_url": "https://wa.me/6281917915344", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 153, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Pradipta", "agency": "", "wa_num": "6285950032972", "wa_url": "https://wa.me/6285950032972", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 154, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "ERINA", "agency": "", "wa_num": "6287891184818", "wa_url": "https://wa.me/6287891184818", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 155, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ferdian Arsa", "agency": "", "wa_num": "6285338831294", "wa_url": "https://wa.me/6285338831294", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 156, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Junita", "agency": "", "wa_num": "6281529067300", "wa_url": "https://wa.me/6281529067300", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 157, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Fuad", "agency": "Bhumi Berkah", "wa_num": "6282335770101", "wa_url": "https://wa.me/6282335770101", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 158, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Puspita", "agency": "Bali Villas", "wa_num": "6285607932953", "wa_url": "https://wa.me/6285607932953", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 159, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "6281239209021", "wa_url": "https://wa.me/6281239209021", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 160, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Gede", "agency": "Toplo Property", "wa_num": "6285737072447", "wa_url": "https://wa.me/6285737072447", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 161, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Khadafi Rich Akbar", "agency": "", "wa_num": "6281339643575", "wa_url": "https://wa.me/6281339643575", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 162, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ariny Putri", "agency": "", "wa_num": "6282322613762", "wa_url": "https://wa.me/6282322613762", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 163, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Lala Sedana", "agency": "", "wa_num": "6281237699682", "wa_url": "https://wa.me/6281237699682", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 164, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "628563752412", "wa_url": "https://wa.me/628563752412", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 165, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Romada", "agency": "", "wa_num": "628811696888", "wa_url": "https://wa.me/628811696888", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 166, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ardina", "agency": "Bali Home Immo", "wa_num": "6281338824711", "wa_url": "https://wa.me/6281338824711", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 167, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Valencia", "agency": "", "wa_num": "6285858911021", "wa_url": "https://wa.me/6285858911021", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 168, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "EFRAIM", "agency": "", "wa_num": "6285934426891", "wa_url": "https://wa.me/6285934426891", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 169, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Alexander", "agency": "", "wa_num": "6281237150083", "wa_url": "https://wa.me/6281237150083", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 170, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Danoya Property", "wa_num": "6287828385670", "wa_url": "https://wa.me/6287828385670", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 171, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Herman Perkasa", "agency": "Bali Villa Co.", "wa_num": "6281211489565", "wa_url": "https://wa.me/6281211489565", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 172, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Maria", "agency": "", "wa_num": "639959666851", "wa_url": "https://wa.me/639959666851", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 173, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Mimi Dewi", "agency": "", "wa_num": "6281315191914", "wa_url": "https://wa.me/6281315191914", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 174, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Rivaldy Ragil", "agency": "", "wa_num": "6282146736998", "wa_url": "https://wa.me/6282146736998", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 175, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Ancak Realty", "wa_num": "6282267269077", "wa_url": "https://wa.me/6282267269077", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 176, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Jee Zee Property", "wa_num": "628987766250", "wa_url": "https://wa.me/628987766250", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 177, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Lisa Blossom", "agency": "", "wa_num": "628174777250", "wa_url": "https://wa.me/628174777250", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 178, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Anne Rose", "agency": "", "wa_num": "6282151938777", "wa_url": "https://wa.me/6282151938777", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 179, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Rianna Felicia", "agency": "", "wa_num": "6281246144098", "wa_url": "https://wa.me/6281246144098", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 180, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "6285343671606", "wa_url": "https://wa.me/6285343671606", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 181, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Risa", "agency": "Bali Property", "wa_num": "628111515182", "wa_url": "https://wa.me/628111515182", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 182, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Gun Purwata", "agency": "Global Gateway", "wa_num": "6282340018966", "wa_url": "https://wa.me/6282340018966", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 183, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Ely", "agency": "", "wa_num": "6285792475804", "wa_url": "https://wa.me/6285792475804", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 184, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Nabil Salim Saleh", "agency": "", "wa_num": "6285964184689", "wa_url": "https://wa.me/6285964184689", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 185, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Friska Siahaan", "agency": "Brighton Golden Canggu", "wa_num": "6282236140004", "wa_url": "https://wa.me/6282236140004", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 186, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Dean Valerian", "agency": "real aesthete Bali", "wa_num": "6281337415114", "wa_url": "https://wa.me/6281337415114", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 187, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Suci", "agency": "Mata Property", "wa_num": "6281353899851", "wa_url": "https://wa.me/6281353899851", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 188, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "", "wa_num": "6285600408964", "wa_url": "https://wa.me/6285600408964", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 189, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Sofia", "agency": "Bali HomeImmo", "wa_num": "6281239161864", "wa_url": "https://wa.me/6281239161864", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 190, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Restu", "agency": "Y Property Bali", "wa_num": "6285121259837", "wa_url": "https://wa.me/6285121259837", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 191, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Oky Rachmawaty", "agency": "", "wa_num": "628115700057", "wa_url": "https://wa.me/628115700057", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 192, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Heavenly Estate", "wa_num": "628139422677", "wa_url": "https://wa.me/628139422677", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 193, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Triang Villas", "wa_num": "6281139406969", "wa_url": "https://wa.me/6281139406969", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 194, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Bayu Siswintara", "agency": "", "wa_num": "62895623466288", "wa_url": "https://wa.me/62895623466288", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 195, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Stephen Wagiran", "agency": "", "wa_num": "6282195404628", "wa_url": "https://wa.me/6282195404628", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 196, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Baba Bali Property", "wa_num": "6282133700500", "wa_url": "https://wa.me/6282133700500", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 197, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Henoch", "agency": "BaliGem Realty", "wa_num": "6281944928888", "wa_url": "https://wa.me/6281944928888", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 198, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Amelia", "agency": "", "wa_num": "6281222808069", "wa_url": "https://wa.me/6281222808069", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 199, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Annisa", "agency": "", "wa_num": "6281246425145", "wa_url": "https://wa.me/6281246425145", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 200, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Duta", "agency": "Skedus", "wa_num": "628153000660", "wa_url": "https://wa.me/628153000660", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 201, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Christy Siahaan", "agency": "", "wa_num": "6281363636160", "wa_url": "https://wa.me/6281363636160", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 202, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "", "agency": "Clarity Homes Bali", "wa_num": "6282382382382", "wa_url": "https://wa.me/6282382382382", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 203, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Putu Marianta", "agency": "Betterplace", "wa_num": "6281138306831", "wa_url": "https://wa.me/6281138306831", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 204, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Indra", "agency": "", "wa_num": "628113977471", "wa_url": "https://wa.me/628113977471", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 205, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Eto", "agency": "", "wa_num": "6285692729239", "wa_url": "https://wa.me/6285692729239", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 206, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Marselina", "agency": "", "wa_num": "6281247099769", "wa_url": "https://wa.me/6281247099769", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 207, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Nafla", "agency": "", "wa_num": "6285708847697", "wa_url": "https://wa.me/6285708847697", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 208, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Marisadewi", "agency": "", "wa_num": "6281339628889", "wa_url": "https://wa.me/6281339628889", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 209, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Wina", "agency": "Rumah Property Bali", "wa_num": "628974645533", "wa_url": "https://wa.me/628974645533", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 210, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Komang Yudhi", "agency": "", "wa_num": "6281362434665", "wa_url": "https://wa.me/6281362434665", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 211, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Meilani Arimau S.Par", "agency": "", "wa_num": "6282259942509", "wa_url": "https://wa.me/6282259942509", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 212, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Rafika Yanthi Ketut", "agency": "", "wa_num": "6281338602768", "wa_url": "https://wa.me/6281338602768", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 213, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Paul", "agency": "Londola Property", "wa_num": "6281281476317", "wa_url": "https://wa.me/6281281476317", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 214, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Chrystine Hanley", "agency": "", "wa_num": "6281337227656", "wa_url": "https://wa.me/6281337227656", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 215, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Gusti Arik", "agency": "", "wa_num": "6281805494158", "wa_url": "https://wa.me/6281805494158", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 216, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Risky Ekasari", "agency": "", "wa_num": "6282144093758", "wa_url": "https://wa.me/6282144093758", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 217, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Rey", "agency": "Bali Villa Realty", "wa_num": "6281337395023", "wa_url": "https://wa.me/6281337395023", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 218, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Adi Ariyati", "agency": "", "wa_num": "6281999945958", "wa_url": "https://wa.me/6281999945958", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 219, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Fajar Dhee", "agency": "", "wa_num": "6281365531969", "wa_url": "https://wa.me/6281365531969", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 220, "activity_score": 0, "activity_tier": "Inactive"}, {"name": "Nikholas Sinaga", "agency": "", "wa_num": "6281389658319", "wa_url": "https://wa.me/6281389658319", "alt_contact": "", "priority": "Medium", "notes": "", "source": "", "projects": {"Clay House": {"status": "Not contacted", "url": ""}, "Tropicana Valley": {"status": "Not contacted", "url": ""}, "Palem Kembar": {"status": "Not contacted", "url": ""}, "Sabit House": {"status": "Not contacted", "url": ""}, "LaneHAUS": {"status": "Not contacted", "url": ""}}, "samba": {"status": "Not contacted", "notes": "", "last_contacted": ""}, "id": 221, "activity_score": 0, "activity_tier": "Inactive"}];
+
+function loadAgents() {
+  try { const s = localStorage.getItem('kaya_samba_crm_v3'); if (s) agents = JSON.parse(s); } catch(e) {}
+}
+function saveAgents() {
+  try { localStorage.setItem('kaya_samba_crm_v3', JSON.stringify(agents)); } catch(e) {}
+}
+loadAgents();
+
+function getWaNum(a) {
+  if (a.wa_url && a.wa_url.startsWith('https://wa.me/')) return a.wa_url.replace('https://wa.me/','').replace(/\D/g,'');
+  return a.wa_num ? a.wa_num.replace(/\D/g,'') : '';
+}
+function buildWaUrl(num) { return num ? 'https://wa.me/' + num.replace(/\D/g,'') : ''; }
+function initials(name, agency) {
+  const src = (name || agency || '').trim();
+  const words = src.split(/\s+/).filter(Boolean);
+  if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+  if (words.length === 1) return words[0].slice(0,2).toUpperCase();
+  return '?';
+}
+
+function getStatuses() { return pipeline === 'kaya' ? KAYA_STATUSES : SAMBA_STATUSES; }
+
+function bestKayaStatus(a) {
+  const proj = activeProjFilter !== 'All' ? activeProjFilter : null;
+  if (proj) return a.projects[proj]?.status || 'Not contacted';
+  let best = 'Not contacted';
+  KAYA_PROJECTS.forEach(p => {
+    const s = a.projects[p]?.status || 'Not contacted';
+    if (KAYA_STATUSES.indexOf(s) > KAYA_STATUSES.indexOf(best)) best = s;
+  });
+  return best;
+}
+
+function getSambaStatus(a) { return a.samba?.status || 'Not contacted'; }
+
+function getCurrentStatus(a) {
+  return pipeline === 'kaya' ? bestKayaStatus(a) : getSambaStatus(a);
+}
+
+function listedCount(a) {
+  return KAYA_PROJECTS.filter(p => a.projects[p]?.status === 'Listed').length;
+}
+
+function pillHtml(status) {
+  const c = S_CFG[status] || S_CFG['Not contacted'];
+  return `<span class="proj-status-pill" style="background:${c.bg};color:${c.text}">
+    <span class="pdot" style="background:${c.dot}"></span>${c.short}
+  </span>`;
+}
+
+// PIPELINE SWITCH
+function setPipeline(p) {
+  pipeline = p;
+  activeStatusFilter = '';
+  activeProjFilter = 'All';
+
+  const isKaya = p === 'kaya';
+  document.getElementById('brandName').textContent = isKaya ? 'KAYA' : 'Samba';
+  document.getElementById('brandSub').textContent = isKaya ? 'Sales CRM' : 'Rentals CRM';
+  document.getElementById('btnKaya').className = 'pipeline-btn' + (isKaya ? ' active-kaya' : '');
+  document.getElementById('btnSamba').className = 'pipeline-btn' + (!isKaya ? ' active-samba' : '');
+
+  const accentVar = isKaya ? 'var(--kaya)' : 'var(--samba)';
+  document.documentElement.style.setProperty('--accent', isKaya ? '#2d5a3d' : '#8b4513');
+  document.documentElement.style.setProperty('--accent-light', isKaya ? '#e8f0eb' : '#f5ede6');
+  document.documentElement.style.setProperty('--accent-mid', isKaya ? '#4a8a5e' : '#c4722a');
+
+  document.getElementById('discoverBtn').className = 'btn-discover' + (!isKaya ? ' samba-mode' : '');
+  document.getElementById('addBtn').className = 'btn-add' + (!isKaya ? ' samba-mode' : '');
+  document.getElementById('drawerSaveBtn').className = 'btn-primary' + (!isKaya ? ' samba' : '');
+
+  render();
+}
+
+// STATS
+function getStats() {
+  const statuses = getStatuses();
+  const counts = {};
+  statuses.forEach(s => counts[s] = 0);
+  const valid = agents.filter(a => a.name || a.agency || getWaNum(a));
+  valid.forEach(a => {
+    const s = getCurrentStatus(a);
+    if (counts[s] !== undefined) counts[s]++;
+  });
+  return { counts, total: valid.length };
+}
+
+function renderSummaryBar() {
+  const { counts } = getStats();
+  const statuses = getStatuses();
+  let html = '';
+  statuses.forEach(s => {
+    const c = S_CFG[s] || S_CFG['Not contacted'];
+    html += `<button class="stat-chip ${activeStatusFilter === s ? 'active' : ''}" style="background:${c.bg};color:${c.text}" onclick="toggleStatusFilter('${s}')">
+      <span class="stat-dot" style="background:${c.dot}"></span>
+      <strong>${counts[s] || 0}</strong>&nbsp;${s}
+    </button>`;
+  });
+  document.getElementById('summaryBar').innerHTML = html;
+}
+
+function renderProjBar() {
+  const bar = document.getElementById('projBar');
+  if (pipeline === 'samba') {
+    bar.innerHTML = '';
+    return;
+  }
+  const tabs = ['All', ...KAYA_PROJECTS];
+  bar.innerHTML = tabs.map(p => {
+    const isAll = p === 'All';
+    const isP = PERSONAL.includes(p);
+    const count = isAll
+      ? agents.filter(a => a.name || a.agency).length
+      : agents.filter(a => (a.name || a.agency) && a.projects[p]?.status === 'Listed').length;
+    const isSamba = pipeline === 'samba';
+    return `<div class="proj-tab ${activeProjFilter === p ? 'active' : ''} ${isSamba ? 'samba' : ''}" onclick="setProjFilter('${p}')">
+      ${isAll ? 'All agents' : p}${isP ? ' *' : ''}
+      <span class="proj-tab-count">${count}</span>
+    </div>`;
+  }).join('');
+}
+
+function getFiltered() {
+  const q = document.getElementById('searchInput').value.toLowerCase();
+  const result = agents.filter(a => {
+    if (!a.name && !a.agency && !getWaNum(a)) return false;
+    if (q) { const h = (a.name + ' ' + a.agency + ' ' + (a.notes||'')).toLowerCase(); if (!h.includes(q)) return false; }
+    if (activeStatusFilter) {
+      if (getCurrentStatus(a) !== activeStatusFilter) return false;
+    }
+    return true;
+  });
+
+  const sort = document.getElementById('sortSelect')?.value || 'default';
+  if (sort === 'activity') {
+    result.sort((a, b) => (b.activity_score || 0) - (a.activity_score || 0));
+  } else if (sort === 'name') {
+    result.sort((a, b) => (a.name || a.agency || '').localeCompare(b.name || b.agency || ''));
+  } else if (sort === 'agency') {
+    result.sort((a, b) => (a.agency || a.name || '').localeCompare(b.agency || b.name || ''));
+  }
+  return result;
+}
+
+function renderCards() {
+  const grid = document.getElementById('cardGrid');
+  const filtered = getFiltered();
+  document.getElementById('resultsCount').textContent = `${filtered.length} agent${filtered.length !== 1 ? 's' : ''}`;
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><h3>No agents found</h3><p>Try adjusting your search or filters.</p></div>`;
+    return;
+  }
+
+  const projs = activeProjFilter !== 'All' ? [activeProjFilter] : KAYA_PROJECTS;
+
+  grid.innerHTML = filtered.map(a => {
+    const waNum = getWaNum(a);
+    const msg = pipeline === 'kaya' ? KAYA_MSG(a.name) : SAMBA_MSG(a.name);
+    const waUrl = waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '';
+    const ini = initials(a.name, a.agency);
+    const lc = listedCount(a);
+
+    const waBtn = waUrl
+      ? `<a class="wa-pill" href="${waUrl}" target="_blank" onclick="event.stopPropagation()">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+          WA
+        </a>`
+      : `<span class="wa-pill none">No WA</span>`;
+
+    let coverageHtml = '';
+    if (pipeline === 'kaya') {
+      const projRows = projs.map(p => {
+        const proj = a.projects[p] || { status: 'Not contacted', url: '' };
+        const isP = PERSONAL.includes(p);
+        const hasUrl = proj.url && proj.url.startsWith('http');
+        return `<div class="proj-dot-row">
+          <span class="proj-dot-label">${p}${isP ? ' *' : ''}</span>
+          ${pillHtml(proj.status)}
+          ${hasUrl ? `<a class="proj-link-icon" href="${proj.url}" target="_blank" onclick="event.stopPropagation()">↗</a>` : ''}
+        </div>`;
+      }).join('');
+      coverageHtml = `<div class="coverage-section">
+        <div class="coverage-label">Project coverage</div>
+        <div class="proj-dots">${projRows}</div>
+      </div>`;
+    } else {
+      const ss = getSambaStatus(a);
+      const kayaBest = bestKayaStatus(a);
+      coverageHtml = `<div class="samba-coverage">
+        <div class="coverage-label">Rental status</div>
+        <div class="samba-status-row">
+          ${pillHtml(ss)}
+          ${kayaBest !== 'Not contacted' ? `<span style="font-size:10px;color:var(--ink4)">Also: KAYA ${kayaBest}</span>` : ''}
+        </div>
+      </div>`;
+    }
+
+    const sambaStatus = getSambaStatus(a);
+    const kayaBestCard = bestKayaStatus(a);
+
+    return `<div class="agent-card" onclick="openDrawer(${a.id})">
+      <div class="card-top">
+        <div class="avatar">${ini}</div>
+        <div class="card-info">
+          <div class="card-name ${!a.name ? 'unnamed' : ''}">${a.name || (a.agency ? '(no name)' : 'Unknown')}</div>
+          ${a.agency ? `<div class="card-agency">${a.agency}</div>` : ''}
+        </div>
+        ${waBtn}
+      </div>
+      ${coverageHtml}
+      <div class="card-footer">
+        <div class="card-notes">${a.notes || a.samba?.notes || ''}</div>
+        ${pipeline === 'kaya' && lc > 0 ? `<div class="listed-count">${lc} listed</div>` : ''}
+        ${pipeline === 'samba' && sambaStatus === 'Active' ? `<div class="listed-count" style="background:var(--samba-light);color:var(--samba)">Active</div>` : ''}
+        ${activityBadge(a)}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+
+function activityBadge(a) {
+  const tier = a.activity_tier || 'Inactive';
+  const cfg = {
+    'High':     { bg:'#e3f5ee', text:'#1a6848', label:'High activity' },
+    'Medium':   { bg:'#fdf4e3', text:'#8a6010', label:'Medium' },
+    'Low':      { bg:'#f0eee8', text:'#9a9488', label:'Low' },
+    'Inactive': { bg:'#f5eef8', text:'#9a78b4', label:'No response' },
+  };
+  const c = cfg[tier] || cfg['Inactive'];
+  if (tier === 'Medium' || tier === 'Low' || tier === 'Inactive') return '';
+  return `<span class="listed-count" style="background:${c.bg};color:${c.text}">${c.label}</span>`;
+}
+
+function render() {
+  renderSummaryBar();
+  renderProjBar();
+  renderCards();
+}
+
+function toggleStatusFilter(s) {
+  activeStatusFilter = activeStatusFilter === s ? '' : s;
+  render();
+}
+
+function setProjFilter(p) {
+  activeProjFilter = p;
+  render();
+}
+
+function setView(v) {
+  viewMode = v;
+  document.getElementById('cardGrid').classList.toggle('list-mode', v === 'list');
+  document.getElementById('gridBtn').classList.toggle('active', v === 'grid');
+  document.getElementById('listBtn').classList.toggle('active', v === 'list');
+}
+
+// DRAWER
+function openDrawer(id) {
+  editingId = id;
+  const a = agents.find(x => x.id === id);
+  if (!a) return;
+
+  document.getElementById('drawerAvatar').textContent = initials(a.name, a.agency);
+  document.getElementById('drawerName').textContent = a.name || a.agency || 'Agent';
+  document.getElementById('drawerAgency').textContent = a.agency || '';
+
+  const waNum = getWaNum(a);
+  const waUrl = waNum ? buildWaUrl(waNum) : '';
+  const kayaMsg = KAYA_MSG(a.name);
+  const sambaMsg = SAMBA_MSG(a.name);
+  const kayaMsgUrl = waUrl ? waUrl + '?text=' + encodeURIComponent(kayaMsg) : '';
+  const sambaMsgUrl = waUrl ? waUrl + '?text=' + encodeURIComponent(sambaMsg) : '';
+
+  const projRows = KAYA_PROJECTS.map(p => {
+    const proj = a.projects[p] || { status: 'Not contacted', url: '' };
+    const isP = PERSONAL.includes(p);
+    const opts = KAYA_STATUSES.map(s => `<option value="${s}" ${s===proj.status?'selected':''}>${s}</option>`).join('');
+    const k = p.replace(/ /g,'_');
+    return `<div class="proj-table-row">
+      <div class="proj-table-name">${p}${isP ? ' <span class="personal-badge">personal</span>' : ''}</div>
+      <div class="proj-table-status"><select id="ps_${k}">${opts}</select></div>
+      <div class="proj-table-link" onclick="toggleUrlRow('${k}')">✎</div>
+    </div>
+    <div class="url-row" id="ur_${k}">
+      <div class="field-label" style="margin-bottom:4px">Listing URL</div>
+      <input class="field-input" type="text" id="pu_${k}" value="${proj.url && proj.url !== 'nan' ? proj.url : ''}" placeholder="https://" style="font-size:12px">
+    </div>`;
+  }).join('');
+
+  const sambaOpts = SAMBA_STATUSES.map(s => `<option value="${s}" ${s===(a.samba?.status||'Not contacted')?'selected':''}>${s}</option>`).join('');
+
+  document.getElementById('drawerBody').innerHTML = `
+    <div style="margin-bottom:16px">
+      <div class="section-label">Agent info</div>
+      <div class="form-grid">
+        <div><div class="field-label">Name</div><input class="field-input" type="text" id="df_name" value="${a.name||''}"></div>
+        <div><div class="field-label">Agency</div><input class="field-input" type="text" id="df_agency" value="${a.agency||''}"></div>
+        <div><div class="field-label">WhatsApp number</div><input class="field-input" type="text" id="df_wa" value="${waNum}" placeholder="628..."></div>
+        <div><div class="field-label">Alternate contact</div><input class="field-input" type="text" id="df_alt" value="${a.alt_contact||''}"></div>
+        <div class="form-full"><div class="field-label">General notes</div><textarea class="field-textarea" id="df_notes">${a.notes||''}</textarea></div>
+      </div>
+    </div>
+
+    <div class="pipeline-section kaya-section" style="margin-bottom:14px">
+      <div class="pipeline-section-title kaya">
+        <span class="pipeline-dot" style="background:var(--kaya)"></span>
+        KAYA Sales pipeline
+      </div>
+      <div class="proj-table" style="margin-bottom:12px">${projRows}</div>
+      <div class="wa-section">
+        <div class="section-label" style="margin-bottom:6px">KAYA outreach message</div>
+        <div class="wa-msg-preview" id="kayaMsgPreview">${kayaMsg}</div>
+        <a class="wa-open-btn ${!waUrl?'disabled':''}" href="${kayaMsgUrl||'#'}" target="_blank" ${!waUrl?'onclick="return false"':''}>Open in WhatsApp</a>
+      </div>
+    </div>
+
+    <div class="pipeline-section samba-section">
+      <div class="pipeline-section-title samba">
+        <span class="pipeline-dot" style="background:var(--samba)"></span>
+        Samba Rentals pipeline
+      </div>
+      <div class="field-label">Rental status</div>
+      <select class="samba-status-select" id="df_samba_status">${sambaOpts}</select>
+      <div class="field-label">Samba notes</div>
+      <textarea class="field-textarea" id="df_samba_notes" style="margin-bottom:12px">${a.samba?.notes||''}</textarea>
+      <div class="wa-section">
+        <div class="section-label" style="margin-bottom:6px">Samba outreach message</div>
+        <div class="wa-msg-preview" id="sambaMsgPreview">${sambaMsg}</div>
+        <a class="wa-open-btn ${!waUrl?'disabled':''}" href="${sambaMsgUrl||'#'}" target="_blank" ${!waUrl?'onclick="return false"':''} style="background:var(--samba)">Open in WhatsApp</a>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('df_name').addEventListener('input', function() {
+    document.getElementById('kayaMsgPreview').textContent = KAYA_MSG(this.value);
+    document.getElementById('sambaMsgPreview').textContent = SAMBA_MSG(this.value);
+  });
+
+  document.getElementById('overlay').classList.add('open');
+}
+
+function toggleUrlRow(k) {
+  document.getElementById('ur_' + k)?.classList.toggle('open');
+}
+
+function closeDrawer() { document.getElementById('overlay').classList.remove('open'); editingId = null; }
+function closeOverlay(e) { if (e.target === document.getElementById('overlay')) closeDrawer(); }
+
+function saveDrawer() {
+  if (!editingId) return;
+  const a = agents.find(x => x.id === editingId);
+  if (!a) return;
+  a.name = document.getElementById('df_name').value.trim();
+  a.agency = document.getElementById('df_agency').value.trim();
+  const waNum = document.getElementById('df_wa').value.replace(/\D/g,'');
+  a.wa_num = waNum; a.wa_url = waNum ? buildWaUrl(waNum) : '';
+  a.alt_contact = document.getElementById('df_alt').value.trim();
+  a.notes = document.getElementById('df_notes').value.trim();
+  if (!a.samba) a.samba = { status: 'Not contacted', notes: '' };
+  a.samba.status = document.getElementById('df_samba_status').value;
+  a.samba.notes = document.getElementById('df_samba_notes').value.trim();
+  KAYA_PROJECTS.forEach(p => {
+    const k = p.replace(/ /g,'_');
+    const se = document.getElementById('ps_' + k);
+    const ue = document.getElementById('pu_' + k);
+    if (se) a.projects[p].status = se.value;
+    if (ue) a.projects[p].url = ue.value.trim();
+  });
+  saveAgents(); closeDrawer(); render();
+}
+
+function openAddModal() {
+  const newId = Math.max(0, ...agents.map(x => x.id)) + 1;
+  agents.push({ id: newId, name: '', agency: '', wa_url: '', wa_num: '', alt_contact: '', notes: '',
+    projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
+    samba: { status: 'Not contacted', notes: '' }
+  });
+  saveAgents(); openDrawer(newId);
+}
+
+// QUICK ADD
+function qaValidate() {
+  const wa = document.getElementById('qaWa').value.replace(/\D/g,'');
+  document.getElementById('qaBtn').disabled = wa.length < 8;
+}
+function qaKeydown(e) { if (e.key === 'Enter') quickAdd(); }
+function quickAdd() {
+  const waRaw = document.getElementById('qaWa').value.replace(/\D/g,'');
+  if (waRaw.length < 8) return;
+  const name = document.getElementById('qaName').value.trim();
+  const agency = document.getElementById('qaAgency').value.trim();
+  const exists = agents.find(a => a.wa_num === waRaw);
+  const fb = document.getElementById('qaFeedback');
+  if (exists) {
+    fb.textContent = 'Already in CRM'; fb.style.color = 'var(--ink3)';
+    fb.classList.add('show'); setTimeout(() => fb.classList.remove('show'), 2000); return;
+  }
+  const newId = Math.max(0, ...agents.map(x => x.id)) + 1;
+  agents.push({ id: newId, name, agency, wa_url: 'https://wa.me/'+waRaw, wa_num: waRaw, alt_contact: '', notes: '',
+    projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
+    samba: { status: 'Not contacted', notes: '' }
+  });
+  saveAgents(); render();
+  document.getElementById('qaWa').value = '';
+  document.getElementById('qaName').value = '';
+  document.getElementById('qaAgency').value = '';
+  document.getElementById('qaBtn').disabled = true;
+  fb.textContent = 'Added!'; fb.style.color = 'var(--accent-mid)';
+  fb.classList.add('show'); setTimeout(() => fb.classList.remove('show'), 2000);
+  document.getElementById('qaWa').focus();
+}
+
+// DISCOVER
+function openDiscoverPanel() {
+  const isSamba = pipeline === 'samba';
+  document.getElementById('discoverTitle').textContent = isSamba ? 'Discover rental agents' : 'Discover sales agents';
+  document.getElementById('discoverRunBtn').className = 'discover-run-btn' + (isSamba ? ' samba' : '');
+  document.getElementById('discoverSpinner').className = 'spinner' + (isSamba ? ' samba' : '');
+  document.querySelectorAll('.area-card.selected').forEach(c => { if (isSamba) c.classList.add('samba'); else c.classList.remove('samba'); });
+  document.getElementById('discoverImportBtn').className = 'discover-import-btn' + (isSamba ? ' samba' : '');
+  document.getElementById('discoverOverlay').classList.add('open');
+}
+function closeDiscoverPanel() { document.getElementById('discoverOverlay').classList.remove('open'); }
+function closeDiscoverOutside(e) { if (e.target === document.getElementById('discoverOverlay')) closeDiscoverPanel(); }
+
+function toggleArea(area) {
+  if (selectedAreas.has(area)) { if (selectedAreas.size > 1) selectedAreas.delete(area); }
+  else selectedAreas.add(area);
+  document.getElementById('area-canggu').classList.toggle('selected', selectedAreas.has('canggu'));
+  document.getElementById('area-uluwatu').classList.toggle('selected', selectedAreas.has('uluwatu'));
+}
+
+async function runDiscover() {
+  const btn = document.getElementById('discoverRunBtn');
+  const status = document.getElementById('discoverStatus');
+  const statusText = document.getElementById('discoverStatusText');
+  const resultsDiv = document.getElementById('discoverResults');
+  const footer = document.getElementById('discoverFooter');
+
+  btn.disabled = true; btn.textContent = 'Searching...';
+  status.classList.add('show'); resultsDiv.innerHTML = '';
+  footer.style.display = 'none'; discoverResults = []; selectedResults = new Set();
+
+  let queries = [];
+  selectedAreas.forEach(area => queries = queries.concat(AREA_QUERIES[area]));
+  statusText.textContent = 'Starting Apify scraper...';
+
+  try {
+    const startRes = await fetch(
+      'https://api.apify.com/v2/acts/' + APIFY_ACTOR + '/runs?token=' + APIFY_TOKEN,
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ searchStringsArray: queries, maxCrawledPlacesPerSearch: 20, language: 'en', countryCode: 'id' }) }
+    );
+    if (!startRes.ok) throw new Error('Failed to start scraper: ' + startRes.status);
+    const runId = (await startRes.json()).data.id;
+    statusText.textContent = 'Scraping Google Maps... this takes 2-3 minutes';
+
+    let done = false, attempts = 0;
+    while (!done && attempts < 60) {
+      await new Promise(r => setTimeout(r, 5000)); attempts++;
+      const poll = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + APIFY_TOKEN)).json();
+      statusText.textContent = 'Scraping Google Maps... (' + (attempts * 5) + 's)';
+      if (poll.data.status === 'SUCCEEDED') done = true;
+      else if (['FAILED','ABORTED'].includes(poll.data.status)) throw new Error('Scraper failed');
+    }
+    if (!done) throw new Error('Timed out');
+
+    statusText.textContent = 'Processing results...';
+    const items = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?token=' + APIFY_TOKEN + '&limit=400')).json();
+
+    const seen = new Set();
+    const existingPhones = new Set(agents.map(a => a.wa_num).filter(Boolean));
+    const existingNames = new Set(agents.map(a => a.agency?.toLowerCase()).filter(Boolean));
+
+    discoverResults = [];
+    items.forEach(item => {
+      if (!item.title) return;
+      const name = item.title.trim();
+      const phone = item.phone ? item.phone.replace(/\D/g,'') : '';
+      const key = name.toLowerCase() + '|' + phone;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const isDuplicate = (phone && existingPhones.has(phone)) || existingNames.has(name.toLowerCase());
+      discoverResults.push({ name, phone, address: item.address || '', website: item.website || '',
+        rating: item.totalScore ? item.totalScore.toFixed(1) : '', reviews: item.reviewsCount || 0, isDuplicate });
+    });
+
+    discoverResults.sort((a, b) => a.isDuplicate !== b.isDuplicate ? (a.isDuplicate ? 1 : -1) : b.reviews - a.reviews);
+    const newCount = discoverResults.filter(r => !r.isDuplicate).length;
+    statusText.textContent = `Found ${discoverResults.length} agencies — ${newCount} new, ${discoverResults.length - newCount} already in CRM`;
+    discoverResults.forEach((r, i) => { if (!r.isDuplicate) selectedResults.add(i); });
+    renderDiscoverResults();
+    footer.style.display = 'flex';
+  } catch(err) {
+    statusText.textContent = 'Error: ' + err.message;
+    btn.disabled = false; btn.textContent = 'Try again'; return;
+  }
+  btn.disabled = false; btn.textContent = 'Search again';
+}
+
+function renderDiscoverResults() {
+  const isSamba = pipeline === 'samba';
+  document.getElementById('discoverResults').innerHTML = discoverResults.map((r, i) => {
+    const sel = selectedResults.has(i);
+    return `<div class="result-card ${sel?'selected':''} ${r.isDuplicate?'duplicate':''} ${isSamba&&sel?'samba':''}" onclick="toggleResult(${i})" id="result-${i}">
+      <div class="result-check">${sel?'✓':''}</div>
+      <div class="result-info">
+        <div class="result-name">${r.name}</div>
+        <div class="result-meta">${r.address||'Bali'}${r.rating?' · '+r.rating+' ★ ('+r.reviews+')':''}</div>
+        ${r.phone?`<div class="result-phone">+${r.phone}</div>`:`<div class="result-meta" style="color:var(--ink4);font-style:italic">No phone found</div>`}
+      </div>
+      ${r.isDuplicate?'<span class="result-dup-badge">Already in CRM</span>':''}
+    </div>`;
+  }).join('');
+  updateImportBtn();
+}
+
+function toggleResult(i) {
+  if (discoverResults[i]?.isDuplicate) return;
+  if (selectedResults.has(i)) selectedResults.delete(i); else selectedResults.add(i);
+  const card = document.getElementById('result-' + i);
+  const isSamba = pipeline === 'samba';
+  card.classList.toggle('selected', selectedResults.has(i));
+  if (isSamba) card.classList.toggle('samba', selectedResults.has(i));
+  card.querySelector('.result-check').textContent = selectedResults.has(i) ? '✓' : '';
+  updateImportBtn();
+}
+
+function selectAllResults() {
+  discoverResults.forEach((r, i) => { if (!r.isDuplicate) selectedResults.add(i); });
+  renderDiscoverResults();
+}
+
+function updateImportBtn() {
+  const count = selectedResults.size;
+  const btn = document.getElementById('discoverImportBtn');
+  btn.textContent = count > 0 ? `Import ${count} agent${count!==1?'s':''}` : 'Import selected';
+  btn.disabled = count === 0;
+}
+
+function importSelected() {
+  const existingPhones = new Set(agents.map(a => a.wa_num).filter(Boolean));
+  let nextId = Math.max(0, ...agents.map(x => x.id)) + 1;
+  let imported = 0;
+  selectedResults.forEach(i => {
+    const r = discoverResults[i];
+    if (!r || r.isDuplicate) return;
+    if (r.phone && existingPhones.has(r.phone)) return;
+    if (r.phone) existingPhones.add(r.phone);
+    agents.push({ id: nextId++, name: '', agency: r.name, wa_url: r.phone?'https://wa.me/'+r.phone:'',
+      wa_num: r.phone||'', alt_contact: '', notes: r.website?'Website: '+r.website:'',
+      projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
+      samba: { status: 'Not contacted', notes: '' }
+    });
+    imported++;
+  });
+  saveAgents(); closeDiscoverPanel(); render();
+  discoverResults = []; selectedResults = new Set();
+  document.getElementById('discoverResults').innerHTML = '';
+  document.getElementById('discoverFooter').style.display = 'none';
+  document.getElementById('discoverStatus').classList.remove('show');
+  document.getElementById('discoverRunBtn').disabled = false;
+  document.getElementById('discoverRunBtn').textContent = 'Search Google Maps';
+  if (imported > 0) alert(imported + ' new agents imported!');
+}
+
+render();
+</script>
+</body>
+</html>
