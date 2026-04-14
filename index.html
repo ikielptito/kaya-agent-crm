@@ -1688,10 +1688,7 @@ async function renderCampaignAgentTargeted() {
   updateCampaignProgress();
 
   if (campaignIndex >= campaignQueue.length) {
-    body.innerHTML = `<div class="campaign-done-card">
-      <h3>Campaign complete!</h3>
-      <p>You've worked through all ${campaignQueue.length} high-activity unlisted agents.</p>
-    </div>`;
+    body.innerHTML = '<div class="campaign-done-card"><h3>Campaign complete!</h3><p>You worked through all ' + campaignQueue.length + ' agents.</p></div>';
     return;
   }
 
@@ -1702,34 +1699,45 @@ async function renderCampaignAgentTargeted() {
   const msg = campaignGenerated[a.id] || '';
 
   const kayaSummary = KAYA_PROJECTS
-    .map(p => { const s = a.projects[p]?.status||'Not contacted'; return s !== 'Not contacted' ? p+': '+s : null; })
+    .map(function(p) { const s = a.projects[p] && a.projects[p].status || 'Not contacted'; return s !== 'Not contacted' ? p + ': ' + s : null; })
     .filter(Boolean).join(' | ') || 'No KAYA history';
 
-  body.innerHTML = '<div class="campaign-agent-card">' +
-    '<div class="campaign-agent-header">' +
-      '<div class="campaign-agent-avatar">' + ini + '</div>' +
-      '<div class="campaign-agent-info">' +
-        '<div class="campaign-agent-name">' + (a.name || a.agency || 'Unknown') + '</div>' +
-        '<div class="campaign-agent-meta">' + (a.agency||'') + (a.agency ? ' · ' : '') + kayaSummary + '</div>' +
-        '<div style="margin-top:4px"><span style="display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;background:' + (group.bg||'#f0f0f0') + ';color:' + (group.color||'#333') + '">' + (group.label||a.campaign_group||'') + '</span></div>' +
-      '</div>' +
-      '<button class="ai-gen-btn" id="campGenBtn" onclick="generateTargetedCampaignMsg(' + a.id + ')">' +
-        '<span class="ai-icon">✦</span> ' + (msg ? 'Regenerate' : 'Generate message') +
-      '</button>' +
-    '</div>' +
-    '<div class="campaign-agent-body">' +
-      (a.conversation_summary ? '<div style="font-size:11px;color:var(--ink3);font-style:italic;margin-bottom:8px;line-height:1.5;padding:8px;background:var(--sand);border-radius:6px">' + a.conversation_summary.slice(0,200) + '...</div>' : '') +
-      '<div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>' +
-      '<textarea class="campaign-msg-area" id="campMsgArea" placeholder="Click Generate message to have Claude write a tailored message for this agent...">' + msg + '</textarea>' +
-      '<div class="campaign-actions">' +
-        '<button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>' +
-        '<span style="flex:1"></span>' +
-        '<a class="campaign-send-btn ' + (!waNum ? 'disabled' : '') + '" id="campSendBtn"' +
-          ' href="' + (waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#') + '"' +
-          ' target="_blank" onclick="advanceCampaign()">Send & next →</a>' +
-      '</div>' +
-    '</div>' +
-    '</div>';
+  const agencyLine = (a.agency || '') + (a.agency && kayaSummary ? ' \u00b7 ' : '') + kayaSummary;
+  const groupBadge = group.label ? '<span style="display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;margin-top:4px;background:' + (group.bg || '#f0f0f0') + ';color:' + (group.color || '#333') + '">' + group.label + '</span>' : '';
+  const summaryHtml = a.conversation_summary ? '<div style="font-size:11px;color:var(--ink3);font-style:italic;margin-bottom:8px;line-height:1.5;padding:8px;background:var(--sand);border-radius:6px">' + a.conversation_summary.slice(0, 200) + '...</div>' : '';
+  const sendHref = waNum && msg ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#';
+  const sendClass = 'campaign-send-btn' + (!waNum ? ' disabled' : '');
+  const genLabel = msg ? '\u2736 Regenerate' : '\u2736 Generate message';
+
+  const card = document.createElement('div');
+  card.className = 'campaign-agent-card';
+  card.innerHTML = [
+    '<div class="campaign-agent-header">',
+      '<div class="campaign-agent-avatar">' + ini + '</div>',
+      '<div class="campaign-agent-info">',
+        '<div class="campaign-agent-name">' + (a.name || a.agency || 'Unknown') + '</div>',
+        '<div class="campaign-agent-meta">' + agencyLine + '</div>',
+        groupBadge,
+      '</div>',
+      '<button class="ai-gen-btn" id="campGenBtn" onclick="generateTargetedCampaignMsg(' + a.id + ')">' + genLabel + '</button>',
+    '</div>',
+    '<div class="campaign-agent-body">',
+      summaryHtml,
+      '<div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>',
+      '<textarea class="campaign-msg-area" id="campMsgArea"></textarea>',
+      '<div class="campaign-actions">',
+        '<button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip \u2192</button>',
+        '<span style="flex:1"></span>',
+        '<a class="' + sendClass + '" id="campSendBtn" href="' + sendHref + '" target="_blank" onclick="advanceCampaign()">Send &amp; next \u2192</a>',
+      '</div>',
+    '</div>'
+  ].join('');
+
+  body.innerHTML = '';
+  body.appendChild(card);
+
+  // Set textarea value safely
+  document.getElementById('campMsgArea').value = msg;
 
   if (!msg) {
     await generateTargetedCampaignMsg(a.id);
