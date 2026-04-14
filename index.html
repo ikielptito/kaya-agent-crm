@@ -1720,7 +1720,7 @@ async function renderCampaignAgentTargeted() {
     '<div class="campaign-agent-body">' +
       (a.conversation_summary ? '<div style="font-size:11px;color:var(--ink3);font-style:italic;margin-bottom:8px;line-height:1.5;padding:8px;background:var(--sand);border-radius:6px">' + a.conversation_summary.slice(0,200) + '...</div>' : '') +
       '<div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>' +
-      '<textarea class="campaign-msg-area" id="campMsgArea" placeholder="Click Generate message to have Claude write a tailored message based on this agent's history...">' + msg + '</textarea>' +
+      '<textarea class="campaign-msg-area" id="campMsgArea" placeholder="Click Generate message to have Claude write a tailored message for this agent...">' + msg + '</textarea>' +
       '<div class="campaign-actions">' +
         '<button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>' +
         '<span style="flex:1"></span>' +
