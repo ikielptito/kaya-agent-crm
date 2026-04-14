@@ -343,6 +343,54 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .wa-contact-btn:hover { background: #d4eddf; }
 .wa-contact-btn svg { width: 11px; height: 11px; }
 
+
+/* AI GENERATE BUTTON */
+.ai-gen-btn { height: 34px; padding: 0 12px; background: linear-gradient(135deg, #2d5a3d, #4a8a5e); border: none; border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; display: flex; align-items: center; gap: 5px; }
+.ai-gen-btn:hover { opacity: 0.88; }
+.ai-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-gen-btn .ai-icon { font-size: 13px; }
+.ai-gen-btn.samba { background: linear-gradient(135deg, #8b4513, #c4722a); }
+.ai-generating { font-size: 11px; color: var(--ink3); display: none; align-items: center; gap: 6px; margin-right: auto; }
+.ai-generating.show { display: flex; }
+
+/* CAMPAIGN PANEL */
+.campaign-overlay { display: none; position: fixed; inset: 0; background: rgba(26,24,20,0.45); z-index: 250; align-items: flex-start; justify-content: flex-end; backdrop-filter: blur(2px); }
+.campaign-overlay.open { display: flex; }
+.campaign-panel { background: white; width: 600px; max-width: 100vw; height: 100vh; overflow-y: auto; box-shadow: -8px 0 32px rgba(0,0,0,0.12); display: flex; flex-direction: column; }
+.campaign-header { padding: 18px 22px 14px; border-bottom: 1px solid var(--sand2); position: sticky; top: 0; background: white; z-index: 10; }
+.campaign-title { font-size: 15px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.campaign-sub { font-size: 12px; color: var(--ink3); }
+.campaign-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.campaign-bar { flex: 1; height: 4px; background: var(--sand2); border-radius: 2px; overflow: hidden; }
+.campaign-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s; }
+.campaign-bar-fill.samba { background: var(--samba); }
+.campaign-count { font-size: 11px; color: var(--ink3); white-space: nowrap; font-family: monospace; }
+
+.campaign-body { flex: 1; padding: 16px 22px; overflow-y: auto; }
+.campaign-agent-card { border: 1px solid var(--sand3); border-radius: var(--radius); overflow: hidden; margin-bottom: 16px; }
+.campaign-agent-header { padding: 12px 16px; background: var(--sand); display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--sand3); }
+.campaign-agent-avatar { width: 34px; height: 34px; border-radius: 50%; background: var(--sand2); display: flex; align-items: center; justify-content: center; font-family: Instrument Serif,serif; font-size: 13px; font-style: italic; color: var(--ink2); flex-shrink: 0; }
+.campaign-agent-info { flex: 1; min-width: 0; }
+.campaign-agent-name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.campaign-agent-meta { font-size: 11px; color: var(--ink3); margin-top: 1px; }
+.campaign-agent-body { padding: 14px 16px; }
+.campaign-msg-area { width: 100%; min-height: 130px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 10px 12px; font-family: Geist,sans-serif; font-size: 12px; color: var(--ink); line-height: 1.65; resize: vertical; outline: none; transition: border-color 0.12s; margin-bottom: 10px; }
+.campaign-msg-area:focus { background: white; border-color: var(--accent-mid); }
+.campaign-msg-area.samba:focus { border-color: var(--samba-mid); }
+.campaign-actions { display: flex; align-items: center; gap: 8px; }
+.campaign-skip-btn { height: 32px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; color: var(--ink3); cursor: pointer; }
+.campaign-skip-btn:hover { border-color: var(--ink3); color: var(--ink2); }
+.campaign-send-btn { height: 32px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.12s; }
+.campaign-send-btn:hover { opacity: 0.88; }
+.campaign-send-btn.disabled { background: var(--sand3); color: var(--ink3); pointer-events: none; }
+.campaign-done-card { text-align: center; padding: 60px 20px; color: var(--ink3); }
+.campaign-done-card h3 { font-size: 16px; color: var(--ink); margin-bottom: 8px; }
+
+/* Campaign button in header */
+.btn-campaign { height: 34px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: 7px; font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: var(--ink2); cursor: pointer; transition: all 0.12s; flex-shrink: 0; display: flex; align-items: center; gap: 5px; }
+.btn-campaign:hover { border-color: var(--accent-mid); color: var(--accent); }
+.btn-campaign.samba-mode:hover { border-color: var(--samba-mid); color: var(--samba); }
+
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--sand3); border-radius: 2px; }
@@ -365,6 +413,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <span class="search-icon">⌕</span>
       <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="render()">
     </div>
+    <button class="btn-campaign" id="campaignBtn" onclick="openCampaignPanel()">↗ Re-engagement campaign</button>
     <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
     <button class="btn-add" id="addBtn" onclick="openAddModal()">+ Add agent</button>
   </div>
@@ -402,6 +451,29 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div class="card-grid" id="cardGrid"></div>
 
 
+
+<!-- CAMPAIGN PANEL -->
+<div class="campaign-overlay" id="campaignOverlay" onclick="closeCampaignOutside(event)">
+  <div class="campaign-panel">
+    <div class="campaign-header">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between">
+        <div>
+          <div class="campaign-title" id="campaignTitle">Re-engagement campaign</div>
+          <div class="campaign-sub" id="campaignSub">Claude generates a personalised message for each agent based on their history</div>
+        </div>
+        <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
+      </div>
+      <div class="campaign-progress">
+        <div class="campaign-bar"><div class="campaign-bar-fill" id="campaignBarFill" style="width:0%"></div></div>
+        <div class="campaign-count" id="campaignCount">0 / 0</div>
+      </div>
+    </div>
+    <div class="campaign-body" id="campaignBody">
+      <div style="text-align:center;padding:40px;color:var(--ink3);font-size:13px">Loading agents...</div>
+    </div>
+  </div>
+</div>
+
 <!-- MESSAGE MODAL -->
 <div class="msg-overlay" id="msgOverlay" onclick="closeMsgOutside(event)">
   <div class="msg-modal">
@@ -417,6 +489,8 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <textarea class="msg-textarea" id="msgTextarea" rows="8"></textarea>
     </div>
     <div class="msg-modal-footer">
+      <button class="ai-gen-btn" id="aiGenBtn" onclick="generateMsgWithClaude()"><span class="ai-icon">✦</span> Generate with Claude</button>
+      <div class="ai-generating" id="aiGenerating"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Generating...</div>
       <button class="msg-cancel-btn" onclick="closeMsg()">Cancel</button>
       <a class="msg-send-btn" id="msgSendBtn" href="#" target="_blank" onclick="closeMsg()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
@@ -721,6 +795,7 @@ function setPipeline(p) {
   document.documentElement.style.setProperty('--accent-mid', isKaya ? '#4a8a5e' : '#c4722a');
 
   document.getElementById('discoverBtn').className = 'btn-discover' + (!isKaya ? ' samba-mode' : '');
+  document.getElementById('campaignBtn').className = 'btn-campaign' + (!isKaya ? ' samba-mode' : '');
   document.getElementById('addBtn').className = 'btn-add' + (!isKaya ? ' samba-mode' : '');
   document.getElementById('drawerSaveBtn').className = 'btn-primary' + (!isKaya ? ' samba' : '');
 
@@ -1384,6 +1459,359 @@ setTimeout(() => { const t = document.getElementById('msgTextarea'); if(t) t.add
 
 function closeMsg() { document.getElementById('msgOverlay').classList.remove('open'); msgAgentId = null; }
 function closeMsgOutside(e) { if (e.target === document.getElementById('msgOverlay')) closeMsg(); }
+
+
+
+// ── CLAUDE MESSAGE GENERATOR ─────────────────────────────────────────
+
+const PORTFOLIO_CONTEXT = `KAYA Developments portfolio (current):
+- Clay House | Cepaka | 1BR apartment | $80K promo | 30yr leasehold | 75% complete | July 2026 delivery | 3 units available
+- Tropicana Valley | Buduk/Pererenan | 1BR townhouse with private pool | from $125K | 27yr leasehold | move-in ready | 4 units available
+- Palem Kembar | Ungasan | 3BR villa with private pool | from $299K | Freehold | 85% complete, finishing resumed | 2 units available
+- Sabit House | Berawa | 1BR apartment | $150K | Freehold pre-construction | 9 units available
+- LaneHAUS | Pererenan | 1BR townhouse | Unit 1: 1.5B IDR / Unit 3: 1.3B IDR | 27yr leasehold | Ikiel's personal property, not a KAYA project
+Standard agent commission: 5%
+Listing materials available on request.
+
+Samba Realty portfolio: 14 villas and apartments across Canggu, Pererenan and Seminyak.
+Agent portal with live availability: https://sambarentals.vercel.app
+Rental commission: 10% per booking.`;
+
+function buildAgentContext(a) {
+  const kayaStatuses = KAYA_PROJECTS.map(p => {
+    const proj = a.projects[p] || {};
+    const status = proj.status || 'Not contacted';
+    const url = proj.url ? ' (listing: ' + proj.url + ')' : '';
+    return `  - ${p}: ${status}${url}`;
+  }).join('\n');
+
+  const sambaStatus = a.samba?.status || 'Not contacted';
+  const sambaNotes = a.samba?.notes || '';
+
+  return `Agent profile:
+Name: ${a.name || '(unknown)'}
+Agency: ${a.agency || '(independent)'}
+WhatsApp: +${a.wa_num || 'unknown'}
+Alternate contact: ${a.alt_contact || 'none'}
+General notes: ${a.notes || 'none'}
+
+KAYA Sales pipeline:
+${kayaStatuses}
+
+Samba Rentals pipeline:
+  Status: ${sambaStatus}
+  Notes: ${sambaNotes}
+
+Activity score: ${a.activity_score || 0} (${a.activity_tier || 'Unknown'})`;
+}
+
+async function callClaude(systemPrompt, userPrompt) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+  });
+  if (!res.ok) throw new Error('Claude API error: ' + res.status);
+  const data = await res.json();
+  return data.content?.[0]?.text || '';
+}
+
+async function generateMsgWithClaude() {
+  const a = agents.find(x => x.id === msgAgentId);
+  if (!a) return;
+
+  const btn = document.getElementById('aiGenBtn');
+  const generating = document.getElementById('aiGenerating');
+  btn.disabled = true;
+  generating.classList.add('show');
+
+  const isSamba = pipeline === 'samba';
+  const agentContext = buildAgentContext(a);
+  const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
+
+  const systemPrompt = `You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali. 
+
+${PORTFOLIO_CONTEXT}
+
+Tone rules:
+- Conversational and warm, never corporate or stiff
+- Short sentences, natural rhythm
+- No em dashes (use -- instead if needed)
+- No emojis
+- No excessive formality
+- Sound like a real person, not a marketing blast
+- Keep it concise -- WhatsApp messages should be scannable
+- Never mention that this message was AI-generated
+
+Write only the message text itself. No subject line, no preamble, no explanation.`;
+
+  const userPrompt = isSamba
+    ? `Write a WhatsApp message to this agent about Samba Realty rental opportunities.
+
+${agentContext}
+
+The message should:
+- Reference their current Samba status (${a.samba?.status || 'Not contacted'}) naturally
+- If not contacted before: introduce Samba Realty, mention 14 properties, 10% commission, include the portal link (sambarentals.vercel.app)
+- If contacted but no response: follow up warmly, re-mention the portal
+- If already active: check in, offer help, reference the portal
+- Feel personal, not mass-sent
+- Address them as ${firstName}`
+    : `Write a WhatsApp message to this agent about listing KAYA Developments projects.
+
+${agentContext}
+
+The message should:
+- Be a catch-up / re-engagement message acknowledging the history
+- Reference which projects they have or haven't listed yet based on the pipeline above
+- If they've listed some: thank them, offer updated materials, introduce unlisted projects
+- If they refused before due to construction: note that Clay House is now 75% complete and Palem Kembar is 85% with finishing resumed
+- If never contacted: introduce KAYA naturally, mention 5% commission
+- Mention all relevant projects that aren't yet listed
+- End with a simple question that's easy to reply to
+- Address them as ${firstName}`;
+
+  try {
+    const msg = await callClaude(systemPrompt, userPrompt);
+    document.getElementById('msgTextarea').value = msg.trim();
+    updateMsgSendBtn();
+  } catch(err) {
+    alert('Could not generate message: ' + err.message);
+  }
+
+  btn.disabled = false;
+  generating.classList.remove('show');
+}
+
+// ── CAMPAIGN PANEL ────────────────────────────────────────────────────
+
+let campaignQueue = [];
+let campaignIndex = 0;
+let campaignGenerated = {};
+
+function openCampaignPanel() {
+  const isSamba = pipeline === 'samba';
+  document.getElementById('campaignTitle').textContent = isSamba
+    ? 'Samba Rentals -- re-engagement campaign'
+    : 'KAYA Sales -- re-engagement campaign';
+
+  // Queue: all agents with a WA number, sorted by activity score desc
+  campaignQueue = agents
+    .filter(a => a.wa_num && (a.name || a.agency))
+    .sort((a, b) => (b.activity_score || 0) - (a.activity_score || 0));
+
+  campaignIndex = 0;
+  campaignGenerated = {};
+  updateCampaignProgress();
+  renderCampaignAgent();
+
+  const fill = document.getElementById('campaignBarFill');
+  if (isSamba) fill.classList.add('samba'); else fill.classList.remove('samba');
+
+  document.getElementById('campaignOverlay').classList.add('open');
+}
+
+function closeCampaignPanel() {
+  document.getElementById('campaignOverlay').classList.remove('open');
+}
+
+function closeCampaignOutside(e) {
+  if (e.target === document.getElementById('campaignOverlay')) closeCampaignPanel();
+}
+
+function updateCampaignProgress() {
+  const total = campaignQueue.length;
+  const done = campaignIndex;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  document.getElementById('campaignBarFill').style.width = pct + '%';
+  document.getElementById('campaignCount').textContent = done + ' / ' + total + ' agents';
+}
+
+async function renderCampaignAgent() {
+  const body = document.getElementById('campaignBody');
+
+  if (campaignIndex >= campaignQueue.length) {
+    body.innerHTML = `<div class="campaign-done-card">
+      <h3>Campaign complete!</h3>
+      <p>You've worked through all ${campaignQueue.length} agents.</p>
+    </div>`;
+    return;
+  }
+
+  const a = campaignQueue[campaignIndex];
+  const isSamba = pipeline === 'samba';
+  const waNum = getWaNum(a);
+  const ini = initials(a.name, a.agency);
+
+  // Status summary for this agent
+  const kayaSummary = KAYA_PROJECTS
+    .map(p => {
+      const s = a.projects[p]?.status || 'Not contacted';
+      if (s === 'Not contacted') return null;
+      return `${p}: ${s}`;
+    })
+    .filter(Boolean)
+    .join(' | ') || 'No KAYA history';
+
+  const sambaSummary = a.samba?.status || 'Not contacted';
+
+  // Get or generate message
+  let msg = campaignGenerated[a.id] || '';
+
+  body.innerHTML = `<div class="campaign-agent-card">
+    <div class="campaign-agent-header">
+      <div class="campaign-agent-avatar">${ini}</div>
+      <div class="campaign-agent-info">
+        <div class="campaign-agent-name">${a.name || a.agency || 'Unknown'}</div>
+        <div class="campaign-agent-meta">${a.agency || ''}${a.agency && (kayaSummary || sambaSummary) ? ' · ' : ''}${isSamba ? 'Samba: ' + sambaSummary : kayaSummary}</div>
+      </div>
+      <button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
+        <span class="ai-icon">✦</span> ${msg ? 'Regenerate' : 'Generate message'}
+      </button>
+    </div>
+    <div class="campaign-agent-body">
+      <div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>
+      <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="Click Generate message to have Claude write a personalised message for this agent...">${msg}</textarea>
+      <div class="campaign-actions">
+        <button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>
+        <span style="flex:1"></span>
+        ${a.notes ? `<span style="font-size:10px;color:var(--ink4);font-style:italic;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.notes}">${a.notes.slice(0,50)}${a.notes.length > 50 ? '...' : ''}</span>` : ''}
+        <a class="campaign-send-btn ${!waNum ? 'disabled' : ''}" id="campSendBtn"
+          href="${waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#'}"
+          target="_blank" onclick="advanceCampaign()">
+          Send & next →
+        </a>
+      </div>
+    </div>
+  </div>`;
+
+  // Auto-generate if no message yet
+  if (!msg) {
+    await generateCampaignMsg(a.id);
+  }
+}
+
+async function generateCampaignMsg(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+
+  const btn = document.getElementById('campGenBtn');
+  const generating = document.getElementById('campGenerating');
+  const area = document.getElementById('campMsgArea');
+  const sendBtn = document.getElementById('campSendBtn');
+
+  if (btn) btn.disabled = true;
+  if (generating) generating.classList.add('show');
+
+  const isSamba = pipeline === 'samba';
+  const agentContext = buildAgentContext(a);
+  const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
+
+  const systemPrompt = `You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali.
+
+${PORTFOLIO_CONTEXT}
+
+Tone rules:
+- Conversational and warm, never corporate or stiff
+- Short sentences, natural rhythm  
+- No em dashes (use -- instead if needed)
+- No emojis
+- Keep it concise and scannable
+- Sound like a real person
+- Never mention AI
+
+Write only the message text. No preamble or explanation.`;
+
+  const userPrompt = isSamba
+    ? `Write a WhatsApp re-engagement message to this rental agent about Samba Realty.
+
+${agentContext}
+
+Goals:
+- If Samba status is Not contacted: introduce Samba Realty, 14 properties, 10% commission, portal link (sambarentals.vercel.app)
+- If Contacted but no response: warm follow-up, re-share portal
+- If Responded/Active: check in, any clients looking?
+- Always include the portal: sambarentals.vercel.app
+- Address them as ${firstName}`
+    : `Write a WhatsApp re-engagement message to this property agent about KAYA Developments projects.
+
+${agentContext}
+
+This is a catch-all re-engagement message to get a current picture of the relationship.
+
+Goals:
+- Acknowledge the history naturally (if any)
+- If they haven't listed any projects: introduce KAYA, mention commission is 5%, ask which projects interest them
+- If they've listed some: acknowledge it, offer updated materials, introduce the ones they haven't listed
+- If they refused due to construction before: note Clay House is 75% complete (July delivery) and Palem Kembar is 85% complete with finishing resumed
+- End with one simple easy-to-answer question
+- Don't mention all 5 projects in one go -- keep it digestible
+- Address them as ${firstName}`;
+
+  try {
+    const msg = await callClaude(systemPrompt, userPrompt);
+    const cleaned = msg.trim();
+    campaignGenerated[agentId] = cleaned;
+    if (area) area.value = cleaned;
+    if (sendBtn) {
+      const waNum = getWaNum(a);
+      sendBtn.href = waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(cleaned) : '#';
+      sendBtn.classList.toggle('disabled', !waNum);
+    }
+  } catch(err) {
+    if (area) area.value = 'Error generating message. Please try again.';
+  }
+
+  if (btn) { btn.disabled = false; btn.innerHTML = '<span class="ai-icon">✦</span> Regenerate'; }
+  if (generating) generating.classList.remove('show');
+}
+
+// Update send link when user edits the textarea
+document.addEventListener('input', function(e) {
+  if (e.target.id === 'campMsgArea') {
+    const a = campaignQueue[campaignIndex];
+    if (!a) return;
+    const waNum = getWaNum(a);
+    const sendBtn = document.getElementById('campSendBtn');
+    if (sendBtn && waNum) {
+      sendBtn.href = buildWaUrl(waNum) + '?text=' + encodeURIComponent(e.target.value);
+    }
+    campaignGenerated[a.id] = e.target.value;
+  }
+});
+
+function skipCampaignAgent() {
+  campaignIndex++;
+  updateCampaignProgress();
+  renderCampaignAgent();
+}
+
+function advanceCampaign() {
+  // Mark agent as contacted if they were Not contacted
+  const a = campaignQueue[campaignIndex];
+  if (a) {
+    const isSamba = pipeline === 'samba';
+    if (isSamba && a.samba?.status === 'Not contacted') {
+      a.samba.status = 'Contacted';
+    } else {
+      KAYA_PROJECTS.forEach(p => {
+        if (a.projects[p]?.status === 'Not contacted') {
+          a.projects[p].status = 'Contacted';
+        }
+      });
+    }
+    saveAgents();
+    render();
+  }
+  campaignIndex++;
+  updateCampaignProgress();
+  setTimeout(() => renderCampaignAgent(), 300);
+}
 
 
 function openDiscoverPanel() {
