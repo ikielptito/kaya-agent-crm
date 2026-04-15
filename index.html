@@ -966,8 +966,13 @@ function activityBadge(a) {
     'Inactive': { bg:'#f5eef8', text:'#9a78b4', label:'No response' },
   };
   const c = cfg[tier] || cfg['Inactive'];
-  if (tier === 'Medium' || tier === 'Low' || tier === 'Inactive') return '';
-  return `<span class="listed-count" style="background:${c.bg};color:${c.text}">${c.label}</span>`;
+  const sentBadge = a.last_campaign_sent 
+    ? `<span class="listed-count" style="background:#e8f0f8;color:#185fa5">Sent ${a.last_campaign_sent}</span>` 
+    : '';
+  const actBadge = (tier === 'High') 
+    ? `<span class="listed-count" style="background:${c.bg};color:${c.text}">${c.label}</span>` 
+    : '';
+  return sentBadge + actBadge;
 }
 
 function render() {
@@ -2040,7 +2045,7 @@ Tone rules:
 - No emojis
 - Keep it concise and scannable
 - Sound like a real person
-- Never mention AI
+- Never mention AI${contextAddition}
 
 Write only the message text. No preamble or explanation.`;
 
@@ -2109,25 +2114,41 @@ function skipCampaignAgent() {
 }
 
 function advanceCampaign() {
-  // Mark agent as contacted if they were Not contacted
   const a = campaignQueue[campaignIndex];
   if (a) {
     const isSamba = pipeline === 'samba';
-    if (isSamba && a.samba?.status === 'Not contacted') {
-      a.samba.status = 'Contacted';
+    const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'2-digit'}).replace(/\//g,'/');
+
+    if (isSamba) {
+      if (a.samba?.status === 'Not contacted') a.samba.status = 'Contacted';
+      a.samba.last_contacted = today;
     } else {
+      // Mark all Not contacted projects as Contacted
+      let anyUpdated = false;
       KAYA_PROJECTS.forEach(p => {
         if (a.projects[p]?.status === 'Not contacted') {
           a.projects[p].status = 'Contacted';
+          anyUpdated = true;
         }
       });
+      // If all projects already have status, just record the contact date in notes
     }
+    // Record last contacted date and message sent in notes
+    const msg = document.getElementById('campMsgArea')?.value?.slice(0, 100) || '';
+    const sentNote = '[' + today + '] Campaign msg sent' + (msg ? ': "' + msg + '..."' : '');
+    a.notes = a.notes ? a.notes + '
+' + sentNote : sentNote;
+    a.last_campaign_sent = today;
+
     saveAgents();
     render();
   }
   campaignIndex++;
   updateCampaignProgress();
-  setTimeout(() => renderCampaignAgent(), 300);
+  // Use targeted render if in targeted campaign
+  const isTargeted = typeof renderCampaignAgentTargeted === 'function' 
+    && campaignQueue.some(x => x.campaign_group);
+  setTimeout(() => isTargeted ? renderCampaignAgentTargeted() : renderCampaignAgent(), 300);
 }
 
 
