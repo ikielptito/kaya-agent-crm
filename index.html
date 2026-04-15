@@ -2165,8 +2165,7 @@ function advanceCampaign() {
     // Record last contacted date and message sent in notes
     const msg = document.getElementById('campMsgArea')?.value?.slice(0, 100) || '';
     const sentNote = '[' + today + '] Campaign msg sent' + (msg ? ': "' + msg + '..."' : '');
-    a.notes = a.notes ? a.notes + '
-' + sentNote : sentNote;
+    a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
     a.last_campaign_sent = today;
 
     saveAgents();
