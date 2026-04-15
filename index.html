@@ -1704,6 +1704,9 @@ function openCampaignPanelTargeted() {
   campaignQueue = agents
     .filter(a => CAMPAIGN_TARGET_IDS.includes(a.id) && a.wa_num)
     .sort((a, b) => {
+      // Already sent goes to end
+      if (a.last_campaign_sent && !b.last_campaign_sent) return 1;
+      if (!a.last_campaign_sent && b.last_campaign_sent) return -1;
       // Sort by group priority: signed > agreed > responded > never pitched
       const groupOrder = { signed_no_listing:0, agreed_no_listing:1, responded_no_agreement:2, high_activity_never_pitched:3 };
       const ga = groupOrder[a.campaign_group] ?? 99;
@@ -1731,6 +1734,25 @@ async function renderCampaignAgentTargeted() {
   }
 
   const a = campaignQueue[campaignIndex];
+
+  // Show sent indicator if already contacted
+  if (a.last_campaign_sent) {
+    const sentCard = document.createElement('div');
+    sentCard.style.cssText = 'background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;';
+    sentCard.innerHTML = '<div style="font-size:12px;color:var(--ink3)">' +
+      '<span style="font-weight:600;color:var(--ink2)">' + (a.name || a.agency || 'Unknown') + '</span>' +
+      ' &middot; Message already sent on ' + a.last_campaign_sent +
+      '</div>' +
+      '<div style="display:flex;gap:8px">' +
+      '<button onclick="campaignIndex++;updateCampaignProgress();renderCampaignAgentTargeted()" ' +
+        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">Skip →</button>' +
+      '<button onclick="var ag=agents.find(function(x){return x.id===' + a.id + ';});delete ag.last_campaign_sent;saveAgents();renderCampaignAgentTargeted();" ' +
+        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3)">Send again</button>' +
+      '</div>';
+    body.innerHTML = '';
+    body.appendChild(sentCard);
+    return;
+  }
   const waNum = getWaNum(a);
   const ini = initials(a.name, a.agency);
   const group = CAMPAIGN_GROUPS[a.campaign_group] || {};
@@ -1935,7 +1957,12 @@ function openCampaignPanel() {
   // Queue: all agents with a WA number, sorted by activity score desc
   campaignQueue = agents
     .filter(a => a.wa_num && (a.name || a.agency))
-    .sort((a, b) => (b.activity_score || 0) - (a.activity_score || 0));
+    .sort((a, b) => {
+      // Already sent agents go to the end
+      if (a.last_campaign_sent && !b.last_campaign_sent) return 1;
+      if (!a.last_campaign_sent && b.last_campaign_sent) return -1;
+      return (b.activity_score || 0) - (a.activity_score || 0);
+    });
 
   campaignIndex = 0;
   campaignGenerated = {};
@@ -1961,7 +1988,9 @@ function updateCampaignProgress() {
   const done = campaignIndex;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   document.getElementById('campaignBarFill').style.width = pct + '%';
-  document.getElementById('campaignCount').textContent = done + ' / ' + total + ' agents';
+  const sentCount = campaignQueue.filter(a => a.last_campaign_sent).length;
+  const label = sentCount > 0 ? done + ' / ' + total + ' agents (' + sentCount + ' already sent)' : done + ' / ' + total + ' agents';
+  document.getElementById('campaignCount').textContent = label;
 }
 
 async function renderCampaignAgent() {
@@ -1976,6 +2005,30 @@ async function renderCampaignAgent() {
   }
 
   const a = campaignQueue[campaignIndex];
+
+  // Skip agents already sent to in this campaign session
+  if (a.last_campaign_sent) {
+    const sentCard = document.createElement('div');
+    sentCard.style.cssText = 'background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;';
+    sentCard.innerHTML = `<div style="font-size:12px;color:var(--ink3)">
+        <span style="font-weight:600;color:var(--ink2)">${a.name || a.agency || 'Unknown'}</span>
+        &nbsp;&middot;&nbsp;Message already sent on ${a.last_campaign_sent}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button onclick="campaignIndex++;updateCampaignProgress();renderCampaignAgent()" 
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">
+          Skip →
+        </button>
+        <button onclick="delete agents.find(x=>x.id===${a.id}).last_campaign_sent;saveAgents();renderCampaignAgent()"
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3)">
+          Send again
+        </button>
+      </div>`;
+    body.innerHTML = '';
+    body.appendChild(sentCard);
+    updateCampaignProgress();
+    return;
+  }
   const isSamba = pipeline === 'samba';
   const waNum = getWaNum(a);
   const ini = initials(a.name, a.agency);
