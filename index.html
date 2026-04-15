@@ -464,7 +464,11 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         </div>
         <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
       </div>
-      <div class="campaign-progress">
+      <div style="margin-top:12px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">ADDITIONAL CONTEXT FOR CLAUDE</div>
+        <textarea id="campaignContext" placeholder="Optional: give Claude extra context or instructions for all messages in this campaign. E.g. 'Focus on Palem Kembar -- we just resumed construction' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:white;border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+      </div>
+      <div class="campaign-progress" style="margin-top:10px">
         <div class="campaign-bar"><div class="campaign-bar-fill" id="campaignBarFill" style="width:0%"></div></div>
         <div class="campaign-count" id="campaignCount">0 / 0</div>
       </div>
@@ -1704,7 +1708,21 @@ async function renderCampaignAgentTargeted() {
 
   const agencyLine = (a.agency || '') + (a.agency && kayaSummary ? ' \u00b7 ' : '') + kayaSummary;
   const groupBadge = group.label ? '<span style="display:inline-block;font-size:10px;font-weight:500;padding:2px 8px;border-radius:10px;margin-top:4px;background:' + (group.bg || '#f0f0f0') + ';color:' + (group.color || '#333') + '">' + group.label + '</span>' : '';
-  const summaryHtml = a.conversation_summary ? '<div style="font-size:11px;color:var(--ink3);font-style:italic;margin-bottom:8px;line-height:1.5;padding:8px;background:var(--sand);border-radius:6px">' + a.conversation_summary.slice(0, 200) + '...</div>' : '';
+  const historyMeta = a.conversation_history?.total_messages
+    ? `<span style="font-weight:400;color:var(--ink4);font-size:10px">${a.conversation_history.total_messages} msgs · ${a.conversation_history.first_contact || ''} → ${a.conversation_history.last_contact || ''}</span>`
+    : '';
+  const recommendedAction = a.conversation_history?.recommended_action
+    ? `<div style="border-top:1px solid var(--sand3);padding-top:7px;margin-top:7px;color:var(--accent);font-size:11px;font-weight:500">→ ${a.conversation_history.recommended_action}</div>`
+    : '';
+  const summaryHtml = (a.conversation_summary || a.conversation_history?.kaya_notes || a.notes)
+    ? `<div style="margin-bottom:12px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between"><span>CONVERSATION HISTORY</span>${historyMeta}</div>
+        <div style="background:var(--sand);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.6">
+          ${a.conversation_summary ? a.conversation_summary.slice(0, 300) + (a.conversation_summary.length > 300 ? '...' : '') : (a.conversation_history?.kaya_notes || a.notes || '').slice(0, 200)}
+          ${recommendedAction}
+        </div>
+      </div>`
+    : '';
   const sendHref = waNum && msg ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#';
   const sendClass = 'campaign-send-btn' + (!waNum ? ' disabled' : '');
   const genLabel = msg ? '\u2736 Regenerate' : '\u2736 Generate message';
@@ -1760,6 +1778,12 @@ async function generateTargetedCampaignMsg(agentId) {
   const agentContext = buildAgentContext(a);
   const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
 
+  const extraContext = document.getElementById('campaignContext')?.value?.trim() || '';
+  const contextAddition = extraContext ? `
+
+ADDITIONAL INSTRUCTIONS FROM IKIEL:
+${extraContext}` : '';
+
   const systemPrompt = `You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali.
 
 ${PORTFOLIO_CONTEXT}
@@ -1771,7 +1795,7 @@ Tone rules:
 - No emojis
 - Concise and scannable
 - Sound like a real person
-- Never mention AI
+- Never mention AI${contextAddition}
 
 ${group.systemAddition || ''}
 
@@ -1886,12 +1910,24 @@ async function renderCampaignAgent() {
       </button>
     </div>
     <div class="campaign-agent-body">
+      ${a.conversation_summary || a.conversation_history?.kaya_notes || a.notes ? `
+      <div style="margin-bottom:12px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
+          <span>CONVERSATION HISTORY</span>
+          ${a.conversation_history?.total_messages ? `<span style="font-weight:400;color:var(--ink4)">${a.conversation_history.total_messages} messages · ${a.conversation_history.first_contact || ''} → ${a.conversation_history.last_contact || ''}</span>` : ''}
+        </div>
+        <div style="background:var(--sand);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.6">
+          ${a.conversation_summary ? `<div style="margin-bottom:${a.conversation_history?.recommended_action ? '8px' : '0'}">${a.conversation_summary.slice(0, 300)}${a.conversation_summary.length > 300 ? '...' : ''}</div>` : ''}
+          ${a.conversation_history?.kaya_notes && !a.conversation_summary ? `<div style="margin-bottom:${a.conversation_history?.recommended_action ? '8px' : '0'}">${a.conversation_history.kaya_notes}</div>` : ''}
+          ${a.conversation_history?.recommended_action ? `<div style="border-top:1px solid var(--sand3);padding-top:7px;margin-top:7px;color:var(--accent);font-weight:500">→ ${a.conversation_history.recommended_action}</div>` : ''}
+          ${!a.conversation_summary && !a.conversation_history?.kaya_notes && a.notes ? `<div style="color:var(--ink3);font-style:italic">${a.notes.slice(0,200)}</div>` : ''}
+        </div>
+      </div>` : ''}
       <div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>
       <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="Click Generate message to have Claude write a personalised message for this agent...">${msg}</textarea>
       <div class="campaign-actions">
         <button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>
         <span style="flex:1"></span>
-        ${a.notes ? `<span style="font-size:10px;color:var(--ink4);font-style:italic;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.notes}">${a.notes.slice(0,50)}${a.notes.length > 50 ? '...' : ''}</span>` : ''}
         <a class="campaign-send-btn ${!waNum ? 'disabled' : ''}" id="campSendBtn"
           href="${waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#'}"
           target="_blank" onclick="advanceCampaign()">
@@ -1922,6 +1958,9 @@ async function generateCampaignMsg(agentId) {
   const isSamba = pipeline === 'samba';
   const agentContext = buildAgentContext(a);
   const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
+
+  const extraContext = document.getElementById('campaignContext')?.value?.trim() || '';
+  const contextAddition = extraContext ? `\n\nADDITIONAL INSTRUCTIONS FROM IKIEL:\n${extraContext}` : '';
 
   const systemPrompt = `You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali.
 
