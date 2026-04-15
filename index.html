@@ -1714,13 +1714,21 @@ async function renderCampaignAgentTargeted() {
   const recommendedAction = a.conversation_history?.recommended_action
     ? `<div style="border-top:1px solid var(--sand3);padding-top:7px;margin-top:7px;color:var(--accent);font-size:11px;font-weight:500">→ ${a.conversation_history.recommended_action}</div>`
     : '';
-  const summaryHtml = (a.conversation_summary || a.conversation_history?.kaya_notes || a.notes)
+  const fullHistoryText = a.conversation_summary || a.conversation_history?.kaya_notes || a.notes || '';
+  const summaryHtml = fullHistoryText
     ? `<div style="margin-bottom:12px">
-        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between"><span>CONVERSATION HISTORY</span>${historyMeta}</div>
-        <div style="background:var(--sand);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.6">
-          ${a.conversation_summary ? a.conversation_summary.slice(0, 300) + (a.conversation_summary.length > 300 ? '...' : '') : (a.conversation_history?.kaya_notes || a.notes || '').slice(0, 200)}
+        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
+          <span>CONVERSATION HISTORY</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${historyMeta}
+            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
+          </div>
+        </div>
+        <div style="background:var(--sand);border-radius:6px;max-height:180px;overflow-y:auto;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7" id="campHistoryBody">
+          ${fullHistoryText}
           ${recommendedAction}
         </div>
+        <div id="campAiSummary" style="display:none;margin-top:8px;background:var(--kaya-light);border-radius:6px;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7;border:1px solid var(--kaya-mid)"></div>
       </div>`
     : '';
   const sendHref = waNum && msg ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#';
@@ -1829,6 +1837,61 @@ Address them as ${firstName}.`;
 }
 
 
+
+async function summariseConversation(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+
+  const btn = document.getElementById('campSumBtn');
+  const summaryDiv = document.getElementById('campAiSummary');
+  if (!btn || !summaryDiv) return;
+
+  btn.textContent = '...';
+  btn.disabled = true;
+  summaryDiv.style.display = 'none';
+
+  const history = a.conversation_summary || a.conversation_history?.kaya_notes || a.notes || '';
+  if (!history) {
+    summaryDiv.innerHTML = 'No conversation history available to summarise.';
+    summaryDiv.style.display = 'block';
+    btn.textContent = '✦ AI summary';
+    btn.disabled = false;
+    return;
+  }
+
+  const name = a.name ? a.name.split(' ')[0] : (a.agency || 'this agent');
+
+  try {
+    const result = await callClaude(
+      `You are summarising an agent relationship for Ikiel at KAYA Developments in Bali.
+
+${PORTFOLIO_CONTEXT}
+
+Give a crisp, practical summary of the relationship. Cover:
+- How responsive and active this agent is
+- Which KAYA projects have been discussed or listed
+- Any key objections, agreements, or pending actions
+- What the most important next step is
+
+Keep it under 100 words. Plain text, no bullet points, no bold.`,
+      `Agent: ${a.name || a.agency || 'Unknown'}
+
+History:
+${history}
+
+Notes: ${a.notes || 'none'}`
+    );
+    summaryDiv.innerHTML = result.trim();
+    summaryDiv.style.display = 'block';
+  } catch(err) {
+    summaryDiv.innerHTML = 'Error: ' + err.message;
+    summaryDiv.style.display = 'block';
+  }
+
+  btn.textContent = '✦ AI summary';
+  btn.disabled = false;
+}
+
 function openCampaignPanel() {
   const isSamba = pipeline === 'samba';
   document.getElementById('campaignTitle').textContent = isSamba
@@ -1910,18 +1973,22 @@ async function renderCampaignAgent() {
       </button>
     </div>
     <div class="campaign-agent-body">
-      ${a.conversation_summary || a.conversation_history?.kaya_notes || a.notes ? `
+      ${(a.conversation_summary || a.conversation_history?.kaya_notes || a.notes) ? `
       <div style="margin-bottom:12px">
         <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
           <span>CONVERSATION HISTORY</span>
-          ${a.conversation_history?.total_messages ? `<span style="font-weight:400;color:var(--ink4)">${a.conversation_history.total_messages} messages · ${a.conversation_history.first_contact || ''} → ${a.conversation_history.last_contact || ''}</span>` : ''}
+          <div style="display:flex;align-items:center;gap:8px">
+            ${a.conversation_history?.total_messages ? `<span style="font-weight:400;color:var(--ink4)">${a.conversation_history.total_messages} msgs · ${a.conversation_history.first_contact || ''} → ${a.conversation_history.last_contact || ''}</span>` : ''}
+            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
+          </div>
         </div>
-        <div style="background:var(--sand);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.6">
-          ${a.conversation_summary ? `<div style="margin-bottom:${a.conversation_history?.recommended_action ? '8px' : '0'}">${a.conversation_summary.slice(0, 300)}${a.conversation_summary.length > 300 ? '...' : ''}</div>` : ''}
-          ${a.conversation_history?.kaya_notes && !a.conversation_summary ? `<div style="margin-bottom:${a.conversation_history?.recommended_action ? '8px' : '0'}">${a.conversation_history.kaya_notes}</div>` : ''}
+        <div style="background:var(--sand);border-radius:var(--radius-sm);max-height:180px;overflow-y:auto;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7" id="campHistoryBody">
+          ${a.conversation_summary ? a.conversation_summary : ''}
+          ${a.conversation_history?.kaya_notes && !a.conversation_summary ? a.conversation_history.kaya_notes : ''}
+          ${!a.conversation_summary && !a.conversation_history?.kaya_notes && a.notes ? `<span style="color:var(--ink3);font-style:italic">${a.notes}</span>` : ''}
           ${a.conversation_history?.recommended_action ? `<div style="border-top:1px solid var(--sand3);padding-top:7px;margin-top:7px;color:var(--accent);font-weight:500">→ ${a.conversation_history.recommended_action}</div>` : ''}
-          ${!a.conversation_summary && !a.conversation_history?.kaya_notes && a.notes ? `<div style="color:var(--ink3);font-style:italic">${a.notes.slice(0,200)}</div>` : ''}
         </div>
+        <div id="campAiSummary" style="display:none;margin-top:8px;background:var(--kaya-light);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7;border:1px solid var(--kaya-mid)"></div>
       </div>` : ''}
       <div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>
       <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="Click Generate message to have Claude write a personalised message for this agent...">${msg}</textarea>
