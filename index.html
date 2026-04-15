@@ -1527,11 +1527,23 @@ function buildAgentContext(a) {
   const sambaStatus = a.samba?.status || 'Not contacted';
   const sambaNotes = a.samba?.notes || '';
 
+  // Include conversation history and recommended action -- these are critical context
+  const historySection = a.conversation_summary
+    ? `\n\nCONVERSATION HISTORY (${a.conversation_history?.total_messages || 0} messages, ${a.conversation_history?.first_contact || ''} to ${a.conversation_history?.last_contact || ''}):\n${a.conversation_summary}`
+    : '';
+
+  const actionSection = a.conversation_history?.recommended_action
+    ? `\n\nRECOMMENDED NEXT ACTION (based on conversation history):\n${a.conversation_history.recommended_action}`
+    : '';
+
+  const kayaNotesSection = a.conversation_history?.kaya_notes && !a.conversation_summary
+    ? `\n\nKAYA CONVERSATION NOTES:\n${a.conversation_history.kaya_notes}`
+    : '';
+
   return `Agent profile:
 Name: ${a.name || '(unknown)'}
 Agency: ${a.agency || '(independent)'}
 WhatsApp: +${a.wa_num || 'unknown'}
-Alternate contact: ${a.alt_contact || 'none'}
 General notes: ${a.notes || 'none'}
 
 KAYA Sales pipeline:
@@ -1541,7 +1553,7 @@ Samba Rentals pipeline:
   Status: ${sambaStatus}
   Notes: ${sambaNotes}
 
-Activity score: ${a.activity_score || 0} (${a.activity_tier || 'Unknown'})`;
+Activity score: ${a.activity_score || 0} (${a.activity_tier || 'Unknown'})${historySection}${kayaNotesSection}${actionSection}`;
 }
 
 async function callClaude(systemPrompt, userPrompt) {
@@ -1594,6 +1606,8 @@ Write only the message text itself. No subject line, no preamble, no explanation
 
 ${agentContext}
 
+CRITICAL: If there is a RECOMMENDED NEXT ACTION in the agent context above, focus the message on that specific action.
+
 The message should:
 - Reference their current Samba status (${a.samba?.status || 'Not contacted'}) naturally
 - If not contacted before: introduce Samba Realty, mention 14 properties, 10% commission, include the portal link (sambarentals.vercel.app)
@@ -1604,6 +1618,8 @@ The message should:
     : `Write a WhatsApp message to this agent about listing KAYA Developments projects.
 
 ${agentContext}
+
+CRITICAL: If there is a RECOMMENDED NEXT ACTION or CONVERSATION HISTORY in the context, let that drive the message. A specific follow-up on a pending situation is far more valuable than a generic introduction.
 
 The message should:
 - Be a catch-up / re-engagement message acknowledging the history
@@ -2136,6 +2152,8 @@ Write only the message text. No preamble or explanation.`;
 
 ${agentContext}
 
+CRITICAL: If there is a RECOMMENDED NEXT ACTION in the agent context above, make that the focus of the message -- do not write a generic message if a specific action is recommended.
+
 Goals:
 - If Samba status is Not contacted: introduce Samba Realty, 14 properties, 10% commission, portal link (sambarentals.vercel.app)
 - If Contacted but no response: warm follow-up, re-share portal
@@ -2146,10 +2164,10 @@ Goals:
 
 ${agentContext}
 
-This is a catch-all re-engagement message to get a current picture of the relationship.
+CRITICAL: If there is a RECOMMENDED NEXT ACTION or CONVERSATION HISTORY in the agent context above, use that as the PRIMARY guide for what this message should say. Do not write a generic "here are our projects" message if the history shows a specific ongoing situation (a buyer in discussion, a visit pending, an objection to address, etc).
 
 Goals:
-- Acknowledge the history naturally (if any)
+- If the conversation history shows a specific pending situation: address that directly and specifically
 - If they haven't listed any projects: introduce KAYA, mention commission is 5%, ask which projects interest them
 - If they've listed some: acknowledge it, offer updated materials, introduce the ones they haven't listed
 - If they refused due to construction before: note Clay House is 75% complete (July delivery) and Palem Kembar is 85% complete with finishing resumed
