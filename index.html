@@ -1857,8 +1857,8 @@ Address them as ${firstName}.`;
     const cleaned = msg.trim();
     campaignGenerated[agentId] = cleaned;
     if (area) area.value = cleaned;
+    const waNum = getWaNum(a);
     if (sendBtn && waNum) {
-      const waNum = getWaNum(a);
       sendBtn.href = buildWaUrl(waNum) + '?text=' + encodeURIComponent(cleaned);
       sendBtn.classList.remove('disabled');
     }
