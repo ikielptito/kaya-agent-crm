@@ -1020,10 +1020,18 @@ function renderCards() {
       </div>
       ${coverageHtml}
       <div class="card-footer">
-        <div class="card-notes" title="${a.conversation_summary || a.notes || ''}">${a.conversation_summary ? a.conversation_summary.slice(0,60) + '...' : (a.notes || a.samba?.notes || '')}</div>
-        ${pipeline === 'kaya' && lc > 0 ? `<div class="listed-count">${lc} listed</div>` : ''}
-        ${pipeline === 'samba' && sambaStatus === 'Active' ? `<div class="listed-count" style="background:var(--samba-light);color:var(--samba)">Active</div>` : ''}
-        ${activityBadge(a)}
+        ${a.conversation_summary ? `
+        <div class="card-summary" id="cs_${a.id}" onclick="toggleCardSummary(${a.id})" title="Click to expand">${a.conversation_summary}</div>
+        ${a.conversation_history?.recommended_action ? `<div class="card-action">${a.conversation_history.recommended_action}</div>` : ''}
+        ` : a.notes ? `<div class="card-summary" style="-webkit-line-clamp:2;color:var(--ink3);font-style:italic">${a.notes.slice(0,120)}</div>` : ''}
+        <div class="card-footer-row">
+          <span></span>
+          <div style="display:flex;align-items:center;gap:5px">
+            ${pipeline === 'kaya' && lc > 0 ? `<div class="listed-count">${lc} listed</div>` : ''}
+            ${pipeline === 'samba' && sambaStatus === 'Active' ? `<div class="listed-count" style="background:var(--samba-light);color:var(--samba)">Active</div>` : ''}
+            ${activityBadge(a)}
+          </div>
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -2294,6 +2302,11 @@ function advanceCampaign() {
   setTimeout(() => isTargeted ? renderCampaignAgentTargeted() : renderCampaignAgent(), 300);
 }
 
+
+function toggleCardSummary(id) {
+  const el = document.getElementById('cs_' + id);
+  if (el) el.classList.toggle('expanded');
+}
 
 function openDiscoverPanel() {
   const isSamba = pipeline === 'samba';
