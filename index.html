@@ -168,6 +168,37 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .card-action-text { font-size: 11px; color: var(--accent); font-weight: 500; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .card-action-text.expanded { -webkit-line-clamp: unset; }
 .card-notes { font-size: 11px; color: var(--ink3); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+
+/* SUMMARY PANEL */
+.card-summary-section { border-top: 1px solid var(--sand2); }
+.card-summary-header { padding: 7px 14px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; }
+.card-summary-header:hover { background: var(--sand); }
+.card-summary-label { font-size: 10px; font-weight: 600; letter-spacing: 0.05em; color: var(--ink3); }
+.card-summary-meta { font-size: 10px; color: var(--ink4); }
+.card-summary-body { padding: 0 14px 10px; display: none; }
+.card-summary-body.open { display: block; }
+.card-summary-text { font-size: 11px; color: var(--ink2); line-height: 1.6; margin-bottom: 8px; }
+.card-chat-log { max-height: 200px; overflow-y: auto; background: var(--sand); border-radius: 6px; padding: 8px 10px; font-size: 10px; color: var(--ink3); line-height: 1.6; white-space: pre-wrap; font-family: Geist, monospace; margin-top: 6px; display: none; }
+.card-chat-log.open { display: block; }
+.card-summary-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.card-sum-btn { font-size: 10px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--sand3); background: white; color: var(--accent); cursor: pointer; font-family: Geist, sans-serif; font-weight: 500; }
+.card-sum-btn:hover { background: var(--kaya-light); }
+
+/* TAGS */
+.tag-list { display: flex; flex-wrap: wrap; gap: 4px; padding: 5px 14px 8px; }
+.tag { font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 10px; background: var(--sand2); color: var(--ink2); cursor: pointer; border: 1px solid transparent; }
+.tag:hover { border-color: var(--sand3); }
+
+/* FOLLOWUP BADGE */
+.followup-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; }
+.followup-badge.due { background: #fdf4e3; color: #8a6010; }
+.followup-badge.overdue { background: #fcebeb; color: #791f1f; }
+.followup-badge.ok { background: var(--kaya-light); color: var(--accent); }
+
+/* OVERDUE BANNER */
+.overdue-banner { background: #fcebeb; border: 1px solid #f09595; border-radius: var(--radius); padding: 10px 16px; margin: 8px 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.overdue-banner-text { font-size: 12px; color: #791f1f; font-weight: 500; }
+.overdue-banner-agents { font-size: 11px; color: #a32d2d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .listed-count { font-size: 11px; font-weight: 600; color: var(--s5-text); background: var(--s5-bg); padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
 
 /* EMPTY */
@@ -456,6 +487,11 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   </div>
 </div>
 
+<div id="overdueBanner" class="overdue-banner" style="display:none;margin:0 0 8px">
+  <span class="overdue-banner-text"></span>
+  <span class="overdue-banner-agents"></span>
+  <button onclick="activeStatusFilter='';activeTagFilter='';render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap">View all</button>
+</div>
 <div class="card-grid" id="cardGrid"></div>
 
 
@@ -765,6 +801,7 @@ const AREA_QUERIES = {
 
 let pipeline = 'kaya';
 let activeStatusFilter = '';
+let activeTagFilter = '';
 let activeProjFilter = 'All';
 let viewMode = 'grid';
 let editingId = null;
@@ -943,6 +980,7 @@ function getFiltered() {
     if (activeStatusFilter) {
       if (getCurrentStatus(a) !== activeStatusFilter) return false;
     }
+    if (activeTagFilter && !(a.tags || []).includes(activeTagFilter)) return false;
     return true;
   });
 
@@ -1029,7 +1067,8 @@ function renderCards() {
       <div class="card-footer">
         <div class="card-footer-row">
           <div class="card-last-contact">
-            ${a.conversation_history?.last_contact ? `<span style="color:var(--ink4);font-size:10px">${a.conversation_history.last_contact}</span>` : a.notes ? `<span style="color:var(--ink4);font-size:10px;font-style:italic;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.notes}">${a.notes.slice(0,40)}${a.notes.length > 40 ? '...' : ''}</span>` : '<span></span>'}
+            ${followupBadge(a)}
+            ${!a.followup_date && a.conversation_history?.last_contact ? `<span style="color:var(--ink4);font-size:10px">Last: ${a.conversation_history.last_contact}</span>` : ''}
           </div>
           <div style="display:flex;align-items:center;gap:5px">
             ${pipeline === 'kaya' && lc > 0 ? `<div class="listed-count">${lc} listed</div>` : ''}
@@ -1037,12 +1076,22 @@ function renderCards() {
             ${activityBadge(a)}
           </div>
         </div>
-        ${a.conversation_history?.recommended_action ? `<div class="card-action-row" onclick="event.stopPropagation();toggleCardAction(${a.id})" title="${a.conversation_history.recommended_action}">
-          <span class="card-action-dot"></span>
-          <span class="card-action-text" id="ca_${a.id}">${a.conversation_history.recommended_action}</span>
-        </div>` : a.conversation_summary ? `<div class="card-action-row" style="color:var(--ink3)" onclick="event.stopPropagation();toggleCardAction(${a.id})" title="${a.conversation_summary}">
-          <span class="card-action-dot" style="background:var(--ink4)"></span>
-          <span class="card-action-text" id="ca_${a.id}">${a.conversation_summary.slice(0, 80)}${a.conversation_summary.length > 80 ? '...' : ''}</span>
+        ${a.tags?.length ? `<div class="tag-list">${a.tags.map(t => `<span class="tag" onclick="event.stopPropagation();filterByTag('${t}')">${t}</span>`).join('')}</div>` : ''}
+        ${(a.conversation_summary || a.conversation_history?.recommended_action) ? `
+        <div class="card-summary-section">
+          <div class="card-summary-header" onclick="event.stopPropagation();toggleCardSummary(${a.id})">
+            <span class="card-summary-label">✦ AI SUMMARY</span>
+            <span class="card-summary-meta">${a.conversation_history?.total_messages ? a.conversation_history.total_messages + ' msgs' : ''} ${a.conversation_history?.first_contact || ''} → ${a.conversation_history?.last_contact || ''}</span>
+          </div>
+          <div class="card-summary-body" id="csb_${a.id}">
+            <div class="card-summary-actions" style="margin-bottom:6px">
+              <button class="card-sum-btn" onclick="event.stopPropagation();regenerateSummary(${a.id})">↺ Regenerate</button>
+              <button class="card-sum-btn" onclick="event.stopPropagation();toggleChatLog(${a.id})" id="logbtn_${a.id}">Show chat log</button>
+            </div>
+            ${a.conversation_history?.recommended_action ? `<div style="font-size:11px;color:var(--accent);font-weight:500;margin-bottom:6px;line-height:1.5">→ ${a.conversation_history.recommended_action}</div>` : ''}
+            <div class="card-summary-text">${a.conversation_summary || ''}</div>
+            <div class="card-chat-log" id="clog_${a.id}">${(a.notes || '').replace(/</g,'&lt;')}</div>
+          </div>
         </div>` : ''}
       </div>
     </div>`;
@@ -1072,6 +1121,7 @@ function render() {
   renderSummaryBar();
   renderProjBar();
   renderCards();
+  renderOverdueBanner();
 }
 
 function toggleStatusFilter(s) {
@@ -1135,6 +1185,8 @@ function openDrawer(id) {
         <div><div class="field-label">WhatsApp number</div><input class="field-input" type="text" id="df_wa" value="${waNum}" placeholder="628..."></div>
         <div><div class="field-label">Alternate contact</div><input class="field-input" type="text" id="df_alt" value="${a.alt_contact||''}"></div>
         <div class="form-full"><div class="field-label">General notes</div><textarea class="field-textarea" id="df_notes">${a.notes||''}</textarea></div>
+        <div><div class="field-label">Follow-up date (DD/MM/YY)</div><input class="field-input" type="text" id="df_followup" value="${a.followup_date||''}" placeholder="e.g. 25/04/26"></div>
+        <div class="form-full"><div class="field-label">Tags (comma separated)</div><input class="field-input" type="text" id="df_tags" value="${(a.tags||[]).join(', ')}" placeholder="e.g. Canggu focus, has buyer, French"></div>
       </div>
     </div>
 
@@ -1193,6 +1245,9 @@ function saveDrawer() {
   a.wa_num = waNum; a.wa_url = waNum ? buildWaUrl(waNum) : '';
   a.alt_contact = document.getElementById('df_alt').value.trim();
   a.notes = document.getElementById('df_notes').value.trim();
+  a.followup_date = document.getElementById('df_followup').value.trim() || null;
+  const tagsRaw = document.getElementById('df_tags').value.trim();
+  a.tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
   if (!a.samba) a.samba = { status: 'Not contacted', notes: '' };
   a.samba.status = document.getElementById('df_samba_status').value;
   a.samba.notes = document.getElementById('df_samba_notes').value.trim();
@@ -2318,6 +2373,72 @@ function advanceCampaign() {
 function toggleCardAction(id) {
   const el = document.getElementById('ca_' + id);
   if (el) el.classList.toggle('expanded');
+}
+
+
+function followupBadge(a) {
+  if (!a.followup_date) return '';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const parts = a.followup_date.split('/');
+  const due = new Date(2000 + parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+  const diff = Math.round((due - today) / 86400000);
+  if (diff < 0) return `<span class="followup-badge overdue">⚠ Follow up: ${a.followup_date}</span>`;
+  if (diff === 0) return `<span class="followup-badge due">Follow up: today</span>`;
+  if (diff <= 3) return `<span class="followup-badge due">Follow up: ${a.followup_date}</span>`;
+  return `<span class="followup-badge ok">Follow up: ${a.followup_date}</span>`;
+}
+
+function toggleCardSummary(id) {
+  const body = document.getElementById('csb_' + id);
+  if (body) body.classList.toggle('open');
+}
+
+function toggleChatLog(id) {
+  const log = document.getElementById('clog_' + id);
+  const btn = document.getElementById('logbtn_' + id);
+  if (!log) return;
+  const isOpen = log.classList.toggle('open');
+  if (btn) btn.textContent = isOpen ? 'Hide chat log' : 'Show chat log';
+}
+
+async function regenerateSummary(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const history = a.notes || a.conversation_history?.kaya_notes || '';
+  if (!history) { alert('No conversation history to summarise.'); return; }
+  const btn = event.target;
+  btn.textContent = '...'; btn.disabled = true;
+  try {
+    const summary = await callClaude(
+      `You are summarising a real estate agent relationship for Ikiel at KAYA Developments, Bali.\n\n${PORTFOLIO_CONTEXT}\n\nWrite a clear, practical summary in 3-5 sentences covering: how responsive this agent is, what KAYA/Samba projects have been discussed, any key agreements, objections or pending actions, and the single most important next step. Plain text, no bullet points.`,
+      `Agent: ${a.name || a.agency}\n\nConversation history:\n${history}\n\nNotes: ${a.notes || 'none'}`
+    );
+    a.conversation_summary = summary.trim();
+    saveAgent(agentId, { conversation_summary: a.conversation_summary });
+    render();
+  } catch(err) { alert('Error: ' + err.message); }
+  btn.textContent = '↺ Regenerate'; btn.disabled = false;
+}
+
+function filterByTag(tag) {
+  activeTagFilter = activeTagFilter === tag ? '' : tag;
+  render();
+}
+
+function renderOverdueBanner() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const overdue = agents.filter(a => {
+    if (!a.followup_date) return false;
+    const parts = a.followup_date.split('/');
+    const due = new Date(2000 + parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+    return due <= today;
+  });
+  const banner = document.getElementById('overdueBanner');
+  if (!banner) return;
+  if (overdue.length === 0) { banner.style.display = 'none'; return; }
+  banner.style.display = 'flex';
+  banner.querySelector('.overdue-banner-text').textContent = overdue.length + ' overdue follow-up' + (overdue.length > 1 ? 's' : '');
+  banner.querySelector('.overdue-banner-agents').textContent = overdue.map(a => a.name || a.agency).join(', ');
 }
 
 function openDiscoverPanel() {
