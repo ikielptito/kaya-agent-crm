@@ -159,7 +159,14 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .pipeline-badge.samba-badge { background: var(--samba-light); color: var(--samba); }
 
 /* CARD FOOTER */
-.card-footer { padding: 8px 16px; border-top: 1px solid var(--sand2); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-footer { padding: 0; border-top: 1px solid var(--sand2); display: flex; flex-direction: column; }
+.card-footer-row { padding: 7px 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.card-last-contact { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1; }
+.card-action-row { padding: 5px 14px 8px; display: flex; align-items: flex-start; gap: 6px; cursor: pointer; border-top: 1px solid var(--sand2); }
+.card-action-row:hover { background: var(--sand); }
+.card-action-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 4px; }
+.card-action-text { font-size: 11px; color: var(--accent); font-weight: 500; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.card-action-text.expanded { -webkit-line-clamp: unset; }
 .card-notes { font-size: 11px; color: var(--ink3); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .listed-count { font-size: 11px; font-weight: 600; color: var(--s5-text); background: var(--s5-bg); padding: 2px 8px; border-radius: 10px; flex-shrink: 0; }
 
@@ -1020,18 +1027,23 @@ function renderCards() {
       </div>
       ${coverageHtml}
       <div class="card-footer">
-        ${a.conversation_summary ? `
-        <div class="card-summary" id="cs_${a.id}" onclick="toggleCardSummary(${a.id})" title="Click to expand">${a.conversation_summary}</div>
-        ${a.conversation_history?.recommended_action ? `<div class="card-action">${a.conversation_history.recommended_action}</div>` : ''}
-        ` : a.notes ? `<div class="card-summary" style="-webkit-line-clamp:2;color:var(--ink3);font-style:italic">${a.notes.slice(0,120)}</div>` : ''}
         <div class="card-footer-row">
-          <span></span>
+          <div class="card-last-contact">
+            ${a.conversation_history?.last_contact ? `<span style="color:var(--ink4);font-size:10px">${a.conversation_history.last_contact}</span>` : a.notes ? `<span style="color:var(--ink4);font-size:10px;font-style:italic;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${a.notes}">${a.notes.slice(0,40)}${a.notes.length > 40 ? '...' : ''}</span>` : '<span></span>'}
+          </div>
           <div style="display:flex;align-items:center;gap:5px">
             ${pipeline === 'kaya' && lc > 0 ? `<div class="listed-count">${lc} listed</div>` : ''}
             ${pipeline === 'samba' && sambaStatus === 'Active' ? `<div class="listed-count" style="background:var(--samba-light);color:var(--samba)">Active</div>` : ''}
             ${activityBadge(a)}
           </div>
         </div>
+        ${a.conversation_history?.recommended_action ? `<div class="card-action-row" onclick="event.stopPropagation();toggleCardAction(${a.id})" title="${a.conversation_history.recommended_action}">
+          <span class="card-action-dot"></span>
+          <span class="card-action-text" id="ca_${a.id}">${a.conversation_history.recommended_action}</span>
+        </div>` : a.conversation_summary ? `<div class="card-action-row" style="color:var(--ink3)" onclick="event.stopPropagation();toggleCardAction(${a.id})" title="${a.conversation_summary}">
+          <span class="card-action-dot" style="background:var(--ink4)"></span>
+          <span class="card-action-text" id="ca_${a.id}">${a.conversation_summary.slice(0, 80)}${a.conversation_summary.length > 80 ? '...' : ''}</span>
+        </div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -2303,8 +2315,8 @@ function advanceCampaign() {
 }
 
 
-function toggleCardSummary(id) {
-  const el = document.getElementById('cs_' + id);
+function toggleCardAction(id) {
+  const el = document.getElementById('ca_' + id);
   if (el) el.classList.toggle('expanded');
 }
 
