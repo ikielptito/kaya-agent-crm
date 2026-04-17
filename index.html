@@ -2367,7 +2367,13 @@ function advanceCampaign() {
     a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
     a.last_campaign_sent = today;
 
-    saveAgents();
+    // Use saveAgent (single PATCH) not saveAgents (bulk) so this persists to Supabase immediately
+    saveAgent(a.id, {
+      last_campaign_sent: today,
+      notes: a.notes,
+      projects: a.projects,
+      samba: a.samba
+    });
     render();
   }
   campaignIndex++;
