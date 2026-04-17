@@ -1033,7 +1033,7 @@ function renderCards() {
           <span class="proj-dot-label">${p}${isP ? ' *' : ''}</span>
           ${pillHtml(proj.status)}
           ${hasUrl ? `<a class="proj-link-icon" href="${proj.url}" target="_blank" onclick="event.stopPropagation()" title="${proj.url}">
-              <svg style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:2px" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2H2a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V7M8 1h3m0 0v3m0-3L5 7"/></svg>${new URL(proj.url).hostname.replace('www.','')}</a>` : ''}
+              <svg style="width:10px;height:10px;display:inline;vertical-align:middle;margin-right:2px" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M5 2H2a1 1 0 00-1 1v7a1 1 0 001 1h7a1 1 0 001-1V7M8 1h3m0 0v3m0-3L5 7"/></svg>${proj.url.replace(/^https?:\/\/(?:www\.)?/,'').split('/')[0]}</a>` : ''}
         </div>`;
       }).join('');
       coverageHtml = `<div class="coverage-section">
