@@ -1077,20 +1077,25 @@ function renderCards() {
           </div>
         </div>
         ${a.tags?.length ? `<div class="tag-list">${a.tags.map(t => `<span class="tag" onclick="event.stopPropagation();filterByTag('${t}')">${t}</span>`).join('')}</div>` : ''}
-        ${(a.conversation_summary || a.conversation_history?.recommended_action) ? `
+        ${(a.ai_summary || a.conversation_summary || a.conversation_history?.recommended_action || a.conversation_history?.total_messages > 0) ? `
         <div class="card-summary-section">
           <div class="card-summary-header" onclick="event.stopPropagation();toggleCardSummary(${a.id})">
             <span class="card-summary-label">✦ AI SUMMARY</span>
-            <span class="card-summary-meta">${a.conversation_history?.total_messages ? a.conversation_history.total_messages + ' msgs' : ''} ${a.conversation_history?.first_contact || ''} → ${a.conversation_history?.last_contact || ''}</span>
+            <span class="card-summary-meta">${a.conversation_history?.total_messages ? a.conversation_history.total_messages + ' msgs · ' : ''}${a.conversation_history?.first_contact || ''} → ${a.conversation_history?.last_contact || ''}</span>
           </div>
           <div class="card-summary-body" id="csb_${a.id}">
-            <div class="card-summary-actions" style="margin-bottom:6px">
-              <button class="card-sum-btn" onclick="event.stopPropagation();regenerateSummary(${a.id})">↺ Regenerate</button>
-              <button class="card-sum-btn" onclick="event.stopPropagation();toggleChatLog(${a.id})" id="logbtn_${a.id}">Show chat log</button>
+            <div class="card-summary-actions" style="margin-bottom:8px">
+              <button class="card-sum-btn" onclick="event.stopPropagation();regenerateSummary(${a.id})">✦ Generate summary</button>
+              <button class="card-sum-btn" onclick="event.stopPropagation();suggestNextStep(${a.id})" id="nsbtn_${a.id}">→ Suggest next step</button>
+              ${a.conversation_summary ? `<button class="card-sum-btn" onclick="event.stopPropagation();toggleChatLog(${a.id})" id="logbtn_${a.id}">Show chat log</button>` : ''}
             </div>
-            ${a.conversation_history?.recommended_action ? `<div style="font-size:11px;color:var(--accent);font-weight:500;margin-bottom:6px;line-height:1.5">→ ${a.conversation_history.recommended_action}</div>` : ''}
-            <div class="card-summary-text">${a.conversation_summary || ''}</div>
-            <div class="card-chat-log" id="clog_${a.id}">${(a.notes || '').replace(/</g,'&lt;')}</div>
+            ${a.ai_summary ? `
+            <div style="font-size:11px;color:var(--ink2);line-height:1.6;margin-bottom:8px;padding:8px 10px;background:var(--sand);border-radius:6px">${a.ai_summary}</div>
+            ` : '<div style="font-size:11px;color:var(--ink4);font-style:italic;margin-bottom:8px">No summary yet — click Generate summary</div>'}
+            ${a.next_step ? `
+            <div style="font-size:11px;color:var(--accent);font-weight:500;line-height:1.5;padding:7px 10px;background:var(--kaya-light);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--accent)">→ ${a.next_step}</div>
+            ` : ''}
+            <div class="card-chat-log" id="clog_${a.id}">${(a.conversation_summary || a.notes || '').replace(/</g,'&lt;')}</div>
           </div>
         </div>` : ''}
       </div>
@@ -2404,20 +2409,79 @@ function toggleChatLog(id) {
 async function regenerateSummary(agentId) {
   const a = agents.find(x => x.id === agentId);
   if (!a) return;
-  const history = a.notes || a.conversation_history?.kaya_notes || '';
+  const history = a.conversation_summary || a.notes || a.conversation_history?.kaya_notes || '';
   if (!history) { alert('No conversation history to summarise.'); return; }
-  const btn = event.target;
+  const btn = document.querySelector(`[onclick*="regenerateSummary(${agentId})"]`) || event.target;
+  const origText = btn.textContent;
   btn.textContent = '...'; btn.disabled = true;
   try {
     const summary = await callClaude(
-      `You are summarising a real estate agent relationship for Ikiel at KAYA Developments, Bali.\n\n${PORTFOLIO_CONTEXT}\n\nWrite a clear, practical summary in 3-5 sentences covering: how responsive this agent is, what KAYA/Samba projects have been discussed, any key agreements, objections or pending actions, and the single most important next step. Plain text, no bullet points.`,
-      `Agent: ${a.name || a.agency}\n\nConversation history:\n${history}\n\nNotes: ${a.notes || 'none'}`
+      `You are summarising a real estate agent relationship for Ikiel at KAYA Developments, Bali.
+
+${PORTFOLIO_CONTEXT}
+
+Write a clear, practical summary in 3-4 sentences covering:
+- How responsive and engaged this agent is
+- Which KAYA or Samba projects have been discussed, listed, or agreed
+- Any key objections, pending actions, or recent breakthroughs
+Plain text only, no bullet points, no bold. Be specific and concrete.`,
+      `Agent: ${a.name || a.agency}${a.agency ? ' (' + a.agency + ')' : ''}
+
+Conversation history (${a.conversation_history?.total_messages || 'unknown'} messages):
+${history.slice(0, 3000)}
+
+Notes: ${a.notes && a.notes !== history ? a.notes : 'none'}`
     );
-    a.conversation_summary = summary.trim();
-    saveAgent(agentId, { conversation_summary: a.conversation_summary });
+    a.ai_summary = summary.trim();
+    saveAgent(agentId, { ai_summary: a.ai_summary });
     render();
+    // Re-open the summary panel after render
+    setTimeout(() => {
+      const body = document.getElementById('csb_' + agentId);
+      if (body) body.classList.add('open');
+    }, 100);
+  } catch(err) { alert('Error generating summary: ' + err.message); }
+  btn.textContent = origText; btn.disabled = false;
+}
+
+async function suggestNextStep(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const history = a.ai_summary || a.conversation_summary || a.notes || '';
+  if (!history) { alert('No conversation history to base a recommendation on.'); return; }
+  const btn = document.getElementById('nsbtn_' + agentId) || event.target;
+  const origText = btn.textContent;
+  btn.textContent = '...'; btn.disabled = true;
+  try {
+    const step = await callClaude(
+      `You are advising Ikiel, co-founder of KAYA Developments and Samba Realty in Bali, on what to do next with a specific real estate agent.
+
+${PORTFOLIO_CONTEXT}
+
+Give ONE specific, concrete recommended next action. Not generic advice -- a real specific move Ikiel should make right now with this specific agent. Think about timing, what was last discussed, what projects they could list, and what would most likely move the relationship forward.
+
+Respond with just the action itself in 1-2 sentences. Start with a verb. No preamble, no "I recommend", just the action.`,
+      `Agent: ${a.name || a.agency}${a.agency ? ' (' + a.agency + ')' : ''}
+Activity: ${a.activity_tier || 'Unknown'}
+Last contact: ${a.conversation_history?.last_contact || 'unknown'}
+
+Summary: ${a.ai_summary || ''}
+
+Recent history:
+${history.slice(0, 2000)}
+
+KAYA pipeline: ${Object.entries(a.projects || {}).filter(([,v]) => v.status !== 'Not contacted').map(([k,v]) => k + ': ' + v.status).join(', ') || 'No history'}
+Samba: ${a.samba?.status || 'Not contacted'}`
+    );
+    a.next_step = step.trim();
+    saveAgent(agentId, { next_step: a.next_step });
+    render();
+    setTimeout(() => {
+      const body = document.getElementById('csb_' + agentId);
+      if (body) body.classList.add('open');
+    }, 100);
   } catch(err) { alert('Error: ' + err.message); }
-  btn.textContent = '↺ Regenerate'; btn.disabled = false;
+  btn.textContent = origText; btn.disabled = false;
 }
 
 function filterByTag(tag) {
