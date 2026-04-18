@@ -2556,13 +2556,8 @@ function scanForUrl(projectKey, projectName) {
   ) || urls[0];
   
   // Show all options in a simple prompt
-  const options = urls.map((u, i) => (i+1) + '. ' + u).join('
-');
-  const pick = prompt('Found ' + urls.length + ' URLs in conversation history. Enter number to select (or paste your own):
-
-' + options + '
-
-Or 0 to cancel:', urls.indexOf(choice) + 1);
+  const options = urls.map((u, i) => (i+1) + '. ' + u).join('\n');
+  const pick = prompt('Found ' + urls.length + ' URLs in conversation history. Enter number to select (or paste your own):\n\n' + options + '\n\nOr 0 to cancel:', urls.indexOf(choice) + 1);
   
   if (pick === null || pick === '0') return;
   const idx = parseInt(pick) - 1;
