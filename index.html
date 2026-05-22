@@ -497,6 +497,128 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 @keyframes slideInCard { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .slide-in { animation: slideInCard 0.3s ease-out; }
 
+/* ── RESPONSIVE ─────────────────────────────────────────── */
+
+/* Tablet (<=768px) */
+@media (max-width: 768px) {
+  .header { padding: 0 12px; gap: 8px; height: 50px; flex-wrap: wrap; }
+  .brand-sub { display: none; }
+  .brand-sep { display: none; }
+  .pipeline-toggle { padding: 2px; }
+  .pipeline-btn { padding: 4px 10px; font-size: 11px; }
+  .header-controls { gap: 6px; }
+  .search-wrap { max-width: 180px; }
+  .search { height: 30px; font-size: 12px; }
+
+  .summary-bar { padding: 6px 12px; }
+  .quick-add-bar { padding: 6px 12px; flex-wrap: wrap; gap: 6px; }
+  .quick-add-input.wa { width: 140px; }
+  .quick-add-input.name { width: 120px; }
+  .quick-add-input.agency { width: 130px; }
+  .quick-add-sep { display: none; }
+
+  .proj-bar { padding: 0 12px; }
+  .results-bar { padding: 8px 12px 4px; }
+  .card-grid { padding: 4px 12px 30px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+
+  .drawer { width: 100vw; }
+  .discover-panel { width: 100vw; }
+  .campaign-panel { width: 100vw; }
+
+  .inbox-layout { flex-direction: column; height: auto; }
+  .inbox-list { width: 100%; max-height: 35vh; border-right: none; border-bottom: 1px solid var(--sand3); }
+  .inbox-thread { min-height: 55vh; }
+  .inbox-thread-msgs { padding: 12px; }
+  .inbox-bar { padding: 8px 12px; }
+
+  .agent-table th, .agent-table td { padding: 8px 8px; font-size: 12px; }
+  .agent-table th:nth-child(4), .agent-table td:nth-child(4) { display: none; } /* hide WhatsApp col */
+}
+
+/* Mobile (<=480px) */
+@media (max-width: 480px) {
+  .header { height: auto; min-height: 50px; padding: 8px 10px; flex-wrap: wrap; gap: 6px; }
+  .brand { flex-basis: auto; }
+  .brand-name { font-size: 16px; }
+  .pipeline-toggle { order: 1; }
+  .header-controls { order: 2; flex-basis: 100%; gap: 5px; flex-wrap: wrap; }
+  .search-wrap { max-width: none; flex: 1; min-width: 120px; }
+  .search { height: 32px; }
+
+  .btn-campaign { height: 30px; padding: 0 8px; font-size: 11px; }
+  .btn-add { height: 30px; padding: 0 10px; font-size: 12px; }
+  .more-btn { height: 30px; width: 30px; font-size: 14px; }
+
+  .quick-add-bar { padding: 6px 10px; }
+  .quick-add-label { display: none; }
+  .quick-add-input.wa { width: 110px; }
+  .quick-add-input.name { width: 90px; }
+  .quick-add-input.agency { width: 100px; }
+  .quick-add-input { height: 30px; font-size: 12px; }
+  .quick-add-btn { height: 30px; font-size: 11px; padding: 0 10px; }
+
+  .summary-bar { padding: 5px 10px; gap: 4px; }
+  .stat-chip { padding: 3px 7px; font-size: 11px; }
+  .proj-bar { padding: 0 10px; }
+  .proj-tab { padding: 9px 10px; font-size: 11px; }
+
+  .results-bar { padding: 6px 10px 4px; }
+  .card-grid { padding: 4px 10px 30px; grid-template-columns: 1fr; gap: 8px; }
+
+  .card-top { padding: 10px 12px 8px; gap: 8px; }
+  .avatar { width: 32px; height: 32px; font-size: 13px; }
+  .card-name { font-size: 13px; }
+  .card-agency { font-size: 11px; }
+  .coverage-section { padding: 0 12px 8px; }
+  .proj-dot-label { width: 85px; font-size: 10px; }
+
+  .overdue-banner { margin: 4px 10px !important; padding: 8px 12px; }
+
+  .inbox-bar { flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; }
+  .inbox-list { max-height: 30vh; }
+  .inbox-conv { padding: 10px 12px; gap: 8px; }
+  .inbox-conv-avatar { width: 32px; height: 32px; font-size: 12px; }
+  .inbox-conv-name { font-size: 12px; }
+  .inbox-reply { padding: 8px 10px; }
+  .inbox-reply-row { gap: 6px; }
+  .inbox-suggest-btn { height: 34px; padding: 0 8px; font-size: 11px; }
+  .inbox-send-btn { height: 34px; padding: 0 12px; font-size: 12px; }
+  .bubble { max-width: 85%; font-size: 12px; padding: 7px 10px; }
+
+  .drawer-header { padding: 12px 14px 10px; }
+  .drawer-body { padding: 12px 14px; }
+  .drawer-footer { padding: 10px 14px; }
+  .drawer-avatar { width: 36px; height: 36px; font-size: 14px; }
+  .drawer-name { font-size: 15px; }
+  .form-grid { grid-template-columns: 1fr; gap: 8px; }
+
+  .campaign-header { padding: 12px 14px 10px; }
+  .campaign-body { padding: 12px 14px; }
+  .campaign-msg-area { min-height: 100px; font-size: 12px; }
+
+  .msg-modal { max-width: 95vw; border-radius: 10px; }
+  .msg-modal-header { padding: 12px 14px 10px; }
+  .msg-modal-body { padding: 12px 14px; }
+  .msg-modal-footer { padding: 10px 14px; flex-wrap: wrap; }
+  .msg-textarea { min-height: 120px; font-size: 12px; }
+
+  /* Table view: hide less critical columns on mobile */
+  .agent-table th:nth-child(3), .agent-table td:nth-child(3) { display: none; } /* agency */
+  .agent-table th:nth-child(4), .agent-table td:nth-child(4) { display: none; } /* whatsapp */
+  .agent-table th:nth-child(6), .agent-table td:nth-child(6) { display: none; } /* last activity */
+  .agent-table th, .agent-table td { padding: 8px 6px; font-size: 12px; }
+}
+
+/* Very small screens (<=360px) */
+@media (max-width: 360px) {
+  .header-controls { gap: 4px; }
+  .btn-campaign { padding: 0 6px; font-size: 10px; }
+  .btn-add { padding: 0 8px; font-size: 11px; }
+  .card-grid { padding: 4px 8px 24px; }
+  .inbox-list { max-height: 25vh; }
+  .quick-add-bar { display: none; } /* too cramped, use + Add agent instead */
+}
+
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--sand3); border-radius: 2px; }
