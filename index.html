@@ -1975,17 +1975,43 @@ function closeMsgOutside(e) { if (e.target === document.getElementById('msgOverl
 // ── CLAUDE MESSAGE GENERATOR ─────────────────────────────────────────
 
 const PORTFOLIO_CONTEXT = `KAYA Developments portfolio (current):
-- Clay House | Cepaka | 1BR apartment | $80K promo | 30yr leasehold | 75% complete | July 2026 delivery | 3 units available
-- Tropicana Valley | Buduk | 1BR townhouse with private pool | from $125K | 27yr leasehold | move-in ready | 4 units available
-- Palem Kembar | Ungasan | 3BR villa with private pool | from $299K | Freehold | 85% complete, finishing resumed | 2 units available
-- Sabit House | Berawa | 1BR apartment | $150K | Freehold pre-construction | 9 units available
-- LaneHAUS | Pererenan | 1BR townhouse | Unit 1: 1.5B IDR / Unit 3: 1.3B IDR | 27yr leasehold | Ikiel personal property, not a KAYA project
-Standard agent commission: 5%
-Listing materials: https://drive.google.com/drive/folders/1i8dIkGMOkR4OJnWdst2e8BXNpCeziISH
 
-Samba Realty portfolio: 14 villas and apartments across Canggu, Pererenan and Seminyak.
-Agent portal with live availability: https://sambarentals.vercel.app
-Rental commission: 10% per booking.`;
+1. THE CLAY HOUSE — Cepaka (8 min from Pererenan)
+   Type: Boutique luxury studio apartments, 30-year leasehold, fully furnished
+   Unit types:
+   - Type A1/A2: 1 bed, 1 bath, workspace, 47 sqm, 2nd floor — IDR 2.18B (~$130K USD)
+   - Type B1: 1 bed, 1 bath, 45.5 sqm, ground floor — IDR 1.66B (~$100K USD)
+   Availability: 4 units left (Units 1-3 at IDR 2.18B, Unit 5 at IDR 1.66B). Construction ~75% complete.
+   ROI: 60% occ = 12.5%, 70% occ = 14.55%, 80% occ = 16.95% net. ADR ~$100.
+   Features: Western construction standards, passive cooling, resort-style pool, shared rooftop terrace.
+
+2. TROPICAL TOWNHOUSES — Buduk (5 min from Pererenan)
+   Type: 1BR two-level townhouses with private plunge pool, 28-year leasehold, fully furnished, 75 sqm
+   Pricing: Units B2/B3 $125,000 USD | Units B5/B6 (garden view) $135,000 USD
+   Availability: 4 units left. Move-in ready.
+   ROI: 60% occ = 14.4%, 70% occ = 17.28%, 80% occ = 20.16% net. ADR ~$100.
+   Features: Private pool, loft bedroom, workspace, soaking tub, rental management available.
+
+3. PALEM KEMBAR — Ungasan (5 min from beach)
+   Type: Twin 3BR freehold villas, 218 sqm on 150 sqm land, 3 levels, private pool, rooftop ocean views
+   Pricing: Villa 1 $299K USD / Villa 2 $329K USD. 20% deposit, balance at handover.
+   Availability: 2 villas. 85% complete, July delivery, turnkey furnished.
+   ROI: 15.7%-21.0% gross at ~$300 ADR. Near Karma Beach, Sunday Beach, Savaya.
+
+4. THE SABIT HOUSE — Berawa
+   Type: 9 boutique freehold apartments (Corporate HOA structure). Pre-construction.
+   Pricing: Type A (40 sqm) $180K | Type B (46 sqm) $180K | Type C (51 sqm) $189K | Penthouse $199K
+   Availability: 9 units. Payment: 20/30/40/10 construction-linked.
+   ROI: 60% occ = 10.3%, 70% = 12.1%, 80% = 13.8% annual. Rice paddy views, rooftop pool, sunken lounge.
+
+5. LANEHAUS — Pererenan (Ikiel personal property, NOT a KAYA project)
+   2 units available: Unit 1 (65 sqm) IDR 1.7B | Unit 3 (55 sqm) IDR 1.5B
+   Leasehold until Nov 2052, 10yr extension agreed. Turnkey, existing rental ops.
+
+Standard agent commission: 5% on all KAYA projects.
+
+Samba Realty: 14 villas/apartments across Canggu, Pererenan, Seminyak.
+Agent portal: https://sambarentals.vercel.app | Commission: 10% per booking.`;
 
 function buildAgentContext(a) {
   const kayaStatuses = KAYA_PROJECTS.map(p => {
