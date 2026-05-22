@@ -462,6 +462,41 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .inbox-draft-banner { background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; padding: 8px 11px; margin-bottom: 8px; font-size: 11px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .btn-campaign.samba-mode:hover { border-color: var(--samba-mid); color: var(--samba); }
 
+/* URGENCY DOT */
+.urgency-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.urgency-dot.red { background: #d64545; }
+.urgency-dot.yellow { background: #d4a017; }
+.urgency-dot.green { background: #2d8a4e; }
+.urgency-dot.gray { background: var(--sand3); }
+
+/* MORE DROPDOWN */
+.more-dropdown-wrap { position: relative; flex-shrink: 0; }
+.more-btn { height: 34px; width: 34px; display: flex; align-items: center; justify-content: center; background: white; border: 1px solid var(--sand3); border-radius: 7px; cursor: pointer; font-size: 16px; color: var(--ink2); transition: all 0.12s; }
+.more-btn:hover { border-color: var(--accent-mid); color: var(--accent); }
+.more-menu { display: none; position: absolute; right: 0; top: 38px; background: white; border: 1px solid var(--sand3); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 180px; z-index: 110; overflow: hidden; }
+.more-menu.open { display: block; }
+.more-menu-item { padding: 9px 14px; font-size: 12px; color: var(--ink2); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.1s; font-family: Geist, sans-serif; border: none; background: none; width: 100%; text-align: left; }
+.more-menu-item:hover { background: var(--sand); }
+.more-menu-item + .more-menu-item { border-top: 1px solid var(--sand2); }
+
+/* TABLE VIEW */
+.agent-table { width: 100%; border-collapse: separate; border-spacing: 0; margin: 0 0 40px; }
+.agent-table th { position: sticky; top: 0; background: white; padding: 8px 12px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink4); text-align: left; border-bottom: 1px solid var(--sand3); white-space: nowrap; z-index: 5; }
+.agent-table td { padding: 10px 12px; font-size: 13px; color: var(--ink); border-bottom: 1px solid var(--sand2); vertical-align: middle; }
+.agent-table tr { cursor: pointer; transition: background 0.1s; }
+.agent-table tbody tr:hover { background: var(--sand); }
+.table-name { font-weight: 600; }
+.table-agency { color: var(--ink3); font-size: 12px; }
+.table-wa { font-size: 12px; color: var(--wa); font-family: monospace; }
+
+/* MICRO-INTERACTIONS */
+@keyframes flashSent { 0% { opacity: 1; } 100% { opacity: 0; } }
+.sent-flash { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: #e3f5ee; color: #1a6848; border-radius: 6px; font-size: 11px; font-weight: 500; animation: flashSent 2s ease-out forwards; }
+@keyframes statusPop { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
+.status-pop { animation: statusPop 0.25s ease; }
+@keyframes slideInCard { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
+.slide-in { animation: slideInCard 0.3s ease-out; }
+
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--sand3); border-radius: 2px; }
@@ -482,13 +517,18 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   <div class="header-controls">
     <div class="search-wrap">
       <span class="search-icon">⌕</span>
-      <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="render()">
+      <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="debouncedRender()">
     </div>
     <button class="btn-campaign" id="inboxToggle" onclick="toggleInbox()">💬 Inbox <span id="inboxBadge" class="inbox-badge" style="display:none">0</span></button>
     <button class="btn-campaign" id="campaignBtn" onclick="openCampaignBuilder()">↗ New campaign</button>
-    <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
-    <button class="btn-discover" onclick="downloadExcel()" style="flex-shrink:0">↓ Export .xlsx</button>
     <button class="btn-add" id="addBtn" onclick="openAddModal()">+ Add agent</button>
+    <div class="more-dropdown-wrap">
+      <button class="more-btn" id="moreBtn" onclick="toggleMoreMenu(event)">⋯</button>
+      <div class="more-menu" id="moreMenu">
+        <button class="more-menu-item" id="discoverBtn" onclick="openDiscoverPanel();closeMoreMenu()">⊕ Discover agents</button>
+        <button class="more-menu-item" onclick="downloadExcel();closeMoreMenu()">↓ Export .xlsx</button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -843,6 +883,27 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 </div>
 
 <script>
+// ── Utilities ──────────────────────────────────────────────
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+const debouncedRender = debounce(() => render(), 200);
+
+// More dropdown
+function toggleMoreMenu(e) { e.stopPropagation(); document.getElementById('moreMenu').classList.toggle('open'); }
+function closeMoreMenu() { document.getElementById('moreMenu').classList.remove('open'); }
+document.addEventListener('click', () => closeMoreMenu());
+
+// Urgency dot helper
+function getUrgencyDot(a) {
+  if (!a.followup_date) return 'gray';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const parts = a.followup_date.split('/');
+  const due = new Date(2000 + parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]));
+  const diff = Math.round((due - today) / 86400000);
+  if (diff < 0) return 'red';
+  if (diff === 0) return 'yellow';
+  return 'green';
+}
+
 // Supabase helpers — keys live server-side in /api/supabase
 async function sbGet() {
   const r = await fetch('/api/supabase', {
@@ -968,6 +1029,10 @@ function saveAgent(id, fields) {
     body: JSON.stringify({ action: 'patch_agent', payload: { id, fields } })
   }).catch(e => console.warn('Supabase patch failed:', e.message));
 }
+// Restore view mode preference
+const savedView = localStorage.getItem('crm_viewMode');
+if (savedView === 'list') { viewMode = 'list'; setTimeout(() => setView('list'), 0); }
+
 loadAgents();
 
 function getWaNum(a) {
@@ -1030,7 +1095,7 @@ function setPipeline(p) {
   document.documentElement.style.setProperty('--accent-light', isKaya ? '#e8f0eb' : '#f5ede6');
   document.documentElement.style.setProperty('--accent-mid', isKaya ? '#4a8a5e' : '#c4722a');
 
-  document.getElementById('discoverBtn').className = 'btn-discover' + (!isKaya ? ' samba-mode' : '');
+  // discoverBtn is now in More menu — no class toggle needed
   document.getElementById('campaignBtn').className = 'btn-campaign' + (!isKaya ? ' samba-mode' : '');
   document.getElementById('addBtn').className = 'btn-add' + (!isKaya ? ' samba-mode' : '');
   document.getElementById('drawerSaveBtn').className = 'btn-primary' + (!isKaya ? ' samba' : '');
@@ -1109,6 +1174,34 @@ function getFiltered() {
   return result;
 }
 
+function renderTable(filtered) {
+  const grid = document.getElementById('cardGrid');
+  const rows = filtered.map(a => {
+    const waNum = getWaNum(a);
+    const ini = initials(a.name, a.agency);
+    const urgency = getUrgencyDot(a);
+    const status = getCurrentStatus(a);
+    const sc = S_CFG[status] || S_CFG['Not contacted'];
+    const lastContact = a.conversation_history?.last_contact || '';
+    const followup = a.followup_date || '';
+    return `<tr onclick="openDrawer(${a.id})">
+      <td><span class="urgency-dot ${urgency}"></span></td>
+      <td><div style="display:flex;align-items:center;gap:8px"><div class="avatar" style="width:28px;height:28px;font-size:11px">${ini}</div><span class="table-name">${a.name || '(no name)'}</span></div></td>
+      <td class="table-agency">${a.agency || ''}</td>
+      <td>${waNum ? `<span class="table-wa">${waNum}</span>` : '<span style="color:var(--ink4);font-size:11px">—</span>'}</td>
+      <td>${pillHtml(status)}</td>
+      <td style="font-size:12px;color:var(--ink3)">${lastContact}</td>
+      <td style="font-size:12px;color:var(--ink3)">${followup}</td>
+    </tr>`;
+  }).join('');
+  grid.innerHTML = `<table class="agent-table">
+    <thead><tr>
+      <th style="width:28px"></th><th>Name</th><th>Agency</th><th>WhatsApp</th><th>Status</th><th>Last activity</th><th>Follow-up</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
 function renderCards() {
   const grid = document.getElementById('cardGrid');
   const filtered = getFiltered();
@@ -1118,6 +1211,8 @@ function renderCards() {
     grid.innerHTML = `<div class="empty-state"><h3>No agents found</h3><p>Try adjusting your search or filters.</p></div>`;
     return;
   }
+
+  if (viewMode === 'list') { renderTable(filtered); return; }
 
   const projs = activeProjFilter !== 'All' ? [activeProjFilter] : KAYA_PROJECTS;
 
@@ -1169,6 +1264,8 @@ function renderCards() {
     const sambaStatus = getSambaStatus(a);
     const kayaBestCard = bestKayaStatus(a);
 
+    const urgency = getUrgencyDot(a);
+
     return `<div class="agent-card" onclick="openDrawer(${a.id})">
       <div class="card-top">
         <div class="avatar">${ini}</div>
@@ -1176,6 +1273,7 @@ function renderCards() {
           <div class="card-name ${!a.name ? 'unnamed' : ''}">${a.name || (a.agency ? '(no name)' : 'Unknown')}</div>
           ${a.agency ? `<div class="card-agency">${a.agency}</div>` : ''}
         </div>
+        <span class="urgency-dot ${urgency}" title="${urgency === 'red' ? 'Overdue' : urgency === 'yellow' ? 'Due today' : urgency === 'green' ? 'Scheduled' : 'No follow-up'}"></span>
         ${waBtn}
       </div>
       ${coverageHtml}
@@ -1257,9 +1355,11 @@ function setProjFilter(p) {
 
 function setView(v) {
   viewMode = v;
+  localStorage.setItem('crm_viewMode', v);
   document.getElementById('cardGrid').classList.toggle('list-mode', v === 'list');
   document.getElementById('gridBtn').classList.toggle('active', v === 'grid');
   document.getElementById('listBtn').classList.toggle('active', v === 'list');
+  renderCards();
 }
 
 // DRAWER
@@ -1383,6 +1483,11 @@ function saveDrawer() {
     if (ue) a.projects[p].url = ue.value.trim();
   });
   saveAgents(); closeDrawer(); render();
+  // Briefly flash status pill for saved agent
+  setTimeout(() => {
+    const cards = document.querySelectorAll('.agent-card');
+    cards.forEach(c => { if (c.getAttribute('onclick')?.includes(editingId)) { const pills = c.querySelectorAll('.proj-status-pill'); pills.forEach(p => p.classList.add('status-pop')); } });
+  }, 100);
 }
 
 function openAddModal() {
@@ -1417,6 +1522,11 @@ function quickAdd() {
     samba: { status: 'Not contacted', notes: '' }
   });
   saveAgents(); render();
+  // Slide-in animation on the newly added card
+  setTimeout(() => {
+    const firstCard = document.querySelector('.agent-card');
+    if (firstCard) firstCard.classList.add('slide-in');
+  }, 50);
   document.getElementById('qaWa').value = '';
   document.getElementById('qaName').value = '';
   document.getElementById('qaAgency').value = '';
@@ -2545,6 +2655,9 @@ async function advanceCampaign() {
       const result = await resp.json();
       if (result.success) {
         if (sendLabel) sendLabel.textContent = '✓ Sent!';
+        // Show sent flash on the campaign card
+        const campCard = document.querySelector('.campaign-agent-card');
+        if (campCard) { const flash = document.createElement('span'); flash.className = 'sent-flash'; flash.textContent = '✓ Sent'; campCard.querySelector('.campaign-agent-header')?.appendChild(flash); }
         // Brief pause to show the sent confirmation, then advance
         await new Promise(r => setTimeout(r, 800));
       } else {
