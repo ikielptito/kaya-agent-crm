@@ -428,6 +428,38 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 /* Campaign button in header */
 .btn-campaign { height: 34px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: 7px; font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: var(--ink2); cursor: pointer; transition: all 0.12s; flex-shrink: 0; display: flex; align-items: center; gap: 5px; }
 .btn-campaign:hover { border-color: var(--accent-mid); color: var(--accent); }
+
+/* INBOX */
+.inbox-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; background: #d64545; color: white; border-radius: 8px; font-size: 10px; font-weight: 600; margin-left: 2px; }
+.inbox-bar { background: white; border-bottom: 1px solid var(--sand3); padding: 10px 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.inbox-layout { display: flex; height: calc(100vh - 56px - 53px); }
+.inbox-list { width: 320px; flex-shrink: 0; border-right: 1px solid var(--sand3); overflow-y: auto; background: white; }
+.inbox-conv { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--sand2); cursor: pointer; transition: background 0.12s; }
+.inbox-conv:hover { background: var(--sand); }
+.inbox-conv.active { background: var(--accent-light); }
+.inbox-conv-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--sand2); display: flex; align-items: center; justify-content: center; font-family: 'Instrument Serif',serif; font-size: 14px; font-style: italic; color: var(--ink2); flex-shrink: 0; }
+.inbox-conv-info { flex: 1; min-width: 0; }
+.inbox-conv-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.inbox-conv-snippet { font-size: 11px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.inbox-conv-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.inbox-conv-time { font-size: 10px; color: var(--ink4); }
+.inbox-unread { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; background: var(--wa); color: white; border-radius: 9px; font-size: 10px; font-weight: 600; }
+.inbox-draft-flag { font-size: 9px; font-weight: 600; letter-spacing: 0.03em; color: var(--accent); background: var(--accent-light); padding: 2px 5px; border-radius: 4px; }
+.inbox-thread { flex: 1; display: flex; flex-direction: column; background: var(--sand); min-width: 0; }
+.inbox-thread-header { background: white; border-bottom: 1px solid var(--sand3); padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.inbox-thread-msgs { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
+.bubble { max-width: 75%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.bubble.in { align-self: flex-start; background: white; color: var(--ink); border-bottom-left-radius: 3px; }
+.bubble.out { align-self: flex-end; background: var(--wa); color: white; border-bottom-right-radius: 3px; }
+.bubble-time { font-size: 9px; opacity: 0.6; margin-top: 3px; }
+.inbox-reply { background: white; border-top: 1px solid var(--sand3); padding: 12px 16px; flex-shrink: 0; }
+.inbox-reply-row { display: flex; gap: 8px; align-items: flex-end; }
+.inbox-reply textarea { flex: 1; min-height: 38px; max-height: 120px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 8px; padding: 9px 12px; font-family: 'Geist',sans-serif; font-size: 13px; color: var(--ink); resize: vertical; outline: none; }
+.inbox-reply textarea:focus { background: white; border-color: var(--accent-mid); }
+.inbox-suggest-btn { height: 38px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 8px; color: var(--accent); font-family: 'Geist',sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.inbox-send-btn { height: 38px; padding: 0 16px; background: var(--wa); border: none; border-radius: 8px; color: white; font-family: 'Geist',sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
+.inbox-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.inbox-draft-banner { background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; padding: 8px 11px; margin-bottom: 8px; font-size: 11px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .btn-campaign.samba-mode:hover { border-color: var(--samba-mid); color: var(--samba); }
 
 ::-webkit-scrollbar { width: 4px; }
@@ -452,6 +484,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <span class="search-icon">⌕</span>
       <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="render()">
     </div>
+    <button class="btn-campaign" id="inboxToggle" onclick="toggleInbox()">💬 Inbox <span id="inboxBadge" class="inbox-badge" style="display:none">0</span></button>
     <button class="btn-campaign" id="campaignBtn" onclick="openCampaignBuilder()">↗ New campaign</button>
     <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
     <button class="btn-discover" onclick="downloadExcel()" style="flex-shrink:0">↓ Export .xlsx</button>
@@ -459,6 +492,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   </div>
 </header>
 
+<div id="pipelineView">
 <div class="summary-bar" id="summaryBar"></div>
 
 <div class="quick-add-bar">
@@ -494,6 +528,32 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   <button onclick="activeStatusFilter='';activeTagFilter='';render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap">View all</button>
 </div>
 <div class="card-grid" id="cardGrid"></div>
+</div><!-- /pipelineView -->
+
+<!-- INBOX VIEW -->
+<div id="inboxView" style="display:none">
+  <div class="inbox-bar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:13px;font-weight:600;color:var(--ink)">Inbox</span>
+      <button onclick="renderInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:11px;font-weight:600;letter-spacing:0.04em;color:var(--ink3);text-transform:uppercase">Claude automation</span>
+      <select id="automationMode" onchange="setAutomationMode(this.value)" style="height:30px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
+        <option value="off">Off — log only</option>
+        <option value="draft">Draft — Claude suggests, you send</option>
+        <option value="hybrid">Hybrid — auto-answer FAQs, escalate rest</option>
+        <option value="autopilot">Autopilot — Claude replies automatically</option>
+      </select>
+    </div>
+  </div>
+  <div class="inbox-layout">
+    <div class="inbox-list" id="inboxList"></div>
+    <div class="inbox-thread" id="inboxThread">
+      <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--ink3);font-size:13px">Select a conversation</div>
+    </div>
+  </div>
+</div>
 
 
 
@@ -1182,6 +1242,7 @@ function render() {
   renderProjBar();
   renderCards();
   renderOverdueBanner();
+  if (typeof updateInboxBadge === 'function') updateInboxBadge();
 }
 
 function toggleStatusFilter(s) {
@@ -2884,6 +2945,198 @@ function downloadExcel() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Agents');
   XLSX.writeFile(wb, 'agents.xlsx');
+}
+
+// ── INBOX ─────────────────────────────────────────────────────────
+
+let inboxOpen = false;
+let activeConvId = null;
+let inboxPollTimer = null;
+
+function toggleInbox() {
+  inboxOpen = !inboxOpen;
+  document.getElementById('pipelineView').style.display = inboxOpen ? 'none' : '';
+  document.getElementById('inboxView').style.display = inboxOpen ? '' : 'none';
+  document.getElementById('inboxToggle').classList.toggle('active-kaya', inboxOpen);
+  if (inboxOpen) {
+    loadAutomationMode();
+    renderInbox();
+    inboxPollTimer = setInterval(() => { if (inboxOpen) renderInbox(true); }, 20000);
+  } else {
+    clearInterval(inboxPollTimer);
+  }
+}
+
+function renderInbox(silent) {
+  const list = document.getElementById('inboxList');
+  // Conversations = agents who have inbound history, sorted by last_inbound_at desc
+  const convs = agents
+    .filter(a => a.last_inbound_at || a.unread_count || a.suggested_reply)
+    .sort((a, b) => new Date(b.last_inbound_at || 0) - new Date(a.last_inbound_at || 0));
+
+  updateInboxBadge();
+
+  if (convs.length === 0) {
+    list.innerHTML = '<div style="padding:30px 16px;text-align:center;color:var(--ink3);font-size:12px">No conversations yet. They\'ll appear here when agents reply.</div>';
+    return;
+  }
+
+  list.innerHTML = convs.map(a => {
+    const ini = initials(a.name, a.agency);
+    const time = a.last_inbound_at ? timeAgo(new Date(a.last_inbound_at)) : '';
+    const hasDraft = a.suggested_reply && a.suggested_reply.trim();
+    return `<div class="inbox-conv ${a.id === activeConvId ? 'active' : ''}" onclick="openConversation(${a.id})">
+      <div class="inbox-conv-avatar">${ini}</div>
+      <div class="inbox-conv-info">
+        <div class="inbox-conv-name">${a.name || a.agency || '+' + a.wa_num}</div>
+        <div class="inbox-conv-snippet">${a.agency || ''}</div>
+      </div>
+      <div class="inbox-conv-meta">
+        <span class="inbox-conv-time">${time}</span>
+        ${a.unread_count ? `<span class="inbox-unread">${a.unread_count}</span>` : ''}
+        ${hasDraft ? `<span class="inbox-draft-flag">DRAFT</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openConversation(agentId) {
+  activeConvId = agentId;
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  renderInbox();
+
+  const thread = document.getElementById('inboxThread');
+  thread.innerHTML = `<div class="inbox-thread-header">
+      <div class="inbox-conv-avatar">${initials(a.name, a.agency)}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">${a.name || a.agency || 'Unknown'}</div>
+        <div style="font-size:11px;color:var(--ink3)">+${a.wa_num}${a.agency ? ' · ' + a.agency : ''}</div>
+      </div>
+      <button onclick="openDrawer(${a.id})" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">View profile</button>
+    </div>
+    <div class="inbox-thread-msgs" id="threadMsgs"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading messages...</div></div>
+    <div class="inbox-reply">
+      ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Claude drafted a reply — review and send</span></div>` : ''}
+      <div class="inbox-reply-row">
+        <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})">✦ Suggest</button>
+        <textarea id="replyBox" placeholder="Type a reply...">${(a.suggested_reply || '').replace(/</g,'&lt;')}</textarea>
+        <button class="inbox-send-btn" id="replySendBtn" onclick="sendReply(${a.id})">Send</button>
+      </div>
+    </div>`;
+
+  // Clear unread
+  if (a.unread_count) {
+    a.unread_count = 0;
+    saveAgent(a.id, { unread_count: 0 });
+    renderInbox();
+  }
+
+  // Fetch messages
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_messages', payload: { agentId } })
+    });
+    const msgs = await r.json();
+    const box = document.getElementById('threadMsgs');
+    if (!Array.isArray(msgs) || msgs.length === 0) {
+      box.innerHTML = '<div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">No messages logged yet.</div>';
+      return;
+    }
+    // Messages come desc; render ascending
+    const asc = msgs.slice().reverse();
+    box.innerHTML = asc.map(m => {
+      const t = new Date(m.timestamp).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+      return `<div class="bubble ${m.direction === 'inbound' ? 'in' : 'out'}">${(m.content||'').replace(/</g,'&lt;')}<div class="bubble-time">${t}</div></div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  } catch(e) {
+    document.getElementById('threadMsgs').innerHTML = '<div style="text-align:center;color:#a32d2d;font-size:12px;padding:20px">Failed to load messages.</div>';
+  }
+}
+
+async function suggestReply(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const box = document.getElementById('replyBox');
+  if (box) { box.value = 'Claude is thinking...'; box.disabled = true; }
+  try {
+    const system = `You are replying to a real estate agent on WhatsApp on behalf of Ikiel from KAYA Developments in Bali.\n\n${PORTFOLIO_CONTEXT}\n\nTone: warm, conversational, concise, no emojis, no em dashes, sound like a real person, never mention AI. Write only the reply text.`;
+    const userPrompt = `${buildAgentContext(a)}\n\nWrite a helpful WhatsApp reply to this agent based on the conversation history above. If they asked a question, answer it accurately from the portfolio info.`;
+    const reply = await callClaude(system, userPrompt);
+    if (box) { box.value = reply.trim(); box.disabled = false; }
+  } catch(e) {
+    if (box) { box.value = ''; box.disabled = false; }
+    alert('Could not generate a suggestion. Try again.');
+  }
+}
+
+async function sendReply(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const box = document.getElementById('replyBox');
+  const btn = document.getElementById('replySendBtn');
+  const msg = box?.value?.trim();
+  if (!msg) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
+  try {
+    const resp = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waNum: getWaNum(a), message: msg, useTemplate: false, agentId: a.id })
+    });
+    const result = await resp.json();
+    if (result.success) {
+      box.value = '';
+      // Clear any stored draft
+      if (a.suggested_reply) { a.suggested_reply = ''; saveAgent(a.id, { suggested_reply: '' }); }
+      openConversation(agentId); // refresh thread
+    } else {
+      alert('Send failed: ' + (result.error || 'unknown error'));
+    }
+  } catch(e) {
+    alert('Send error: ' + e.message);
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+}
+
+function updateInboxBadge() {
+  const total = agents.reduce((sum, a) => sum + (a.unread_count || 0), 0);
+  const badge = document.getElementById('inboxBadge');
+  if (badge) {
+    badge.textContent = total;
+    badge.style.display = total > 0 ? '' : 'none';
+  }
+}
+
+async function loadAutomationMode() {
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_settings', payload: { key: 'automation' } })
+    });
+    const val = await r.json();
+    if (val?.mode) document.getElementById('automationMode').value = val.mode;
+  } catch(e) {}
+}
+
+async function setAutomationMode(mode) {
+  try {
+    await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'set_settings', payload: { key: 'automation', value: { mode } } })
+    });
+  } catch(e) { alert('Could not save automation mode'); }
+}
+
+function timeAgo(date) {
+  const s = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s/60) + 'm';
+  if (s < 86400) return Math.floor(s/3600) + 'h';
+  if (s < 604800) return Math.floor(s/86400) + 'd';
+  return date.toLocaleDateString('en-GB', { day:'2-digit', month:'short' });
 }
 
 render();
