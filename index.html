@@ -452,8 +452,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <span class="search-icon">⌕</span>
       <input class="search" type="text" id="searchInput" placeholder="Search agent or agency..." oninput="render()">
     </div>
-    <button class="btn-campaign" id="campaignBtn" onclick="openCampaignPanel()">↗ Re-engagement campaign</button>
-    <button class="btn-campaign" id="kayaCampaignBtn" onclick="openCampaignPanelTargeted()" style="background:var(--kaya-light);border-color:var(--kaya-mid);color:var(--kaya)">⚡ KAYA listing campaign (66)</button>
+    <button class="btn-campaign" id="campaignBtn" onclick="openCampaignBuilder()">↗ New campaign</button>
     <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
     <button class="btn-discover" onclick="downloadExcel()" style="flex-shrink:0">↓ Export .xlsx</button>
     <button class="btn-add" id="addBtn" onclick="openAddModal()">+ Add agent</button>
@@ -501,26 +500,87 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <!-- CAMPAIGN PANEL -->
 <div class="campaign-overlay" id="campaignOverlay" onclick="closeCampaignOutside(event)">
   <div class="campaign-panel">
-    <div class="campaign-header">
-      <div style="display:flex;align-items:flex-start;justify-content:space-between">
-        <div>
-          <div class="campaign-title" id="campaignTitle">Re-engagement campaign</div>
-          <div class="campaign-sub" id="campaignSub">Claude generates a personalised message for each agent based on their history</div>
+
+    <!-- STEP 1: SETUP -->
+    <div id="campaignSetup">
+      <div class="campaign-header" style="border-bottom:1px solid var(--sand3)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="campaign-title">New campaign</div>
+            <div class="campaign-sub">Configure your audience and Claude will personalise a message for each agent</div>
+          </div>
+          <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
         </div>
-        <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
       </div>
-      <div style="margin-top:12px">
-        <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">ADDITIONAL CONTEXT FOR CLAUDE</div>
-        <textarea id="campaignContext" placeholder="Optional: give Claude extra context or instructions for all messages in this campaign. E.g. 'Focus on Palem Kembar -- we just resumed construction' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:white;border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
-      </div>
-      <div class="campaign-progress" style="margin-top:10px">
-        <div class="campaign-bar"><div class="campaign-bar-fill" id="campaignBarFill" style="width:0%"></div></div>
-        <div class="campaign-count" id="campaignCount">0 / 0</div>
+      <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
+        <!-- Name -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CAMPAIGN NAME</div>
+          <input id="cbName" type="text" placeholder="e.g. May KAYA outreach" style="width:100%;height:36px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'" oninput="updateCampaignPreview()">
+        </div>
+        <!-- Pipeline -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">PIPELINE</div>
+          <div style="display:flex;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
+              <input type="radio" name="cbPipeline" value="kaya" checked onchange="updateCampaignPreview()"> KAYA Sales
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
+              <input type="radio" name="cbPipeline" value="samba" onchange="updateCampaignPreview()"> Samba Rentals
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
+              <input type="radio" name="cbPipeline" value="both" onchange="updateCampaignPreview()"> Both
+            </label>
+          </div>
+        </div>
+        <!-- Status filter -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">TARGET STATUS <span style="font-weight:400;color:var(--ink4)">(leave all unchecked for all agents)</span></div>
+          <div id="cbStatusFilters" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+        </div>
+        <!-- Exclude recently contacted -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">EXCLUDE RECENTLY MESSAGED</div>
+          <select id="cbExcludeDays" onchange="updateCampaignPreview()" style="height:34px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);outline:none">
+            <option value="0">Don't exclude anyone</option>
+            <option value="7">Exclude messaged in last 7 days</option>
+            <option value="14" selected>Exclude messaged in last 14 days</option>
+            <option value="30">Exclude messaged in last 30 days</option>
+          </select>
+        </div>
+        <!-- Context for Claude -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(optional)</span></div>
+          <textarea id="campaignContext" placeholder="e.g. 'Focus on Palem Kembar — construction just resumed' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+        </div>
+        <!-- Preview count + CTA -->
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--sand);border-radius:var(--radius-sm);border:1px solid var(--sand3)">
+          <div id="cbPreviewCount" style="font-size:13px;color:var(--ink2)">— agents match</div>
+          <button onclick="startCampaign()" style="height:36px;padding:0 20px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Geist,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">Start campaign →</button>
+        </div>
       </div>
     </div>
-    <div class="campaign-body" id="campaignBody">
-      <div style="text-align:center;padding:40px;color:var(--ink3);font-size:13px">Loading agents...</div>
+
+    <!-- STEP 2: SEND QUEUE (hidden until setup complete) -->
+    <div id="campaignQueue" style="display:none;flex-direction:column;height:100%">
+      <div class="campaign-header">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="campaign-title" id="campaignTitle">Campaign</div>
+            <div class="campaign-sub" id="campaignSub">Claude generates a personalised message for each agent</div>
+          </div>
+          <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
+        </div>
+        <div class="campaign-progress" style="margin-top:10px">
+          <div class="campaign-bar"><div class="campaign-bar-fill" id="campaignBarFill" style="width:0%"></div></div>
+          <div class="campaign-count" id="campaignCount">0 / 0</div>
+        </div>
+      </div>
+      <div class="campaign-body" id="campaignBody" style="flex:1;overflow-y:auto">
+        <div style="text-align:center;padding:40px;color:var(--ink3);font-size:13px">Loading agents...</div>
+      </div>
     </div>
+
   </div>
 </div>
 
@@ -2082,32 +2142,101 @@ Notes: ${a.notes || 'none'}`
   btn.disabled = false;
 }
 
-function openCampaignPanel() {
-  const isSamba = pipeline === 'samba';
-  document.getElementById('campaignTitle').textContent = isSamba
-    ? 'Samba Rentals -- re-engagement campaign'
-    : 'KAYA Sales -- re-engagement campaign';
+// ── CAMPAIGN BUILDER ──────────────────────────────────────────────
 
-  // Queue: all agents with a WA number, sorted by activity score desc
-  campaignQueue = agents
-    .filter(a => a.wa_num && (a.name || a.agency))
-    .sort((a, b) => {
-      // Already sent agents go to the end
-      if (a.last_campaign_sent && !b.last_campaign_sent) return 1;
-      if (!a.last_campaign_sent && b.last_campaign_sent) return -1;
-      return (b.activity_score || 0) - (a.activity_score || 0);
-    });
+function openCampaignBuilder() {
+  // Reset setup form
+  document.getElementById('cbName').value = '';
+  document.getElementById('campaignContext').value = '';
+  document.getElementById('cbExcludeDays').value = '14';
+  document.querySelector('input[name="cbPipeline"][value="kaya"]').checked = true;
 
-  campaignIndex = 0;
-  campaignGenerated = {};
-  updateCampaignProgress();
-  renderCampaignAgent();
+  // Build status filter checkboxes
+  const filterContainer = document.getElementById('cbStatusFilters');
+  const allStatuses = [...new Set([...KAYA_STATUSES, ...SAMBA_STATUSES])];
+  filterContainer.innerHTML = allStatuses.map(s => {
+    const cfg = S_CFG[s] || {};
+    return `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:4px 10px;border-radius:20px;background:${cfg.bg||'var(--sand)'};color:${cfg.text||'var(--ink2)'};font-size:11px;font-weight:500">
+      <input type="checkbox" name="cbStatus" value="${s}" onchange="updateCampaignPreview()" style="accent-color:currentColor"> ${s}
+    </label>`;
+  }).join('');
 
-  const fill = document.getElementById('campaignBarFill');
-  if (isSamba) fill.classList.add('samba'); else fill.classList.remove('samba');
+  // Show setup, hide queue
+  document.getElementById('campaignSetup').style.display = '';
+  document.getElementById('campaignQueue').style.display = 'none';
 
+  updateCampaignPreview();
   document.getElementById('campaignOverlay').classList.add('open');
 }
+
+function getCampaignAudience() {
+  const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || 'kaya';
+  const selectedStatuses = [...document.querySelectorAll('input[name="cbStatus"]:checked')].map(el => el.value);
+  const excludeDays = parseInt(document.getElementById('cbExcludeDays')?.value || '0');
+
+  const cutoff = excludeDays > 0 ? new Date(Date.now() - excludeDays * 86400000) : null;
+
+  return agents.filter(a => {
+    if (!a.wa_num) return false;
+    if (!a.name && !a.agency) return false;
+
+    // Exclude recently messaged
+    if (cutoff && a.last_campaign_sent) {
+      const parts = a.last_campaign_sent.split('/');
+      if (parts.length === 3) {
+        const sent = new Date(2000 + parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+        if (sent >= cutoff) return false;
+      }
+    }
+
+    // Status filter
+    if (selectedStatuses.length > 0) {
+      const kayaMatch = pipelineVal !== 'samba' && KAYA_PROJECTS.some(p => selectedStatuses.includes(a.projects?.[p]?.status));
+      const sambaMatch = pipelineVal !== 'kaya' && selectedStatuses.includes(a.samba?.status);
+      if (pipelineVal === 'both' && !kayaMatch && !sambaMatch) return false;
+      if (pipelineVal === 'kaya' && !kayaMatch) return false;
+      if (pipelineVal === 'samba' && !sambaMatch) return false;
+    }
+
+    return true;
+  }).sort((a, b) => {
+    if (a.last_campaign_sent && !b.last_campaign_sent) return 1;
+    if (!a.last_campaign_sent && b.last_campaign_sent) return -1;
+    return (b.activity_score || 0) - (a.activity_score || 0);
+  });
+}
+
+function updateCampaignPreview() {
+  const count = getCampaignAudience().length;
+  const el = document.getElementById('cbPreviewCount');
+  if (el) el.innerHTML = `<strong style="color:var(--ink)">${count} agent${count !== 1 ? 's' : ''}</strong> match your filters`;
+}
+
+function startCampaign() {
+  const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || 'kaya';
+  const name = document.getElementById('cbName').value.trim() || 'Campaign';
+
+  campaignQueue = getCampaignAudience();
+  campaignIndex = 0;
+  campaignGenerated = {};
+
+  // Set title
+  document.getElementById('campaignTitle').textContent = name;
+  document.getElementById('campaignSub').textContent = `${campaignQueue.length} agents · Claude personalises each message`;
+
+  const fill = document.getElementById('campaignBarFill');
+  if (pipelineVal === 'samba') fill.classList.add('samba'); else fill.classList.remove('samba');
+
+  // Switch to queue view
+  document.getElementById('campaignSetup').style.display = 'none';
+  const queueEl = document.getElementById('campaignQueue');
+  queueEl.style.display = 'flex';
+
+  updateCampaignProgress();
+  renderCampaignAgent();
+}
+
+function openCampaignPanel() { openCampaignBuilder(); } // legacy alias
 
 function closeCampaignPanel() {
   document.getElementById('campaignOverlay').classList.remove('open');
@@ -2216,11 +2345,10 @@ async function renderCampaignAgent() {
       <div class="campaign-actions">
         <button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>
         <span style="flex:1"></span>
-        <a class="campaign-send-btn ${!waNum ? 'disabled' : ''}" id="campSendBtn"
-          href="${waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '#'}"
-          target="_blank" onclick="advanceCampaign()">
-          Send & next →
-        </a>
+        <button class="campaign-send-btn ${!waNum ? 'disabled' : ''}" id="campSendBtn"
+          ${!waNum ? 'disabled' : ''} onclick="advanceCampaign()">
+          <span id="campSendLabel">Send & next →</span>
+        </button>
       </div>
     </div>
   </div>`;
@@ -2331,47 +2459,67 @@ function skipCampaignAgent() {
   renderCampaignAgent();
 }
 
-function advanceCampaign() {
+async function advanceCampaign() {
   const a = campaignQueue[campaignIndex];
-  if (a) {
-    const isSamba = pipeline === 'samba';
-    const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'2-digit'}).replace(/\//g,'/');
+  if (!a) return;
 
-    if (isSamba) {
-      if (a.samba?.status === 'Not contacted') a.samba.status = 'Contacted';
-      a.samba.last_contacted = today;
-    } else {
-      // Mark all Not contacted projects as Contacted
-      let anyUpdated = false;
-      KAYA_PROJECTS.forEach(p => {
-        if (a.projects[p]?.status === 'Not contacted') {
-          a.projects[p].status = 'Contacted';
-          anyUpdated = true;
-        }
+  const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || pipeline;
+  const isSamba = pipelineVal === 'samba';
+  const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'2-digit'}).replace(/\//g,'/');
+  const msg = document.getElementById('campMsgArea')?.value?.trim() || '';
+  const waNum = getWaNum(a);
+  const sendBtn = document.getElementById('campSendBtn');
+  const sendLabel = document.getElementById('campSendLabel');
+
+  // Send via WhatsApp API
+  if (waNum && msg) {
+    if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.6'; }
+    if (sendLabel) sendLabel.textContent = 'Sending...';
+    try {
+      const resp = await fetch('/api/whatsapp-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
       });
-      // If all projects already have status, just record the contact date in notes
+      const result = await resp.json();
+      if (result.success) {
+        if (sendLabel) sendLabel.textContent = '✓ Sent!';
+        // Brief pause to show the sent confirmation, then advance
+        await new Promise(r => setTimeout(r, 800));
+      } else {
+        // API send failed — fall back to wa.me link
+        console.warn('WA send failed:', result.error);
+        window.open(buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg), '_blank');
+      }
+    } catch(err) {
+      console.warn('WA send error:', err.message);
+      window.open(buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg), '_blank');
     }
-    // Record last contacted date and message sent in notes
-    const msg = document.getElementById('campMsgArea')?.value?.slice(0, 100) || '';
-    const sentNote = '[' + today + '] Campaign msg sent' + (msg ? ': "' + msg + '..."' : '');
-    a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
-    a.last_campaign_sent = today;
-
-    // Use saveAgent (single PATCH) not saveAgents (bulk) so this persists to Supabase immediately
-    saveAgent(a.id, {
-      last_campaign_sent: today,
-      notes: a.notes,
-      projects: a.projects,
-      samba: a.samba
-    });
-    render();
   }
+
+  // Update agent status and record send
+  if (isSamba) {
+    if (a.samba?.status === 'Not contacted') a.samba.status = 'Contacted';
+  } else {
+    KAYA_PROJECTS.forEach(p => {
+      if (a.projects?.[p]?.status === 'Not contacted') a.projects[p].status = 'Contacted';
+    });
+  }
+  const sentNote = '[' + today + '] Campaign msg sent: "' + msg.slice(0, 80) + (msg.length > 80 ? '...' : '') + '"';
+  a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
+  a.last_campaign_sent = today;
+
+  saveAgent(a.id, {
+    last_campaign_sent: today,
+    notes: a.notes,
+    projects: a.projects,
+    samba: a.samba
+  });
+  render();
+
   campaignIndex++;
   updateCampaignProgress();
-  // Use targeted render if in targeted campaign
-  const isTargeted = typeof renderCampaignAgentTargeted === 'function' 
-    && campaignQueue.some(x => x.campaign_group);
-  setTimeout(() => isTargeted ? renderCampaignAgentTargeted() : renderCampaignAgent(), 300);
+  setTimeout(() => renderCampaignAgent(), 300);
 }
 
 
