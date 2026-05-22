@@ -723,41 +723,31 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 </div>
 
 <script>
-const APIFY_TOKEN = 'apify_api_VYbaODK7ioien89N6AWBmwamYQnEyg4DANou';
-const APIFY_ACTOR = 'compass~crawler-google-places';
-
-const SUPABASE_URL = 'https://viftknpkeitbovvxcdez.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZpZnRrbnBrZWl0Ym92dnhjZGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYyNzc5NDAsImV4cCI6MjA5MTg1Mzk0MH0.A6yuw3r8rj4xpt91ZHUSQoVNLDAt0Yi9KuNSad2Wvb4';
-const SUPABASE_HEADERS = {
-  'apikey': SUPABASE_KEY,
-  'Authorization': 'Bearer ' + SUPABASE_KEY,
-  'Content-Type': 'application/json',
-  'Prefer': 'return=minimal'
-};
-
-// Supabase helpers
+// Supabase helpers — keys live server-side in /api/supabase
 async function sbGet() {
-  const r = await fetch(SUPABASE_URL + '/rest/v1/agents?select=*&order=id', {
-    headers: SUPABASE_HEADERS
+  const r = await fetch('/api/supabase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'get_agents' })
   });
   if (!r.ok) throw new Error('Supabase GET failed: ' + r.status);
   return r.json();
 }
 
 async function sbUpsert(agentData) {
-  const r = await fetch(SUPABASE_URL + '/rest/v1/agents', {
+  const r = await fetch('/api/supabase', {
     method: 'POST',
-    headers: { ...SUPABASE_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify(agentData)
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'upsert_agent', payload: agentData })
   });
   if (!r.ok) throw new Error('Supabase upsert failed: ' + r.status);
 }
 
 async function sbPatch(id, fields) {
-  const r = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + id, {
-    method: 'PATCH',
-    headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-    body: JSON.stringify(fields)
+  const r = await fetch('/api/supabase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'patch_agent', payload: { id, fields } })
   });
   if (!r.ok) throw new Error('Supabase PATCH failed: ' + r.status);
 }
@@ -815,8 +805,10 @@ let agents = [{"id": 1, "name": "Lisa Comsatun", "agency": "Seven Stones", "wa_u
 
 async function loadAgents() {
   try {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/agents?select=*&order=id', {
-      headers: SUPABASE_HEADERS
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_agents' })
     });
     if (r.ok) {
       const data = await r.json();
@@ -838,11 +830,11 @@ async function loadAgents() {
 }
 function saveAgents() {
   try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
-  // Async upsert to Supabase
-  fetch(SUPABASE_URL + '/rest/v1/agents', {
+  // Async upsert to Supabase via proxy
+  fetch('/api/supabase', {
     method: 'POST',
-    headers: { ...SUPABASE_HEADERS, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify(agents)
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'upsert_agent', payload: agents })
   }).catch(e => console.warn('Supabase save failed:', e.message));
 }
 
@@ -850,10 +842,10 @@ function saveAgent(id, fields) {
   const a = agents.find(x => x.id === id);
   if (a) Object.assign(a, fields);
   try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
-  fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + id, {
-    method: 'PATCH',
-    headers: { ...SUPABASE_HEADERS, 'Prefer': 'return=minimal' },
-    body: JSON.stringify(fields)
+  fetch('/api/supabase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'patch_agent', payload: { id, fields } })
   }).catch(e => console.warn('Supabase patch failed:', e.message));
 }
 loadAgents();
@@ -1355,8 +1347,6 @@ function selectAllGroups() {
 }
 
 // FACEBOOK SCRAPER
-const FB_ACTOR = 'apify~facebook-groups-scraper';
-
 async function runFacebookScrape() {
   const isSamba = pipeline === 'samba';
   const cuser = document.getElementById('fbCuser').value.trim();
@@ -1401,12 +1391,12 @@ async function runFacebookScrape() {
   const sinceStr = since.toISOString().split('T')[0];
 
   try {
-    const startRes = await fetch(
-      'https://api.apify.com/v2/acts/' + FB_ACTOR + '/runs?token=' + APIFY_TOKEN,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+    const startRes = await fetch('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'start_facebook',
+        payload: {
           startUrls: selectedGroups.slice(0, 10).map(g => ({
             url: 'https://www.facebook.com/groups/search/?q=' + encodeURIComponent(g),
             label: 'GROUP'
@@ -1420,9 +1410,9 @@ async function runFacebookScrape() {
           scrapeAbout: false,
           scrapeReviews: false,
           scrapeMembers: false,
-        })
-      }
-    );
+        }
+      })
+    });
 
     if (!startRes.ok) {
       const err = await startRes.text();
@@ -1437,7 +1427,7 @@ async function runFacebookScrape() {
     while (!done && attempts < 90) {
       await new Promise(r => setTimeout(r, 5000));
       attempts++;
-      const poll = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + APIFY_TOKEN)).json();
+      const poll = await (await fetch('/api/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', payload: { runId } }) })).json();
       statusText.textContent = 'Scanning groups... (' + (attempts * 5) + 's elapsed)';
       if (poll.data.status === 'SUCCEEDED') done = true;
       else if (['FAILED','ABORTED'].includes(poll.data.status)) throw new Error('Scraper failed: ' + poll.data.status);
@@ -1446,9 +1436,7 @@ async function runFacebookScrape() {
 
     statusText.textContent = 'Extracting phone numbers from posts...';
 
-    const items = await (await fetch(
-      'https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?token=' + APIFY_TOKEN + '&limit=500'
-    )).json();
+    const items = await (await fetch('/api/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'results', payload: { runId, limit: 500 } }) })).json();
 
     // Extract WA/phone numbers from post text
     const phoneRegex = /(?:wa(?:\.me)?[:/\s]*|whatsapp[:\s]*|hp[:\s]*|telp?[:\s]*|contact[:\s]*|[\+]?62|08)\s*[\d\s\-\.]{8,15}/gi;
@@ -2609,11 +2597,14 @@ async function runDiscover() {
   statusText.textContent = 'Starting Apify scraper...';
 
   try {
-    const startRes = await fetch(
-      'https://api.apify.com/v2/acts/' + APIFY_ACTOR + '/runs?token=' + APIFY_TOKEN,
-      { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ searchStringsArray: queries, maxCrawledPlacesPerSearch: 20, language: 'en', countryCode: 'id' }) }
-    );
+    const startRes = await fetch('/api/discover', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'start_gmaps',
+        payload: { searchStringsArray: queries, maxCrawledPlacesPerSearch: 20, language: 'en', countryCode: 'id' }
+      })
+    });
     if (!startRes.ok) throw new Error('Failed to start scraper: ' + startRes.status);
     const runId = (await startRes.json()).data.id;
     statusText.textContent = 'Scraping Google Maps... this takes 2-3 minutes';
@@ -2621,7 +2612,7 @@ async function runDiscover() {
     let done = false, attempts = 0;
     while (!done && attempts < 60) {
       await new Promise(r => setTimeout(r, 5000)); attempts++;
-      const poll = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + APIFY_TOKEN)).json();
+      const poll = await (await fetch('/api/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'poll', payload: { runId } }) })).json();
       statusText.textContent = 'Scraping Google Maps... (' + (attempts * 5) + 's)';
       if (poll.data.status === 'SUCCEEDED') done = true;
       else if (['FAILED','ABORTED'].includes(poll.data.status)) throw new Error('Scraper failed');
@@ -2629,7 +2620,7 @@ async function runDiscover() {
     if (!done) throw new Error('Timed out');
 
     statusText.textContent = 'Processing results...';
-    const items = await (await fetch('https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?token=' + APIFY_TOKEN + '&limit=400')).json();
+    const items = await (await fetch('/api/discover', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'results', payload: { runId, limit: 400 } }) })).json();
 
     const seen = new Set();
     const existingPhones = new Set(agents.map(a => a.wa_num).filter(Boolean));
