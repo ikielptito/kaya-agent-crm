@@ -6,6 +6,7 @@
 <title>Agent CRM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -454,6 +455,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
     <button class="btn-campaign" id="campaignBtn" onclick="openCampaignPanel()">↗ Re-engagement campaign</button>
     <button class="btn-campaign" id="kayaCampaignBtn" onclick="openCampaignPanelTargeted()" style="background:var(--kaya-light);border-color:var(--kaya-mid);color:var(--kaya)">⚡ KAYA listing campaign (66)</button>
     <button class="btn-discover" id="discoverBtn" onclick="openDiscoverPanel()">⊕ Discover agents</button>
+    <button class="btn-discover" onclick="downloadExcel()" style="flex-shrink:0">↓ Export .xlsx</button>
     <button class="btn-add" id="addBtn" onclick="openAddModal()">+ Add agent</button>
   </div>
 </header>
@@ -2729,6 +2731,20 @@ function importSelected() {
   document.getElementById('discoverRunBtn').disabled = false;
   document.getElementById('discoverRunBtn').textContent = 'Search Google Maps';
   if (imported > 0) alert(imported + ' new agents imported!');
+}
+
+function downloadExcel() {
+  const rows = agents
+    .filter(a => a.name || a.agency || a.wa_num)
+    .map(a => ({
+      'Name': a.name || '',
+      'Agency': a.agency || '',
+      'WhatsApp': a.wa_num || '',
+    }));
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Agents');
+  XLSX.writeFile(wb, 'agents.xlsx');
 }
 
 render();
