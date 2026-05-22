@@ -84,6 +84,19 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(r.status).json(data);
 
+    } else if (action === 'get_settings') {
+      r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.' + (payload?.key || 'automation') + '&select=value', { headers });
+      const data = await r.json();
+      return res.status(r.status).json(data?.[0]?.value || null);
+
+    } else if (action === 'set_settings') {
+      r = await fetch(SUPABASE_URL + '/rest/v1/settings', {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key: payload.key, value: payload.value })
+      });
+      return res.status(r.status).end();
+
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });
     }

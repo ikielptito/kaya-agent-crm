@@ -14,14 +14,26 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'WhatsApp env vars not configured' });
   }
 
-  const { waNum, message, useTemplate, templateName, templateParams, agentId, campaignId } = req.body || {};
+  const { waNum, message, useTemplate, templateName, templateParams, agentId, campaignId, docUrl, docFilename, caption } = req.body || {};
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
 
   try {
     let body;
 
-    if (useTemplate) {
+    if (docUrl) {
+      // Send a document (PDF brochure)
+      body = {
+        messaging_product: 'whatsapp',
+        to: waNum,
+        type: 'document',
+        document: {
+          link: docUrl,
+          filename: docFilename || 'document.pdf',
+          ...(caption ? { caption } : {})
+        }
+      };
+    } else if (useTemplate) {
       // Send a pre-approved template message
       body = {
         messaging_product: 'whatsapp',
@@ -82,7 +94,7 @@ export default async function handler(req, res) {
           agent_id: agentId || null,
           wa_num: waNum,
           direction: 'outbound',
-          content: useTemplate ? `[Template: ${templateName}]` : message,
+          content: docUrl ? `[Document: ${docFilename || 'PDF'}]${caption ? ' ' + caption : ''}` : (useTemplate ? `[Template: ${templateName}]` : message),
           wa_message_id: waMessageId,
           timestamp: new Date().toISOString(),
           source: 'api',
