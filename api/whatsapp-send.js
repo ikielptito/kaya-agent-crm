@@ -14,7 +14,7 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'WhatsApp env vars not configured' });
   }
 
-  const { waNum, message, useTemplate, templateName, templateParams, agentId, campaignId, docUrl, docFilename, caption } = req.body || {};
+  const { waNum, message, useTemplate, templateName, templateParams, templateLanguage, agentId, campaignId, docUrl, docFilename, caption } = req.body || {};
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
 
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
         type: 'template',
         template: {
           name: templateName || 'hello_world',
-          language: { code: 'en_US' },
+          language: { code: templateLanguage || 'en_US' },
           components: templateParams && templateParams.length > 0 ? [{
             type: 'body',
             parameters: templateParams.map(p => ({ type: 'text', text: p }))
