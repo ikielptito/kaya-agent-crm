@@ -770,10 +770,36 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
             <option value="30">Exclude messaged in last 30 days</option>
           </select>
         </div>
-        <!-- Context for Claude -->
+        <!-- Message mode -->
         <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">MESSAGE MODE</div>
+          <div style="display:flex;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
+              <input type="radio" name="cbMode" value="personalized" checked onchange="campaignMode=this.value;document.getElementById('cbContextWrap').style.display='';document.getElementById('cbBroadcastWrap').style.display='none'"> Personalized (Claude per agent)
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
+              <input type="radio" name="cbMode" value="broadcast" onchange="campaignMode=this.value;document.getElementById('cbContextWrap').style.display='none';document.getElementById('cbBroadcastWrap').style.display=''"> Broadcast (same for all)
+            </label>
+          </div>
+        </div>
+        <!-- Context for Claude (personalized mode) -->
+        <div id="cbContextWrap">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(optional)</span></div>
           <textarea id="campaignContext" placeholder="e.g. 'Focus on Palem Kembar — construction just resumed' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+        </div>
+        <!-- Broadcast message (broadcast mode) -->
+        <div id="cbBroadcastWrap" style="display:none">
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">BROADCAST MESSAGE</div>
+          <textarea id="cbBroadcastMsg" placeholder="Write the message to send to all agents... Use {{name}} for the agent's first name." style="width:100%;min-height:100px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);line-height:1.6;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+        </div>
+        <!-- Attachments -->
+        <div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">ATTACHMENTS <span style="font-weight:400;color:var(--ink4)">(sent as separate WhatsApp documents)</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px" id="cbBrochurePicker">
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px" id="cbAttachmentChips"></div>
+          <input type="file" id="cbFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg" style="display:none" onchange="handleCampaignFileUpload(this)">
+          <button onclick="document.getElementById('cbFileInput').click()" style="font-size:11px;padding:5px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;transition:border-color 0.12s" onmouseover="this.style.borderColor='var(--accent-mid)'" onmouseout="this.style.borderColor='var(--sand3)'">+ Upload custom file</button>
         </div>
         <!-- Preview count + CTA -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--sand);border-radius:var(--radius-sm);border:1px solid var(--sand3)">
@@ -2147,6 +2173,18 @@ The message should:
 let campaignQueue = [];
 let campaignIndex = 0;
 let campaignGenerated = {};
+let campaignAttachments = []; // [{url, filename, label, source:'brochure'|'upload'}]
+let campaignMode = 'personalized'; // 'personalized' | 'broadcast'
+let campaignBroadcastMsg = '';
+
+// Brochure list (mirrors lib/kb.js)
+const BROCHURE_LIST = [
+  { key: 'clay_house', label: 'Clay House', url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/The%20Clay%20House%20February%202028.pdf', filename: 'The Clay House.pdf' },
+  { key: 'tropicana_valley', label: 'Tropicana Valley', url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/Tropical%20Townhouses%20Agent%20Version%20May%202027.pdf', filename: 'Tropicana Valley.pdf' },
+  { key: 'palem_kembar', label: 'Palem Kembar', url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/Palem%20Kembar%20Ungasan%20Freehold%20by%20KAYA%20Developments_compressed%203.pdf', filename: 'Palem Kembar.pdf' },
+  { key: 'sabit_house', label: 'Sabit House', url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/The%20Sabit%20House%20Freehold%20Berawa_compressed%203.pdf', filename: 'The Sabit House.pdf' },
+  { key: 'lanehaus', label: 'LaneHAUS', url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/LaneHAUS%20Pererenan_compressed%202.pdf', filename: 'LaneHAUS Pererenan.pdf' },
+];
 
 
 // CAMPAIGN: 66 HIGH-ACTIVITY UNLISTED AGENTS
@@ -2469,8 +2507,15 @@ function openCampaignBuilder() {
   // Reset setup form
   document.getElementById('cbName').value = '';
   document.getElementById('campaignContext').value = '';
+  document.getElementById('cbBroadcastMsg') && (document.getElementById('cbBroadcastMsg').value = '');
   document.getElementById('cbExcludeDays').value = '14';
   document.querySelector('input[name="cbPipeline"][value="kaya"]').checked = true;
+  document.querySelector('input[name="cbMode"][value="personalized"]').checked = true;
+  campaignMode = 'personalized';
+  campaignBroadcastMsg = '';
+  campaignAttachments = [];
+  document.getElementById('cbContextWrap').style.display = '';
+  document.getElementById('cbBroadcastWrap').style.display = 'none';
 
   // Build status filter checkboxes
   const filterContainer = document.getElementById('cbStatusFilters');
@@ -2481,6 +2526,13 @@ function openCampaignBuilder() {
       <input type="checkbox" name="cbStatus" value="${s}" onchange="updateCampaignPreview()" style="accent-color:currentColor"> ${s}
     </label>`;
   }).join('');
+
+  // Build brochure picker
+  const picker = document.getElementById('cbBrochurePicker');
+  picker.innerHTML = BROCHURE_LIST.map(b => `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:5px 10px;border-radius:8px;border:1.5px solid var(--sand3);background:white;font-size:11px;font-weight:500;color:var(--ink2);transition:all 0.12s">
+    <input type="checkbox" name="cbBrochure" value="${b.key}" onchange="updateAttachments()" style="accent-color:var(--accent)"> ${b.label}
+  </label>`).join('');
+  document.getElementById('cbAttachmentChips').innerHTML = '';
 
   // Show setup, hide queue
   document.getElementById('campaignSetup').style.display = '';
@@ -2529,13 +2581,90 @@ function getCampaignAudience() {
 
 function updateCampaignPreview() {
   const count = getCampaignAudience().length;
+  const attachCount = campaignAttachments.length;
   const el = document.getElementById('cbPreviewCount');
-  if (el) el.innerHTML = `<strong style="color:var(--ink)">${count} agent${count !== 1 ? 's' : ''}</strong> match your filters`;
+  const attachLabel = attachCount > 0 ? ` · ${attachCount} attachment${attachCount !== 1 ? 's' : ''}` : '';
+  if (el) el.innerHTML = `<strong style="color:var(--ink)">${count} agent${count !== 1 ? 's' : ''}</strong> match${attachLabel}`;
+}
+
+function updateAttachments() {
+  // Gather selected brochures
+  const checked = [...document.querySelectorAll('input[name="cbBrochure"]:checked')].map(el => el.value);
+  // Keep custom uploads, replace brochure selections
+  campaignAttachments = campaignAttachments.filter(a => a.source === 'upload');
+  checked.forEach(key => {
+    const b = BROCHURE_LIST.find(x => x.key === key);
+    if (b) campaignAttachments.push({ url: b.url, filename: b.filename, label: b.label, source: 'brochure' });
+  });
+  renderAttachmentChips();
+  updateCampaignPreview();
+}
+
+function renderAttachmentChips() {
+  const container = document.getElementById('cbAttachmentChips');
+  if (!container) return;
+  const uploads = campaignAttachments.filter(a => a.source === 'upload');
+  container.innerHTML = uploads.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:var(--sand);border:1px solid var(--sand3);border-radius:6px;font-size:11px;color:var(--ink2)">
+    📎 ${a.filename}
+    <span onclick="removeUpload(${i})" style="cursor:pointer;color:var(--ink4);font-size:13px;line-height:1">&times;</span>
+  </span>`).join('');
+}
+
+function removeUpload(idx) {
+  const uploads = campaignAttachments.filter(a => a.source === 'upload');
+  const toRemove = uploads[idx];
+  if (toRemove) campaignAttachments = campaignAttachments.filter(a => a !== toRemove);
+  renderAttachmentChips();
+  updateCampaignPreview();
+}
+
+async function handleCampaignFileUpload(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) { alert('File too large (max 10MB)'); input.value = ''; return; }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  // Upload to Supabase Storage via a simple fetch
+  try {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `campaign-files/${Date.now()}_${safeName}`;
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upload_file', payload: { path, contentType: file.type } })
+    });
+    const result = await r.json();
+
+    if (result.uploadUrl) {
+      // Direct upload to Supabase Storage
+      await fetch(result.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      campaignAttachments.push({ url: result.publicUrl, filename: file.name, label: file.name, source: 'upload' });
+    } else {
+      // Fallback: use public URL format directly
+      const SUPABASE_PROJECT = 'viftknpkeitbovvxcdez';
+      const publicUrl = `https://${SUPABASE_PROJECT}.supabase.co/storage/v1/object/public/brochures/${path}`;
+      campaignAttachments.push({ url: publicUrl, filename: file.name, label: file.name, source: 'upload' });
+    }
+  } catch(err) {
+    alert('Upload failed: ' + err.message);
+  }
+  input.value = '';
+  renderAttachmentChips();
+  updateCampaignPreview();
 }
 
 function startCampaign() {
   const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || 'kaya';
   const name = document.getElementById('cbName').value.trim() || 'Campaign';
+  campaignMode = document.querySelector('input[name="cbMode"]:checked')?.value || 'personalized';
+  campaignBroadcastMsg = document.getElementById('cbBroadcastMsg')?.value?.trim() || '';
+
+  if (campaignMode === 'broadcast' && !campaignBroadcastMsg) {
+    alert('Please write a broadcast message before starting.');
+    return;
+  }
 
   campaignQueue = getCampaignAudience();
   campaignIndex = 0;
@@ -2543,7 +2672,9 @@ function startCampaign() {
 
   // Set title
   document.getElementById('campaignTitle').textContent = name;
-  document.getElementById('campaignSub').textContent = `${campaignQueue.length} agents · Claude personalises each message`;
+  const modeLabel = campaignMode === 'broadcast' ? 'Broadcast message' : 'Claude personalises each message';
+  const attachLabel = campaignAttachments.length > 0 ? ` · ${campaignAttachments.length} attachment${campaignAttachments.length !== 1 ? 's' : ''}` : '';
+  document.getElementById('campaignSub').textContent = `${campaignQueue.length} agents · ${modeLabel}${attachLabel}`;
 
   const fill = document.getElementById('campaignBarFill');
   if (pipelineVal === 'samba') fill.classList.add('samba'); else fill.classList.remove('samba');
@@ -2639,9 +2770,9 @@ async function renderCampaignAgent() {
         <div class="campaign-agent-name">${a.name || a.agency || 'Unknown'}</div>
         <div class="campaign-agent-meta">${a.agency || ''}${a.agency && (kayaSummary || sambaSummary) ? ' · ' : ''}${isSamba ? 'Samba: ' + sambaSummary : kayaSummary}</div>
       </div>
-      <button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
+      ${campaignMode === 'personalized' ? `<button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
         <span class="ai-icon">✦</span> ${msg ? 'Regenerate' : 'Generate message'}
-      </button>
+      </button>` : `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Broadcast</span>`}
     </div>
     <div class="campaign-agent-body">
       ${(a.conversation_summary || a.conversation_history?.kaya_notes || a.notes) ? `
@@ -2662,20 +2793,28 @@ async function renderCampaignAgent() {
         <div id="campAiSummary" style="display:none;margin-top:8px;background:var(--kaya-light);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7;border:1px solid var(--kaya-mid)"></div>
       </div>` : ''}
       <div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>
-      <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="Click Generate message to have Claude write a personalised message for this agent...">${msg}</textarea>
+      <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="${campaignMode === 'broadcast' ? 'Broadcast message will be sent to this agent...' : 'Click Generate message to have Claude write a personalised message for this agent...'}">${msg}</textarea>
+      ${campaignAttachments.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
+        ${campaignAttachments.map(a => `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:var(--sand);border:1px solid var(--sand3);border-radius:6px;font-size:10px;color:var(--ink3)">📎 ${a.filename}</span>`).join('')}
+      </div>` : ''}
       <div class="campaign-actions">
         <button class="campaign-skip-btn" onclick="skipCampaignAgent()">Skip →</button>
         <span style="flex:1"></span>
         <button class="campaign-send-btn ${!waNum ? 'disabled' : ''}" id="campSendBtn"
           ${!waNum ? 'disabled' : ''} onclick="advanceCampaign()">
-          <span id="campSendLabel">Send & next →</span>
+          <span id="campSendLabel">Send${campaignAttachments.length > 0 ? ' + ' + campaignAttachments.length + ' PDF' + (campaignAttachments.length > 1 ? 's' : '') : ''} & next →</span>
         </button>
       </div>
     </div>
   </div>`;
 
-  // Auto-generate if no message yet
-  if (!msg) {
+  // Auto-generate or pre-fill message
+  if (campaignMode === 'broadcast' && campaignBroadcastMsg) {
+    const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
+    const personalised = campaignBroadcastMsg.replace(/\{\{name\}\}/gi, firstName);
+    document.getElementById('campMsgArea').value = personalised;
+    campaignGenerated[a.id] = personalised;
+  } else if (!msg) {
     await generateCampaignMsg(a.id);
   }
 }
@@ -2804,6 +2943,17 @@ async function advanceCampaign() {
       });
       const result = await resp.json();
       if (result.success) {
+        // Send attachments as separate document messages
+        for (const att of campaignAttachments) {
+          if (sendLabel) sendLabel.textContent = `Sending ${att.filename}...`;
+          try {
+            await fetch('/api/whatsapp-send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ waNum, docUrl: att.url, docFilename: att.filename, agentId: a.id })
+            });
+          } catch(e) { console.warn('Doc send failed:', att.filename, e.message); }
+        }
         if (sendLabel) sendLabel.textContent = '✓ Sent!';
         // Show sent flash on the campaign card
         const campCard = document.querySelector('.campaign-agent-card');
