@@ -1057,8 +1057,8 @@ async function sbPatch(id, fields) {
 
 const KAYA_PROJECTS = ['Clay House','Tropicana Valley','Palem Kembar','Sabit House','LaneHAUS'];
 const PERSONAL = ['LaneHAUS'];
-const KAYA_STATUSES = ['Not contacted','Contacted','Responded','Listing agreed','Agreement signed','Listed'];
-const SAMBA_STATUSES = ['Not contacted','Contacted','Responded','Agreement sent','Active'];
+const KAYA_STATUSES = ['Not contacted','Contacted','Responded','Listing agreed','Agreement signed','Listed','Test'];
+const SAMBA_STATUSES = ['Not contacted','Contacted','Responded','Agreement sent','Active','Test'];
 
 const S_CFG = {
   'Not contacted':    { bg:'var(--s0-bg)', text:'var(--s0-text)', dot:'var(--s0-dot)', short:'None' },
@@ -1069,6 +1069,7 @@ const S_CFG = {
   'Listed':           { bg:'var(--s5-bg)', text:'var(--s5-text)', dot:'var(--s5-dot)', short:'Listed' },
   'Agreement sent':   { bg:'var(--s4-bg)', text:'var(--s4-text)', dot:'var(--s4-dot)', short:'Agr. sent' },
   'Active':           { bg:'var(--s5-bg)', text:'var(--s5-text)', dot:'var(--s5-dot)', short:'Active' },
+  'Test':             { bg:'#fce4ec', text:'#c62828', dot:'#e57373', short:'Test' },
 };
 
 const KAYA_MSG = name => {
