@@ -791,17 +791,39 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         </div>
         <!-- Message mode -->
         <div>
-          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">MESSAGE MODE</div>
-          <div style="display:flex;gap:8px">
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
-              <input type="radio" name="cbMode" value="personalized" checked onchange="campaignMode=this.value;document.getElementById('cbContextWrap').style.display='';document.getElementById('cbBroadcastWrap').style.display='none'"> Personalized (Claude per agent)
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">CLAUDE AUTONOMY</div>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label onclick="setCampaignMode('manual')" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:2px solid var(--sand3);background:white;transition:all 0.15s" id="cbModeManual">
+              <input type="radio" name="cbMode" value="manual" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Manual</div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:2px">You write every message yourself. Full control.</div>
+              </div>
             </label>
-            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;color:var(--ink2)">
-              <input type="radio" name="cbMode" value="broadcast" onchange="campaignMode=this.value;document.getElementById('cbContextWrap').style.display='none';document.getElementById('cbBroadcastWrap').style.display=''"> Broadcast (same for all)
+            <label onclick="setCampaignMode('assisted')" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:2px solid var(--accent);background:var(--accent-light);transition:all 0.15s" id="cbModeAssisted">
+              <input type="radio" name="cbMode" value="assisted" checked style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Assisted</div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:2px">Claude drafts a personalised message. You review, edit, and approve before sending.</div>
+              </div>
+            </label>
+            <label onclick="setCampaignMode('autopilot')" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:2px solid var(--sand3);background:white;transition:all 0.15s" id="cbModeAutopilot">
+              <input type="radio" name="cbMode" value="autopilot" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Autopilot</div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:2px">Claude generates and sends automatically. You watch the progress, no intervention needed.</div>
+              </div>
+            </label>
+            <label onclick="setCampaignMode('broadcast')" style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:2px solid var(--sand3);background:white;transition:all 0.15s" id="cbModeBroadcast">
+              <input type="radio" name="cbMode" value="broadcast" style="margin-top:2px;accent-color:var(--accent)">
+              <div>
+                <div style="font-size:13px;font-weight:500;color:var(--ink)">Broadcast</div>
+                <div style="font-size:11px;color:var(--ink3);margin-top:2px">Same message to everyone (with {{name}} placeholder). No Claude.</div>
+              </div>
             </label>
           </div>
         </div>
-        <!-- Context for Claude (personalized mode) -->
+        <!-- Context for Claude (assisted + autopilot modes) -->
         <div id="cbContextWrap">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(optional)</span></div>
           <textarea id="campaignContext" placeholder="e.g. 'Focus on Palem Kembar — construction just resumed' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
@@ -2227,7 +2249,7 @@ let campaignQueue = [];
 let campaignIndex = 0;
 let campaignGenerated = {};
 let campaignAttachments = []; // [{url, filename, label, source:'brochure'|'upload'}]
-let campaignMode = 'personalized'; // 'personalized' | 'broadcast'
+let campaignMode = 'assisted'; // 'manual' | 'assisted' | 'autopilot' | 'broadcast'
 let campaignBroadcastMsg = '';
 
 // Brochure list (mirrors lib/kb.js)
@@ -2563,14 +2585,15 @@ function openCampaignBuilder() {
   document.getElementById('cbBroadcastMsg') && (document.getElementById('cbBroadcastMsg').value = '');
   document.getElementById('cbExcludeDays').value = '14';
   document.querySelector('input[name="cbPipeline"][value="kaya"]').checked = true;
-  document.querySelector('input[name="cbMode"][value="personalized"]').checked = true;
-  campaignMode = 'personalized';
+  document.querySelector('input[name="cbMode"][value="assisted"]').checked = true;
+  campaignMode = 'assisted';
   campaignBroadcastMsg = '';
   campaignAttachments = [];
   campaignAudienceMode = 'filter';
   campaignSelectedAgentIds = new Set();
-  document.getElementById('cbContextWrap').style.display = '';
-  document.getElementById('cbBroadcastWrap').style.display = 'none';
+  // Reset mode UI
+  document.querySelector('input[name="cbMode"][value="assisted"]').checked = true;
+  setCampaignMode('assisted');
   // Reset audience mode toggle
   setCampaignAudienceMode('filter');
 
@@ -2622,6 +2645,39 @@ function setCampaignAudienceMode(mode) {
     renderCampaignAgentPicker();
   }
   updateCampaignPreview();
+}
+
+function setCampaignMode(mode) {
+  campaignMode = mode;
+  const modes = ['manual', 'assisted', 'autopilot', 'broadcast'];
+  modes.forEach(m => {
+    const el = document.getElementById('cbMode' + m.charAt(0).toUpperCase() + m.slice(1));
+    if (el) {
+      if (m === mode) {
+        el.style.borderColor = 'var(--accent)';
+        el.style.background = 'var(--accent-light)';
+      } else {
+        el.style.borderColor = 'var(--sand3)';
+        el.style.background = 'white';
+      }
+    }
+  });
+  // Show/hide context and broadcast textareas
+  const contextWrap = document.getElementById('cbContextWrap');
+  const broadcastWrap = document.getElementById('cbBroadcastWrap');
+  if (mode === 'broadcast') {
+    contextWrap.style.display = 'none';
+    broadcastWrap.style.display = '';
+  } else if (mode === 'manual') {
+    contextWrap.style.display = 'none';
+    broadcastWrap.style.display = 'none';
+  } else {
+    contextWrap.style.display = '';
+    broadcastWrap.style.display = 'none';
+  }
+  // Update start button text
+  const startBtn = document.querySelector('#campaignSetup .btn-primary, #campaignSetup button[onclick="startCampaign()"]');
+  // No need to update the button, the mode drives behavior in startCampaign
 }
 
 function renderCampaignAgentPicker() {
@@ -2795,7 +2851,7 @@ async function handleCampaignFileUpload(input) {
 function startCampaign() {
   const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || 'kaya';
   const name = document.getElementById('cbName').value.trim() || 'Campaign';
-  campaignMode = document.querySelector('input[name="cbMode"]:checked')?.value || 'personalized';
+  campaignMode = document.querySelector('input[name="cbMode"]:checked')?.value || 'assisted';
   campaignBroadcastMsg = document.getElementById('cbBroadcastMsg')?.value?.trim() || '';
 
   if (campaignMode === 'broadcast' && !campaignBroadcastMsg) {
@@ -2807,11 +2863,16 @@ function startCampaign() {
   campaignIndex = 0;
   campaignGenerated = {};
 
+  if (campaignQueue.length === 0) {
+    alert('No agents match your audience criteria.');
+    return;
+  }
+
   // Set title
   document.getElementById('campaignTitle').textContent = name;
-  const modeLabel = campaignMode === 'broadcast' ? 'Broadcast message' : 'Claude personalises each message';
+  const modeLabels = { manual: 'Manual messages', assisted: 'Claude drafts, you approve', autopilot: 'Claude sends automatically', broadcast: 'Broadcast message' };
   const attachLabel = campaignAttachments.length > 0 ? ` · ${campaignAttachments.length} attachment${campaignAttachments.length !== 1 ? 's' : ''}` : '';
-  document.getElementById('campaignSub').textContent = `${campaignQueue.length} agents · ${modeLabel}${attachLabel}`;
+  document.getElementById('campaignSub').textContent = `${campaignQueue.length} agents · ${modeLabels[campaignMode] || campaignMode}${attachLabel}`;
 
   const fill = document.getElementById('campaignBarFill');
   if (pipelineVal === 'samba') fill.classList.add('samba'); else fill.classList.remove('samba');
@@ -2822,7 +2883,12 @@ function startCampaign() {
   queueEl.style.display = 'flex';
 
   updateCampaignProgress();
-  renderCampaignAgent();
+
+  if (campaignMode === 'autopilot') {
+    runAutopilotCampaign();
+  } else {
+    renderCampaignAgent();
+  }
 }
 
 function openCampaignPanel() { openCampaignBuilder(); } // legacy alias
@@ -2907,9 +2973,9 @@ async function renderCampaignAgent() {
         <div class="campaign-agent-name">${a.name || a.agency || 'Unknown'}</div>
         <div class="campaign-agent-meta">${a.agency || ''}${a.agency && (kayaSummary || sambaSummary) ? ' · ' : ''}${isSamba ? 'Samba: ' + sambaSummary : kayaSummary}</div>
       </div>
-      ${campaignMode === 'personalized' ? `<button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
+      ${campaignMode === 'assisted' ? `<button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
         <span class="ai-icon">✦</span> ${msg ? 'Regenerate' : 'Generate message'}
-      </button>` : `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Broadcast</span>`}
+      </button>` : campaignMode === 'manual' ? `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Manual</span>` : `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Broadcast</span>`}
     </div>
     <div class="campaign-agent-body">
       ${(a.conversation_summary || a.conversation_history?.kaya_notes || a.notes) ? `
@@ -2930,7 +2996,7 @@ async function renderCampaignAgent() {
         <div id="campAiSummary" style="display:none;margin-top:8px;background:var(--kaya-light);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7;border:1px solid var(--kaya-mid)"></div>
       </div>` : ''}
       <div class="ai-generating" id="campGenerating" style="margin-bottom:8px"><div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div> Claude is writing...</div>
-      <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="${campaignMode === 'broadcast' ? 'Broadcast message will be sent to this agent...' : 'Click Generate message to have Claude write a personalised message for this agent...'}">${msg}</textarea>
+      <textarea class="campaign-msg-area ${isSamba ? 'samba' : ''}" id="campMsgArea" placeholder="${campaignMode === 'manual' ? 'Type your message to this agent...' : campaignMode === 'broadcast' ? 'Broadcast message will be sent to this agent...' : 'Claude is generating a personalised message...'}">${msg}</textarea>
       ${campaignAttachments.length > 0 ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px">
         ${campaignAttachments.map(a => `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;background:var(--sand);border:1px solid var(--sand3);border-radius:6px;font-size:10px;color:var(--ink3)">📎 ${a.filename}</span>`).join('')}
       </div>` : ''}
@@ -2945,15 +3011,16 @@ async function renderCampaignAgent() {
     </div>
   </div>`;
 
-  // Auto-generate or pre-fill message
+  // Auto-generate or pre-fill message based on mode
   if (campaignMode === 'broadcast' && campaignBroadcastMsg) {
     const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
     const personalised = campaignBroadcastMsg.replace(/\{\{name\}\}/gi, firstName);
     document.getElementById('campMsgArea').value = personalised;
     campaignGenerated[a.id] = personalised;
-  } else if (!msg) {
+  } else if (campaignMode === 'assisted' && !msg) {
     await generateCampaignMsg(a.id);
   }
+  // Manual mode: leave textarea blank for user to type
 }
 
 async function generateCampaignMsg(agentId) {
@@ -3133,6 +3200,195 @@ async function advanceCampaign() {
   setTimeout(() => renderCampaignAgent(), 300);
 }
 
+
+let autopilotRunning = false;
+let autopilotPaused = false;
+
+async function runAutopilotCampaign() {
+  autopilotRunning = true;
+  autopilotPaused = false;
+  const body = document.getElementById('campaignBody');
+  const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || pipeline;
+  const isSamba = pipelineVal === 'samba';
+  const total = campaignQueue.length;
+  let sent = 0, skipped = 0, failed = 0;
+  const log = [];
+
+  function renderAutopilotUI() {
+    body.innerHTML = `
+      <div style="padding:20px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div style="font-size:14px;font-weight:600;color:var(--ink)">Autopilot running</div>
+          <div style="display:flex;gap:8px">
+            <button onclick="autopilotPaused=!autopilotPaused;this.textContent=autopilotPaused?'Resume':'Pause'"
+              style="font-size:11px;padding:5px 12px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">${autopilotPaused ? 'Resume' : 'Pause'}</button>
+            <button onclick="autopilotRunning=false"
+              style="font-size:11px;padding:5px 12px;border:1px solid #e57373;border-radius:6px;background:#fce4ec;cursor:pointer;font-family:Geist,sans-serif;color:#c62828">Stop</button>
+          </div>
+        </div>
+        <div style="display:flex;gap:16px;margin-bottom:16px">
+          <div style="flex:1;background:var(--accent-light);border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:600;color:var(--accent)">${sent}</div>
+            <div style="font-size:10px;color:var(--ink3);margin-top:2px">Sent</div>
+          </div>
+          <div style="flex:1;background:var(--sand);border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:600;color:var(--ink3)">${skipped}</div>
+            <div style="font-size:10px;color:var(--ink3);margin-top:2px">Skipped</div>
+          </div>
+          <div style="flex:1;background:#fce4ec;border-radius:8px;padding:12px;text-align:center">
+            <div style="font-size:20px;font-weight:600;color:#c62828">${failed}</div>
+            <div style="font-size:10px;color:var(--ink3);margin-top:2px">Failed</div>
+          </div>
+        </div>
+        <div style="max-height:400px;overflow-y:auto;border:1px solid var(--sand3);border-radius:8px;background:white">
+          ${log.map(l => `<div style="padding:8px 12px;border-bottom:1px solid var(--sand2);font-size:12px;display:flex;align-items:center;gap:8px">
+            <span style="font-size:14px">${l.icon}</span>
+            <span style="font-weight:500;color:var(--ink);min-width:120px">${l.name}</span>
+            <span style="color:var(--ink3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.detail}</span>
+          </div>`).join('')}
+          ${autopilotRunning ? `<div style="padding:10px 12px;font-size:12px;color:var(--ink3);display:flex;align-items:center;gap:8px">
+            <div class="spinner" style="width:12px;height:12px;border-width:1.5px"></div>
+            ${autopilotPaused ? 'Paused...' : 'Processing next agent...'}
+          </div>` : ''}
+        </div>
+      </div>`;
+  }
+
+  for (let i = 0; i < total && autopilotRunning; i++) {
+    // Wait while paused
+    while (autopilotPaused && autopilotRunning) {
+      renderAutopilotUI();
+      await new Promise(r => setTimeout(r, 500));
+    }
+    if (!autopilotRunning) break;
+
+    const a = campaignQueue[i];
+    campaignIndex = i;
+    updateCampaignProgress();
+
+    const waNum = getWaNum(a);
+    const agentName = a.name || a.agency || 'Unknown';
+
+    // Skip if already sent or no WhatsApp
+    if (a.last_campaign_sent) {
+      log.unshift({ icon: '⏭️', name: agentName, detail: 'Already sent on ' + a.last_campaign_sent });
+      skipped++;
+      renderAutopilotUI();
+      continue;
+    }
+    if (!waNum) {
+      log.unshift({ icon: '⚠️', name: agentName, detail: 'No WhatsApp number' });
+      skipped++;
+      renderAutopilotUI();
+      continue;
+    }
+
+    // Generate message via Claude
+    log.unshift({ icon: '✦', name: agentName, detail: 'Generating message...' });
+    renderAutopilotUI();
+
+    let msg = '';
+    if (campaignMode === 'autopilot') {
+      try {
+        const agentContext = buildAgentContext(a);
+        const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
+        const extraContext = document.getElementById('campaignContext')?.value?.trim() || '';
+        const contextAddition = extraContext ? '\n\nADDITIONAL INSTRUCTIONS FROM IKIEL:\n' + extraContext : '';
+
+        const systemPrompt = 'You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali.\n\n' + PORTFOLIO_CONTEXT + '\n\nTone rules:\n- Conversational and warm, never corporate or stiff\n- Short sentences, natural rhythm\n- No em dashes (use -- instead if needed)\n- No emojis\n- Keep it concise and scannable\n- Sound like a real person\n- Never mention AI' + contextAddition + '\n\nWrite only the message text. No preamble or explanation.';
+
+        const userPrompt = isSamba
+          ? 'Write a WhatsApp message to ' + firstName + ' about Samba Realty.\n\n' + agentContext + '\n\nIf Not contacted: introduce Samba, 14 properties, 10% commission, portal (sambarentals.vercel.app). If Contacted: warm follow-up. If Active: check in.'
+          : 'Write a WhatsApp message to ' + firstName + ' about KAYA Developments.\n\n' + agentContext + '\n\nCRITICAL: If there is a RECOMMENDED NEXT ACTION or CONVERSATION HISTORY, use that as the PRIMARY guide. Otherwise introduce KAYA, 5% commission, ask which projects interest them. End with one easy question.';
+
+        msg = (await callClaude(systemPrompt, userPrompt)).trim();
+      } catch(err) {
+        log[0] = { icon: '❌', name: agentName, detail: 'Claude error: ' + err.message };
+        failed++;
+        renderAutopilotUI();
+        continue;
+      }
+    }
+
+    if (!msg) {
+      log[0] = { icon: '❌', name: agentName, detail: 'No message generated' };
+      failed++;
+      renderAutopilotUI();
+      continue;
+    }
+
+    // Send via WhatsApp API
+    log[0] = { icon: '📤', name: agentName, detail: 'Sending...' };
+    renderAutopilotUI();
+
+    try {
+      const resp = await fetch('/api/whatsapp-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
+      });
+      const result = await resp.json();
+
+      if (result.success) {
+        // Send attachments
+        for (const att of campaignAttachments) {
+          try {
+            await fetch('/api/whatsapp-send', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ waNum, docUrl: att.url, docFilename: att.filename, agentId: a.id })
+            });
+          } catch(e) {}
+        }
+
+        const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'2-digit'});
+        const sentNote = '[' + today + '] Autopilot: "' + msg.slice(0, 60) + (msg.length > 60 ? '...' : '') + '"';
+        a.last_campaign_sent = today;
+        a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
+        if (isSamba) {
+          if (a.samba?.status === 'Not contacted') a.samba.status = 'Contacted';
+        } else {
+          KAYA_PROJECTS.forEach(p => { if (a.projects?.[p]?.status === 'Not contacted') a.projects[p].status = 'Contacted'; });
+        }
+        saveAgent(a.id, { last_campaign_sent: today, notes: a.notes, projects: a.projects, samba: a.samba });
+
+        log[0] = { icon: '✅', name: agentName, detail: msg.slice(0, 80) + (msg.length > 80 ? '...' : '') };
+        sent++;
+      } else {
+        log[0] = { icon: '❌', name: agentName, detail: 'Send failed: ' + (result.error || 'unknown') };
+        failed++;
+      }
+    } catch(err) {
+      log[0] = { icon: '❌', name: agentName, detail: 'Error: ' + err.message };
+      failed++;
+    }
+
+    renderAutopilotUI();
+    // Brief delay between sends to avoid rate limiting
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  // Done
+  autopilotRunning = false;
+  campaignIndex = total;
+  updateCampaignProgress();
+  render();
+
+  body.innerHTML = `<div style="padding:20px">
+    <div style="text-align:center;margin-bottom:20px">
+      <div style="font-size:32px;margin-bottom:8px">✅</div>
+      <h3 style="margin-bottom:4px">Autopilot complete</h3>
+      <p style="font-size:13px;color:var(--ink3)">${sent} sent · ${skipped} skipped · ${failed} failed</p>
+    </div>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid var(--sand3);border-radius:8px;background:white">
+      ${log.map(l => `<div style="padding:8px 12px;border-bottom:1px solid var(--sand2);font-size:12px;display:flex;align-items:center;gap:8px">
+        <span style="font-size:14px">${l.icon}</span>
+        <span style="font-weight:500;color:var(--ink);min-width:120px">${l.name}</span>
+        <span style="color:var(--ink3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${l.detail}</span>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
 
 function toggleCardAction(id) {
   const el = document.getElementById('ca_' + id);
