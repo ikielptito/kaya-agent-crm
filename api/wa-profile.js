@@ -16,41 +16,50 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'set_photo') {
-      // Step 1: Upload image as media
-      const boundary = '----FormBoundary' + Date.now();
       const imgBuffer = Buffer.from(imageBase64, 'base64');
 
-      const bodyParts = [
-        `--${boundary}\r\n`,
-        `Content-Disposition: form-data; name="messaging_product"\r\n\r\n`,
-        `whatsapp\r\n`,
-        `--${boundary}\r\n`,
-        `Content-Disposition: form-data; name="type"\r\n\r\n`,
-        `image/png\r\n`,
-        `--${boundary}\r\n`,
-        `Content-Disposition: form-data; name="file"; filename="profile.png"\r\n`,
-        `Content-Type: image/png\r\n\r\n`,
-      ];
+      // Step 1: Get the app ID from the token (introspect)
+      const debugRes = await fetch(
+        `https://graph.facebook.com/v19.0/debug_token?input_token=${TOKEN}&access_token=${TOKEN}`
+      );
+      const debugData = await debugRes.json();
+      const appId = debugData?.data?.app_id;
 
-      const header = Buffer.from(bodyParts.join(''));
-      const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
-      const fullBody = Buffer.concat([header, imgBuffer, footer]);
-
-      const uploadRes = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/media`, {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + TOKEN,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        },
-        body: fullBody,
-      });
-      const uploadData = await uploadRes.json();
-
-      if (!uploadRes.ok || !uploadData.id) {
-        return res.status(400).json({ error: 'Media upload failed', details: uploadData });
+      if (!appId) {
+        return res.status(400).json({ error: 'Could not determine app ID', details: debugData });
       }
 
-      // Step 2: Set profile photo using the media handle
+      // Step 2: Create a resumable upload session
+      const sessionRes = await fetch(
+        `https://graph.facebook.com/v19.0/${appId}/uploads?file_length=${imgBuffer.length}&file_type=image/png&access_token=${TOKEN}`,
+        { method: 'POST' }
+      );
+      const sessionData = await sessionRes.json();
+
+      if (!sessionRes.ok || !sessionData.id) {
+        return res.status(400).json({ error: 'Upload session failed', details: sessionData });
+      }
+
+      // Step 3: Upload the file bytes
+      const uploadRes = await fetch(
+        `https://graph.facebook.com/v19.0/${sessionData.id}`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': 'OAuth ' + TOKEN,
+            'file_offset': '0',
+            'Content-Type': 'application/octet-stream',
+          },
+          body: imgBuffer,
+        }
+      );
+      const uploadData = await uploadRes.json();
+
+      if (!uploadRes.ok || !uploadData.h) {
+        return res.status(400).json({ error: 'File upload failed', details: uploadData });
+      }
+
+      // Step 4: Set profile photo using the file handle
       const profileRes = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/whatsapp_business_profile`, {
         method: 'POST',
         headers: {
@@ -59,13 +68,13 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
-          profile_picture_handle: uploadData.id,
+          profile_picture_handle: uploadData.h,
         }),
       });
       const profileData = await profileRes.json();
 
       return res.status(profileRes.ok ? 200 : 400).json({
-        mediaId: uploadData.id,
+        handle: uploadData.h,
         profileUpdate: profileData,
       });
 
