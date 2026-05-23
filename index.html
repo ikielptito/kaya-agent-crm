@@ -1170,6 +1170,13 @@ async function saveAgents() {
     if (r.ok) {
       const saved = await r.json();
       if (Array.isArray(saved) && saved.length > 0) {
+        // Update editingId if the currently open agent got a new server ID
+        if (editingId) {
+          const oldIdx = agents.findIndex(x => x.id === editingId);
+          if (oldIdx >= 0 && saved[oldIdx] && saved[oldIdx].id !== editingId) {
+            editingId = saved[oldIdx].id;
+          }
+        }
         agents = saved;
         try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
         console.log('Saved', agents.length, 'agents to Supabase');
@@ -1651,13 +1658,16 @@ function saveDrawer() {
   }, 100);
 }
 
-function openAddModal() {
+async function openAddModal() {
   const newId = Math.max(0, ...agents.map(x => x.id)) + 1;
   agents.push({ id: newId, name: '', agency: '', wa_url: '', wa_num: '', alt_contact: '', notes: '',
     projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
     samba: { status: 'Not contacted', notes: '' }
   });
-  saveAgents(); openDrawer(newId);
+  // Set editingId before save so saveAgents can remap it if server assigns a new ID
+  editingId = newId;
+  await saveAgents();
+  openDrawer(editingId);
 }
 
 // QUICK ADD
