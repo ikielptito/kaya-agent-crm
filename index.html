@@ -1158,14 +1158,26 @@ async function loadAgents() {
   } catch(e) {}
   render();
 }
-function saveAgents() {
+async function saveAgents() {
   try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
-  // Async upsert to Supabase via proxy
-  fetch('/api/supabase', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'upsert_agent', payload: agents })
-  }).catch(e => console.warn('Supabase save failed:', e.message));
+  // Upsert all agents to Supabase
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_agent', payload: agents })
+    });
+    if (r.ok) {
+      const saved = await r.json();
+      if (Array.isArray(saved) && saved.length > 0) {
+        agents = saved;
+        try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
+        console.log('Saved', agents.length, 'agents to Supabase');
+      }
+    } else {
+      console.warn('Supabase upsert failed:', await r.text());
+    }
+  } catch(e) { console.warn('Supabase save failed:', e.message); }
 }
 
 function saveAgent(id, fields) {

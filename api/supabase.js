@@ -32,14 +32,15 @@ export default async function handler(req, res) {
     } else if (action === 'upsert_agent') {
       r = await fetch(SUPABASE_URL + '/rest/v1/agents', {
         method: 'POST',
-        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=representation' },
         body: JSON.stringify(payload)
       });
       if (!r.ok) {
         const err = await r.text();
         return res.status(r.status).json({ error: err });
       }
-      return res.status(r.status).end();
+      const data = await r.json();
+      return res.status(200).json(data);
 
     } else if (action === 'patch_agent') {
       const { id, fields } = payload;
