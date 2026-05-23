@@ -1464,10 +1464,14 @@ function renderCards() {
     const lc = listedCount(a);
 
     const waBtn = waUrl
-      ? `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0">
-          <button class="wa-contact-btn" onclick="openMsg(${a.id}, event)">
-            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-            Contact
+      ? `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;align-items:flex-end">
+          <button class="wa-contact-btn" onclick="openInboxForAgent(${a.id}, event)" title="Open in CRM inbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+            Message
+          </button>
+          <button onclick="openWaApp(${a.id}, event)" title="Open in WhatsApp app" style="font-size:9px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;display:flex;align-items:center;gap:4px">
+            <svg viewBox="0 0 24 24" fill="currentColor" style="width:9px;height:9px"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+            WhatsApp
           </button>
         </div>`
       : `<span class="wa-pill none" style="font-size:10px">No WA</span>`;
@@ -2024,6 +2028,26 @@ const SAMBA_MESSAGES = {
 
 let msgAgentId = null;
 let msgWaUrl = '';
+
+// Open the inbox and select an agent's conversation
+function openInboxForAgent(agentId, event) {
+  if (event) event.stopPropagation();
+  // Switch to inbox view
+  if (!inboxOpen) {
+    toggleInbox();
+  }
+  // Open the conversation
+  setTimeout(() => openConversation(agentId), 50);
+}
+
+// Open agent's chat in WhatsApp app
+function openWaApp(agentId, event) {
+  if (event) event.stopPropagation();
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const waNum = getWaNum(a);
+  if (waNum) window.open(buildWaUrl(waNum), '_blank');
+}
 
 function openMsg(agentId, event) {
   event.stopPropagation();
@@ -3973,6 +3997,79 @@ function downloadExcel() {
 let inboxOpen = false;
 let activeConvId = null;
 let inboxPollTimer = null;
+let inboxAttachments = [];
+
+function openInboxAttachMenu(agentId) {
+  const menu = document.getElementById('inboxBrochureMenu');
+  if (!menu) return;
+  if (menu.style.display !== 'none') {
+    menu.style.display = 'none';
+    return;
+  }
+  // Build menu with brochure shortcuts + file upload
+  const brochures = BROCHURE_LIST.map(b =>
+    `<button onclick="addInboxBrochure('${b.key}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">📄 ${b.label}</button>`
+  ).join('');
+  menu.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;width:100%">
+    <div style="font-size:10px;font-weight:600;color:var(--ink3);letter-spacing:0.05em">QUICK ATTACH</div>
+    <div style="display:flex;flex-wrap:wrap;gap:5px">${brochures}</div>
+    <button onclick="document.getElementById('inboxFileInput').click()" style="font-size:11px;padding:4px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3);align-self:flex-start">+ Upload custom file</button>
+  </div>`;
+  menu.style.display = '';
+}
+
+function addInboxBrochure(key) {
+  const b = BROCHURE_LIST.find(x => x.key === key);
+  if (!b) return;
+  if (inboxAttachments.some(a => a.url === b.url)) return;
+  inboxAttachments.push({ url: b.url, filename: b.filename, label: b.label, source: 'brochure' });
+  renderInboxAttachChips();
+  document.getElementById('inboxBrochureMenu').style.display = 'none';
+}
+
+function removeInboxAttachment(i) {
+  inboxAttachments.splice(i, 1);
+  renderInboxAttachChips();
+}
+
+function renderInboxAttachChips() {
+  const el = document.getElementById('inboxAttachChips');
+  if (!el) return;
+  if (inboxAttachments.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = inboxAttachments.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:5px;padding:4px 8px;background:var(--accent-light);border:1px solid var(--accent-mid);border-radius:6px;font-size:11px;color:var(--accent)">
+    📎 ${a.filename}
+    <span onclick="removeInboxAttachment(${i})" style="cursor:pointer;color:var(--accent);font-size:14px;line-height:1">&times;</span>
+  </span>`).join('');
+}
+
+async function handleInboxFileUpload(input, agentId) {
+  const file = input.files?.[0];
+  if (!file) return;
+  if (file.size > 5 * 1024 * 1024) { alert('File too large (max 5MB)'); input.value = ''; return; }
+  try {
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const path = `inbox-files/${Date.now()}_${safeName}`;
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upload_file', payload: { path, contentType: file.type, fileBase64: base64 } })
+    });
+    const result = await r.json();
+    if (result.error) throw new Error(result.error);
+    inboxAttachments.push({ url: result.publicUrl, filename: file.name, label: file.name, source: 'upload' });
+    renderInboxAttachChips();
+    document.getElementById('inboxBrochureMenu').style.display = 'none';
+  } catch(err) {
+    alert('Upload failed: ' + err.message);
+  }
+  input.value = '';
+}
 
 function toggleInbox() {
   inboxOpen = !inboxOpen;
@@ -3988,29 +4085,64 @@ function toggleInbox() {
   }
 }
 
-function renderInbox(silent) {
+async function renderInbox(silent) {
   const list = document.getElementById('inboxList');
-  // Conversations = agents who have inbound history, sorted by last_inbound_at desc
+
+  // Fetch the list of agent_ids that have any messages (inbound OR outbound)
+  if (!silent || !window._inboxMsgAgentIds) {
+    try {
+      const r = await fetch('/api/supabase', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get_messages' })
+      });
+      const allMsgs = await r.json();
+      if (Array.isArray(allMsgs)) {
+        // Build a map: agent_id -> { lastTimestamp, lastContent, hasInbound }
+        const map = {};
+        allMsgs.forEach(m => {
+          if (m.agent_id == null) return;
+          if (!map[m.agent_id] || new Date(m.timestamp) > new Date(map[m.agent_id].lastTimestamp)) {
+            map[m.agent_id] = {
+              lastTimestamp: m.timestamp,
+              lastContent: m.content || '',
+              direction: m.direction
+            };
+          }
+        });
+        window._inboxMsgAgentIds = map;
+      }
+    } catch(e) { console.warn('Inbox fetch failed:', e.message); }
+  }
+  const msgMap = window._inboxMsgAgentIds || {};
+
+  // Conversations = agents with any message history, plus any with drafts/unread
   const convs = agents
-    .filter(a => a.last_inbound_at || a.unread_count || a.suggested_reply)
-    .sort((a, b) => new Date(b.last_inbound_at || 0) - new Date(a.last_inbound_at || 0));
+    .filter(a => msgMap[a.id] || a.last_inbound_at || a.unread_count || a.suggested_reply)
+    .sort((a, b) => {
+      const aT = msgMap[a.id]?.lastTimestamp || a.last_inbound_at || 0;
+      const bT = msgMap[b.id]?.lastTimestamp || b.last_inbound_at || 0;
+      return new Date(bT) - new Date(aT);
+    });
 
   updateInboxBadge();
 
   if (convs.length === 0) {
-    list.innerHTML = '<div style="padding:30px 16px;text-align:center;color:var(--ink3);font-size:12px">No conversations yet. They\'ll appear here when agents reply.</div>';
+    list.innerHTML = '<div style="padding:30px 16px;text-align:center;color:var(--ink3);font-size:12px">No conversations yet. Send a message from a campaign or agent card and it\'ll appear here.</div>';
     return;
   }
 
   list.innerHTML = convs.map(a => {
     const ini = initials(a.name, a.agency);
-    const time = a.last_inbound_at ? timeAgo(new Date(a.last_inbound_at)) : '';
+    const m = msgMap[a.id];
+    const lastTs = m?.lastTimestamp || a.last_inbound_at;
+    const time = lastTs ? timeAgo(new Date(lastTs)) : '';
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
+    const snippet = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
     return `<div class="inbox-conv ${a.id === activeConvId ? 'active' : ''}" onclick="openConversation(${a.id})">
       <div class="inbox-conv-avatar">${ini}</div>
       <div class="inbox-conv-info">
         <div class="inbox-conv-name">${a.name || a.agency || '+' + a.wa_num}</div>
-        <div class="inbox-conv-snippet">${a.agency || ''}</div>
+        <div class="inbox-conv-snippet">${snippet.replace(/</g,'&lt;')}</div>
       </div>
       <div class="inbox-conv-meta">
         <span class="inbox-conv-time">${time}</span>
@@ -4039,12 +4171,19 @@ async function openConversation(agentId) {
     <div class="inbox-thread-msgs" id="threadMsgs"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading messages...</div></div>
     <div class="inbox-reply">
       ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Claude drafted a reply — review and send</span></div>` : ''}
+      <div id="inboxAttachChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px"></div>
       <div class="inbox-reply-row">
-        <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})">✦ Suggest</button>
+        <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})" title="Claude suggests a reply">✦</button>
+        <button onclick="openInboxAttachMenu(${a.id})" title="Attach a file" style="height:38px;padding:0 10px;border:1px solid var(--sand3);border-radius:8px;background:white;color:var(--ink2);cursor:pointer;flex-shrink:0;font-size:16px">📎</button>
+        <input type="file" id="inboxFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg,.jpeg" style="display:none" onchange="handleInboxFileUpload(this, ${a.id})">
         <textarea id="replyBox" placeholder="Type a reply...">${(a.suggested_reply || '').replace(/</g,'&lt;')}</textarea>
         <button class="inbox-send-btn" id="replySendBtn" onclick="sendReply(${a.id})">Send</button>
       </div>
+      <div id="inboxBrochureMenu" style="display:none;margin-top:8px;padding:8px;background:var(--sand);border-radius:8px;flex-wrap:wrap;gap:5px"></div>
     </div>`;
+  // Reset inbox attachments
+  inboxAttachments = [];
+  renderInboxAttachChips();
 
   // Clear unread
   if (a.unread_count) {
@@ -4099,22 +4238,53 @@ async function sendReply(agentId) {
   const box = document.getElementById('replyBox');
   const btn = document.getElementById('replySendBtn');
   const msg = box?.value?.trim();
-  if (!msg) return;
+  if (!msg && inboxAttachments.length === 0) return;
 
+  const waNum = getWaNum(a);
   if (btn) { btn.disabled = true; btn.textContent = 'Sending...'; }
   try {
-    const resp = await fetch('/api/whatsapp-send', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waNum: getWaNum(a), message: msg, useTemplate: false, agentId: a.id })
-    });
-    const result = await resp.json();
-    if (result.success) {
+    let sentOk = false;
+    let errorMsg = null;
+
+    // Send text message first if present
+    if (msg) {
+      const resp = await fetch('/api/whatsapp-send', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
+      });
+      const result = await resp.json();
+      if (result.success) {
+        sentOk = true;
+      } else {
+        errorMsg = result.error || 'unknown error';
+      }
+    }
+
+    // Send attachments (if text succeeded or no text was sent)
+    if ((sentOk || !msg) && inboxAttachments.length > 0) {
+      for (const att of inboxAttachments) {
+        if (btn) btn.textContent = `Sending ${att.filename}...`;
+        try {
+          const docResp = await fetch('/api/whatsapp-send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ waNum, docUrl: att.url, docFilename: att.filename, agentId: a.id })
+          });
+          const docResult = await docResp.json();
+          if (docResult.success) sentOk = true;
+        } catch(e) { console.warn('Attachment send failed:', e.message); }
+      }
+    }
+
+    if (sentOk) {
       box.value = '';
-      // Clear any stored draft
+      inboxAttachments = [];
+      renderInboxAttachChips();
       if (a.suggested_reply) { a.suggested_reply = ''; saveAgent(a.id, { suggested_reply: '' }); }
+      // Invalidate inbox cache so next render fetches fresh
+      window._inboxMsgAgentIds = null;
       openConversation(agentId); // refresh thread
     } else {
-      alert('Send failed: ' + (result.error || 'unknown error'));
+      alert('Send failed: ' + (errorMsg || 'No message or attachments sent'));
     }
   } catch(e) {
     alert('Send error: ' + e.message);

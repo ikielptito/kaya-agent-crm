@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "crm",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "-l", "3456", "/Users/ikiel/kaya-agent-crm"],
+      "port": 3456
+    }
+  ]
+}
