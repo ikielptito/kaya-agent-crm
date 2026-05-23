@@ -90,6 +90,34 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(r.status).json(data?.[0]?.value || null);
 
+    } else if (action === 'upload_file') {
+      const { path, contentType, fileBase64 } = payload;
+      // Upload file to Supabase Storage (brochures bucket)
+      const uploadUrl = SUPABASE_URL + '/storage/v1/object/brochures/' + path;
+      const publicUrl = SUPABASE_URL + '/storage/v1/object/public/brochures/' + path;
+
+      if (fileBase64) {
+        // Direct upload via proxy (file sent as base64)
+        const fileBuffer = Buffer.from(fileBase64, 'base64');
+        r = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': 'Bearer ' + SUPABASE_KEY,
+            'Content-Type': contentType || 'application/octet-stream',
+            'x-upsert': 'true'
+          },
+          body: fileBuffer
+        });
+        if (!r.ok) {
+          const err = await r.text();
+          return res.status(r.status).json({ error: err });
+        }
+        return res.status(200).json({ publicUrl });
+      }
+      // Legacy: return URLs for client-side upload (won't work without auth)
+      return res.status(200).json({ uploadUrl, publicUrl });
+
     } else if (action === 'set_settings') {
       r = await fetch(SUPABASE_URL + '/rest/v1/settings', {
         method: 'POST',

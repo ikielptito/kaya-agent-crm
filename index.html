@@ -2633,32 +2633,29 @@ function removeUpload(idx) {
 async function handleCampaignFileUpload(input) {
   const file = input.files?.[0];
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) { alert('File too large (max 10MB)'); input.value = ''; return; }
+  if (file.size > 5 * 1024 * 1024) { alert('File too large (max 5MB)'); input.value = ''; return; }
 
-  const formData = new FormData();
-  formData.append('file', file);
-
-  // Upload to Supabase Storage via a simple fetch
   try {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
     const path = `campaign-files/${Date.now()}_${safeName}`;
+
+    // Read file as base64 and upload through proxy
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
     const r = await fetch('/api/supabase', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'upload_file', payload: { path, contentType: file.type } })
+      body: JSON.stringify({ action: 'upload_file', payload: { path, contentType: file.type, fileBase64: base64 } })
     });
     const result = await r.json();
 
-    if (result.uploadUrl) {
-      // Direct upload to Supabase Storage
-      await fetch(result.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      campaignAttachments.push({ url: result.publicUrl, filename: file.name, label: file.name, source: 'upload' });
-    } else {
-      // Fallback: use public URL format directly
-      const SUPABASE_PROJECT = 'viftknpkeitbovvxcdez';
-      const publicUrl = `https://${SUPABASE_PROJECT}.supabase.co/storage/v1/object/public/brochures/${path}`;
-      campaignAttachments.push({ url: publicUrl, filename: file.name, label: file.name, source: 'upload' });
-    }
+    if (result.error) throw new Error(result.error);
+    campaignAttachments.push({ url: result.publicUrl, filename: file.name, label: file.name, source: 'upload' });
   } catch(err) {
     alert('Upload failed: ' + err.message);
   }
