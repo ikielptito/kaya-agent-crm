@@ -13,17 +13,6 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Meta env vars not configured' });
   }
 
-  // DEBUG mode: return env var status
-  if (req.query?.debug === '1') {
-    return res.status(200).json({
-      META_WABA_ID_present: !!WABA_ID,
-      META_WABA_ID_length: WABA_ID ? WABA_ID.length : 0,
-      META_WABA_ID_value: WABA_ID ? WABA_ID.substring(0, 4) + '...' + WABA_ID.substring(WABA_ID.length - 4) : null,
-      META_WA_TOKEN_present: !!TOKEN,
-      META_WA_PHONE_ID_present: !!PHONE_ID,
-    });
-  }
-
   try {
     // If WABA_ID is not set, derive it from the phone number
     let wabaId = WABA_ID;
@@ -71,4 +60,3 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: err.message });
   }
 }
-// trigger redeploy v3
