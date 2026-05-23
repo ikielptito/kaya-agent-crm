@@ -57,10 +57,32 @@ export default async function handler(req, res) {
 
     } else if (action === 'get_messages') {
       const { agentId } = payload || {};
-      const filter = agentId ? `?agent_id=eq.${agentId}&order=timestamp.desc&limit=100` : '?order=timestamp.desc&limit=200';
+      const filter = agentId ? `?agent_id=eq.${agentId}&order=timestamp.desc&limit=100` : '?order=timestamp.desc&limit=500';
       r = await fetch(SUPABASE_URL + '/rest/v1/wa_messages' + filter, { headers });
       const data = await r.json();
       return res.status(r.status).json(data);
+
+    } else if (action === 'get_last_inbound') {
+      // For each agent_id in payload.agentIds, return the timestamp of their most recent inbound message
+      const { agentIds } = payload || {};
+      if (!Array.isArray(agentIds) || agentIds.length === 0) {
+        return res.status(200).json({});
+      }
+      const idsFilter = 'agent_id=in.(' + agentIds.join(',') + ')';
+      r = await fetch(
+        SUPABASE_URL + '/rest/v1/wa_messages?' + idsFilter + '&direction=eq.inbound&select=agent_id,timestamp&order=timestamp.desc&limit=1000',
+        { headers }
+      );
+      const data = await r.json();
+      const result = {};
+      if (Array.isArray(data)) {
+        data.forEach(m => {
+          if (!result[m.agent_id] || new Date(m.timestamp) > new Date(result[m.agent_id])) {
+            result[m.agent_id] = m.timestamp;
+          }
+        });
+      }
+      return res.status(200).json(result);
 
     } else if (action === 'insert_message') {
       r = await fetch(SUPABASE_URL + '/rest/v1/wa_messages', {

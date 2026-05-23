@@ -845,9 +845,20 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
             </label>
           </div>
         </div>
+        <!-- Template selection (for first-contact agents outside 24h window) -->
+        <div id="cbTemplateWrap">
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
+            <span>FIRST-CONTACT TEMPLATE <span style="font-weight:400;color:var(--ink4)">(required for cold agents)</span></span>
+            <button onclick="loadWaTemplates(true)" style="font-size:10px;padding:2px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
+          </div>
+          <div id="cbTemplatePicker" style="background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:10px;min-height:48px;font-size:12px;color:var(--ink3)">
+            <div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>
+          </div>
+          <div id="cbTemplatePreview" style="display:none;margin-top:8px;background:var(--accent-light);border:1px solid var(--accent-mid);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;line-height:1.6;color:var(--ink2);white-space:pre-wrap"></div>
+        </div>
         <!-- Context for Claude (assisted + autopilot modes) -->
         <div id="cbContextWrap">
-          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(optional)</span></div>
+          <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(optional, for agents within 24h reply window)</span></div>
           <textarea id="campaignContext" placeholder="e.g. 'Focus on Palem Kembar — construction just resumed' or 'Mention the 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
         </div>
         <!-- Broadcast message (broadcast mode) -->
@@ -2626,6 +2637,110 @@ Notes: ${a.notes || 'none'}`
 
 let currentCampaignId = null;
 let campaignsList = [];
+let waTemplates = [];
+let selectedTemplateName = null;
+let agentLastInboundMap = {};
+
+async function loadWaTemplates(forceRefresh) {
+  const picker = document.getElementById('cbTemplatePicker');
+  if (!picker) return;
+  if (waTemplates.length > 0 && !forceRefresh) {
+    renderTemplatePicker();
+    return;
+  }
+  picker.innerHTML = '<div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>';
+  try {
+    const r = await fetch('/api/whatsapp-templates', { method: 'GET' });
+    const data = await r.json();
+    if (data.templates) {
+      waTemplates = data.templates;
+      renderTemplatePicker();
+    } else {
+      picker.innerHTML = '<div style="font-size:11px;color:#a32d2d">Could not load templates: ' + (data.error || 'unknown error') + '</div>';
+    }
+  } catch(e) {
+    picker.innerHTML = '<div style="font-size:11px;color:#a32d2d">Failed to fetch templates: ' + e.message + '</div>';
+  }
+}
+
+function renderTemplatePicker() {
+  const picker = document.getElementById('cbTemplatePicker');
+  if (!picker) return;
+
+  const approved = waTemplates.filter(t => t.status === 'APPROVED');
+
+  if (approved.length === 0) {
+    picker.innerHTML = `<div style="font-size:11px;color:var(--ink3);line-height:1.6">
+      <strong style="color:var(--ink2)">No approved templates yet.</strong><br>
+      Create one in <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" style="color:var(--accent);text-decoration:underline">Meta Business Suite → WhatsApp Manager → Message Templates</a> (1-24h approval). For first-contact campaigns, you need at least one approved template. After approval, click ↻ Refresh.
+    </div>`;
+    return;
+  }
+
+  picker.innerHTML = `<select id="cbTemplateSelect" onchange="onTemplateSelect()" style="width:100%;height:34px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);outline:none">
+    <option value="">-- No template (free-form only, fails for cold agents) --</option>
+    ${approved.map(t => {
+      const sel = t.name === selectedTemplateName ? 'selected' : '';
+      return `<option value="${t.name}" ${sel}>${t.name} (${t.category}, ${t.language}) — ${t.placeholderCount} param${t.placeholderCount !== 1 ? 's' : ''}</option>`;
+    }).join('')}
+  </select>`;
+  onTemplateSelect();
+}
+
+function onTemplateSelect() {
+  const sel = document.getElementById('cbTemplateSelect');
+  if (!sel) return;
+  selectedTemplateName = sel.value || null;
+  const preview = document.getElementById('cbTemplatePreview');
+  if (!selectedTemplateName) {
+    preview.style.display = 'none';
+    return;
+  }
+  const t = waTemplates.find(x => x.name === selectedTemplateName);
+  if (!t) return;
+  // Show preview with placeholders filled with example agent data
+  const exampleName = 'Lisa';
+  const previewText = t.body
+    .replace(/\{\{1\}\}/g, exampleName)
+    .replace(/\{\{(\d+)\}\}/g, (m, n) => `[${n}]`);
+  preview.innerHTML = `<div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:0.05em">PREVIEW (with example: ${exampleName})</div>${previewText.replace(/</g,'&lt;')}`;
+  preview.style.display = '';
+}
+
+// Build template parameters for a given agent from their data
+function buildTemplateParams(agent, template) {
+  if (!template) return [];
+  // Default mapping: {{1}} = first name (or 'there'), {{2}} = agency (or empty)
+  const firstName = agent.name ? agent.name.split(' ')[0] : (agent.agency || 'there');
+  const params = [];
+  for (let i = 1; i <= template.placeholderCount; i++) {
+    if (i === 1) params.push(firstName);
+    else if (i === 2) params.push(agent.agency || '');
+    else params.push('');
+  }
+  return params;
+}
+
+// Check if an agent is within the 24h reply window
+function isAgentInWindow(agentId) {
+  const lastInbound = agentLastInboundMap[agentId];
+  if (!lastInbound) return false;
+  const hoursSince = (Date.now() - new Date(lastInbound).getTime()) / (1000 * 60 * 60);
+  return hoursSince < 24;
+}
+
+// Fetch last-inbound timestamps for all agents in the campaign queue
+async function loadAgentLastInbound(agentIds) {
+  if (!agentIds || agentIds.length === 0) return;
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_last_inbound', payload: { agentIds } })
+    });
+    const data = await r.json();
+    agentLastInboundMap = data || {};
+  } catch(e) { console.warn('Failed to fetch last inbound:', e.message); }
+}
 
 function openCampaignBuilder() {
   // Show campaign list first
@@ -2748,6 +2863,10 @@ function showCampaignSetup(existingCampaign) {
   document.getElementById('campaignSetup').style.display = '';
   document.getElementById('campaignQueue').style.display = 'none';
 
+  // Load templates for first-contact agents
+  selectedTemplateName = c.template_name || null;
+  loadWaTemplates();
+
   updateCampaignPreview();
 }
 
@@ -2851,22 +2970,23 @@ function setCampaignMode(mode) {
       }
     }
   });
-  // Show/hide context and broadcast textareas
+  // Show/hide context, broadcast, and template sections based on mode
   const contextWrap = document.getElementById('cbContextWrap');
   const broadcastWrap = document.getElementById('cbBroadcastWrap');
+  const templateWrap = document.getElementById('cbTemplateWrap');
   if (mode === 'broadcast') {
     contextWrap.style.display = 'none';
     broadcastWrap.style.display = '';
+    if (templateWrap) templateWrap.style.display = 'none';
   } else if (mode === 'manual') {
     contextWrap.style.display = 'none';
     broadcastWrap.style.display = 'none';
+    if (templateWrap) templateWrap.style.display = '';
   } else {
     contextWrap.style.display = '';
     broadcastWrap.style.display = 'none';
+    if (templateWrap) templateWrap.style.display = '';
   }
-  // Update start button text
-  const startBtn = document.querySelector('#campaignSetup .btn-primary, #campaignSetup button[onclick="startCampaign()"]');
-  // No need to update the button, the mode drives behavior in startCampaign
 }
 
 function renderCampaignAgentPicker() {
@@ -3057,6 +3177,9 @@ async function startCampaign() {
     return;
   }
 
+  // Pre-fetch which agents are in the 24h reply window
+  await loadAgentLastInbound(campaignQueue.map(a => a.id));
+
   // Save campaign to database
   const selectedStatuses = [...document.querySelectorAll('input[name="cbStatus"]:checked')].map(el => el.value);
   const savedCampaign = await saveCampaignToDb({
@@ -3070,6 +3193,7 @@ async function startCampaign() {
     audience_filter: { statuses: selectedStatuses, exclude_days: parseInt(document.getElementById('cbExcludeDays')?.value || '0') },
     agent_ids: campaignAudienceMode === 'manual' ? [...campaignSelectedAgentIds] : campaignQueue.map(a => a.id),
     attachments: campaignAttachments,
+    template_name: selectedTemplateName || null,
     total_count: campaignQueue.length,
     sent_count: 0, skip_count: 0, fail_count: 0
   });
@@ -3180,9 +3304,24 @@ async function renderCampaignAgent() {
         <div class="campaign-agent-name">${a.name || a.agency || 'Unknown'}</div>
         <div class="campaign-agent-meta">${a.agency || ''}${a.agency && (kayaSummary || sambaSummary) ? ' · ' : ''}${isSamba ? 'Samba: ' + sambaSummary : kayaSummary}</div>
       </div>
-      ${campaignMode === 'assisted' ? `<button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})">
-        <span class="ai-icon">✦</span> ${msg ? 'Regenerate' : 'Generate message'}
-      </button>` : campaignMode === 'manual' ? `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Manual</span>` : `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Broadcast</span>`}
+      ${(() => {
+        const inWindow = isAgentInWindow(a.id);
+        const willUseTemplate = !inWindow && selectedTemplateName && campaignMode !== 'broadcast';
+        const modeBadge = willUseTemplate
+          ? '<span style="font-size:10px;color:#8a6010;padding:4px 8px;background:#fdf4e3;border:1px solid #c89028;border-radius:5px;font-weight:500" title="Cold agent - will send template: ' + selectedTemplateName + '">📋 Template</span>'
+          : inWindow
+            ? '<span style="font-size:10px;color:#2d6840;padding:4px 8px;background:#eef6f0;border:1px solid #4a9860;border-radius:5px;font-weight:500" title="Agent replied within 24h - free-form OK">✓ Free-form</span>'
+            : '';
+        if (campaignMode === 'assisted') {
+          return `${modeBadge}<button class="ai-gen-btn ${isSamba ? 'samba' : ''}" id="campGenBtn" onclick="generateCampaignMsg(${a.id})" style="margin-left:6px">
+            <span class="ai-icon">✦</span> ${msg ? 'Regenerate' : 'Generate message'}
+          </button>`;
+        } else if (campaignMode === 'manual') {
+          return `${modeBadge}<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px;margin-left:6px">Manual</span>`;
+        } else {
+          return `<span style="font-size:10px;color:var(--ink4);padding:4px 8px;background:var(--sand);border-radius:5px">Broadcast</span>`;
+        }
+      })()}
     </div>
     <div class="campaign-agent-body">
       ${(a.conversation_summary || a.conversation_history?.kaya_notes || a.notes) ? `
@@ -3350,15 +3489,32 @@ async function advanceCampaign() {
   const sendBtn = document.getElementById('campSendBtn');
   const sendLabel = document.getElementById('campSendLabel');
 
+  // Determine send mode: template (cold agent) vs free-form (in 24h window)
+  const inWindow = isAgentInWindow(a.id);
+  const useTemplate = !inWindow && selectedTemplateName && campaignMode !== 'broadcast';
+  const template = useTemplate ? waTemplates.find(t => t.name === selectedTemplateName) : null;
+
+  // Block free-form sends to cold agents with no template selected
+  if (waNum && msg && !inWindow && !useTemplate && campaignMode !== 'broadcast') {
+    const proceed = confirm(`Warning: ${a.name || 'this agent'} has not messaged you in the last 24 hours. WhatsApp will silently DROP this free-form message. Select a template in the campaign setup to reach cold agents. Send anyway?`);
+    if (!proceed) {
+      if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
+      return;
+    }
+  }
+
   // Send via WhatsApp API
-  if (waNum && msg) {
+  if (waNum && (msg || useTemplate)) {
     if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.6'; }
-    if (sendLabel) sendLabel.textContent = 'Sending...';
+    if (sendLabel) sendLabel.textContent = useTemplate ? 'Sending template...' : 'Sending...';
     try {
+      const sendBody = useTemplate
+        ? { waNum, useTemplate: true, templateName: selectedTemplateName, templateParams: buildTemplateParams(a, template), agentId: a.id, campaignId: currentCampaignId }
+        : { waNum, message: msg, useTemplate: false, agentId: a.id, campaignId: currentCampaignId };
       const resp = await fetch('/api/whatsapp-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
+        body: JSON.stringify(sendBody)
       });
       const result = await resp.json();
       if (result.success) {
@@ -3511,12 +3667,29 @@ async function runAutopilotCampaign() {
       continue;
     }
 
-    // Generate message via Claude
-    log.unshift({ icon: '✦', name: agentName, detail: 'Generating message...' });
-    renderAutopilotUI();
+    // Decide: template (cold agent) vs free-form (in 24h window)
+    const inWindow = isAgentInWindow(a.id);
+    const useTemplate = !inWindow && selectedTemplateName;
+    const template = useTemplate ? waTemplates.find(t => t.name === selectedTemplateName) : null;
+
+    // If cold agent and no template selected, skip with warning
+    if (!inWindow && !selectedTemplateName) {
+      log.unshift({ icon: '⏭️', name: agentName, detail: 'Cold agent — no template selected, skipped to avoid silent drop' });
+      skipped++;
+      renderAutopilotUI();
+      continue;
+    }
 
     let msg = '';
-    if (campaignMode === 'autopilot') {
+    let sendBody;
+
+    if (useTemplate) {
+      log.unshift({ icon: '📋', name: agentName, detail: 'Sending template: ' + selectedTemplateName });
+      sendBody = { waNum, useTemplate: true, templateName: selectedTemplateName, templateParams: buildTemplateParams(a, template), agentId: a.id, campaignId: currentCampaignId };
+    } else {
+      // In-window: generate free-form with Claude
+      log.unshift({ icon: '✦', name: agentName, detail: 'Generating personalised reply...' });
+      renderAutopilotUI();
       try {
         const agentContext = buildAgentContext(a);
         const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
@@ -3536,24 +3709,25 @@ async function runAutopilotCampaign() {
         renderAutopilotUI();
         continue;
       }
-    }
 
-    if (!msg) {
-      log[0] = { icon: '❌', name: agentName, detail: 'No message generated' };
-      failed++;
-      renderAutopilotUI();
-      continue;
+      if (!msg) {
+        log[0] = { icon: '❌', name: agentName, detail: 'No message generated' };
+        failed++;
+        renderAutopilotUI();
+        continue;
+      }
+      sendBody = { waNum, message: msg, useTemplate: false, agentId: a.id, campaignId: currentCampaignId };
     }
 
     // Send via WhatsApp API
-    log[0] = { icon: '📤', name: agentName, detail: 'Sending...' };
+    log[0] = { ...log[0], icon: useTemplate ? '📋' : '📤', detail: log[0].detail.replace('Generating personalised reply...', 'Sending...') };
     renderAutopilotUI();
 
     try {
       const resp = await fetch('/api/whatsapp-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
+        body: JSON.stringify(sendBody)
       });
       const result = await resp.json();
 
@@ -3570,7 +3744,8 @@ async function runAutopilotCampaign() {
         }
 
         const today = new Date().toLocaleDateString('en-GB', {day:'2-digit',month:'2-digit',year:'2-digit'});
-        const sentNote = '[' + today + '] Autopilot: "' + msg.slice(0, 60) + (msg.length > 60 ? '...' : '') + '"';
+        const sentDetail = useTemplate ? 'Template: ' + selectedTemplateName : msg;
+        const sentNote = '[' + today + '] Autopilot ' + (useTemplate ? 'template' : 'msg') + ': "' + sentDetail.slice(0, 60) + (sentDetail.length > 60 ? '...' : '') + '"';
         a.last_campaign_sent = today;
         a.notes = a.notes ? a.notes + '\n' + sentNote : sentNote;
         if (isSamba) {
@@ -3580,7 +3755,7 @@ async function runAutopilotCampaign() {
         }
         saveAgent(a.id, { last_campaign_sent: today, notes: a.notes, projects: a.projects, samba: a.samba });
 
-        log[0] = { icon: '✅', name: agentName, detail: msg.slice(0, 80) + (msg.length > 80 ? '...' : '') };
+        log[0] = { icon: useTemplate ? '📋✅' : '✅', name: agentName, detail: sentDetail.slice(0, 80) + (sentDetail.length > 80 ? '...' : '') };
         sent++;
       } else {
         log[0] = { icon: '❌', name: agentName, detail: 'Send failed: ' + (result.error || 'unknown') };
