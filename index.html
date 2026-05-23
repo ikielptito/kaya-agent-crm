@@ -875,6 +875,11 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
           <input type="file" id="cbFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg" style="display:none" onchange="handleCampaignFileUpload(this)">
           <button onclick="document.getElementById('cbFileInput').click()" style="font-size:11px;padding:5px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;transition:border-color 0.12s" onmouseover="this.style.borderColor='var(--accent-mid)'" onmouseout="this.style.borderColor='var(--sand3)'">+ Upload custom file</button>
         </div>
+        <!-- Resend toggle (for testing / re-running campaigns) -->
+        <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink3);cursor:pointer;padding:8px 12px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm)">
+          <input type="checkbox" id="cbResendAll" style="margin:0;accent-color:var(--accent);cursor:pointer">
+          <span>Resend to previously messaged agents <span style="color:var(--ink4)">(ignore "already sent" flag — useful for tests)</span></span>
+        </label>
         <!-- Preview count + CTA -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--sand);border-radius:var(--radius-sm);border:1px solid var(--sand3)">
           <div id="cbPreviewCount" style="font-size:13px;color:var(--ink2)">— agents match</div>
@@ -2308,6 +2313,7 @@ let campaignGenerated = {};
 let campaignAttachments = []; // [{url, filename, label, source:'brochure'|'upload'}]
 let campaignMode = 'assisted'; // 'manual' | 'assisted' | 'autopilot' | 'broadcast'
 let campaignBroadcastMsg = '';
+let campaignResendAll = false; // if true, ignore last_campaign_sent flag (re-send to messaged agents)
 
 // Brochure list (mirrors lib/kb.js)
 const BROCHURE_LIST = [
@@ -2812,6 +2818,10 @@ function showCampaignSetup(existingCampaign) {
   document.getElementById('campaignContext').value = c.context || '';
   document.getElementById('cbBroadcastMsg') && (document.getElementById('cbBroadcastMsg').value = c.broadcast_msg || '');
   document.getElementById('cbExcludeDays').value = '14';
+  // Reset resend toggle (defaults off — only opt-in for re-sends)
+  campaignResendAll = false;
+  const resendCb = document.getElementById('cbResendAll');
+  if (resendCb) resendCb.checked = false;
   document.getElementById('campaignSetupTitle').textContent = currentCampaignId ? 'Edit campaign' : 'New campaign';
 
   // Pipeline
@@ -3162,6 +3172,7 @@ async function startCampaign() {
   const name = document.getElementById('cbName').value.trim() || 'Campaign';
   campaignMode = document.querySelector('input[name="cbMode"]:checked')?.value || 'assisted';
   campaignBroadcastMsg = document.getElementById('cbBroadcastMsg')?.value?.trim() || '';
+  campaignResendAll = document.getElementById('cbResendAll')?.checked || false;
 
   if (campaignMode === 'broadcast' && !campaignBroadcastMsg) {
     alert('Please write a broadcast message before starting.');
@@ -3255,8 +3266,8 @@ async function renderCampaignAgent() {
 
   const a = campaignQueue[campaignIndex];
 
-  // Skip agents already sent to in this campaign session
-  if (a.last_campaign_sent) {
+  // Skip agents already sent to in this campaign session (unless resend flag is set)
+  if (a.last_campaign_sent && !campaignResendAll) {
     const sentCard = document.createElement('div');
     sentCard.style.cssText = 'background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius);padding:12px 16px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;';
     sentCard.innerHTML = `<div style="font-size:12px;color:var(--ink3)">
@@ -3653,8 +3664,8 @@ async function runAutopilotCampaign() {
     const waNum = getWaNum(a);
     const agentName = a.name || a.agency || 'Unknown';
 
-    // Skip if already sent or no WhatsApp
-    if (a.last_campaign_sent) {
+    // Skip if already sent or no WhatsApp (unless resend flag is set)
+    if (a.last_campaign_sent && !campaignResendAll) {
       log.unshift({ icon: '⏭️', name: agentName, detail: 'Already sent on ' + a.last_campaign_sent });
       skipped++;
       renderAutopilotUI();
