@@ -723,15 +723,37 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div class="campaign-overlay" id="campaignOverlay" onclick="closeCampaignOutside(event)">
   <div class="campaign-panel">
 
-    <!-- STEP 1: SETUP -->
-    <div id="campaignSetup">
+    <!-- STEP 0: CAMPAIGN LIST -->
+    <div id="campaignList">
       <div class="campaign-header" style="border-bottom:1px solid var(--sand3)">
         <div style="display:flex;align-items:flex-start;justify-content:space-between">
           <div>
-            <div class="campaign-title">New campaign</div>
-            <div class="campaign-sub">Configure your audience and Claude will personalise a message for each agent</div>
+            <div class="campaign-title">Campaigns</div>
+            <div class="campaign-sub">Create new campaigns or resume existing ones</div>
           </div>
           <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
+        </div>
+      </div>
+      <div style="padding:16px">
+        <button onclick="showCampaignSetup()" style="width:100%;height:42px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Geist,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s;margin-bottom:16px" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">+ New campaign</button>
+        <div id="campaignHistoryList" style="display:flex;flex-direction:column;gap:8px">
+          <div style="text-align:center;padding:20px;color:var(--ink4);font-size:12px">Loading campaigns...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 1: SETUP -->
+    <div id="campaignSetup" style="display:none">
+      <div class="campaign-header" style="border-bottom:1px solid var(--sand3)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between">
+          <div>
+            <div class="campaign-title" id="campaignSetupTitle">New campaign</div>
+            <div class="campaign-sub">Configure your audience and Claude will personalise a message for each agent</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button onclick="showCampaignList()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+            <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
+          </div>
         </div>
       </div>
       <div style="padding:20px;display:flex;flex-direction:column;gap:16px">
@@ -2578,48 +2600,191 @@ Notes: ${a.notes || 'none'}`
 
 // ── CAMPAIGN BUILDER ──────────────────────────────────────────────
 
+let currentCampaignId = null;
+let campaignsList = [];
+
 function openCampaignBuilder() {
-  // Reset setup form
-  document.getElementById('cbName').value = '';
-  document.getElementById('campaignContext').value = '';
-  document.getElementById('cbBroadcastMsg') && (document.getElementById('cbBroadcastMsg').value = '');
+  // Show campaign list first
+  document.getElementById('campaignList').style.display = '';
+  document.getElementById('campaignSetup').style.display = 'none';
+  document.getElementById('campaignQueue').style.display = 'none';
+  document.getElementById('campaignOverlay').classList.add('open');
+  loadCampaigns();
+}
+
+async function loadCampaigns() {
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_campaigns' })
+    });
+    if (r.ok) {
+      campaignsList = await r.json();
+      if (!Array.isArray(campaignsList)) campaignsList = [];
+    }
+  } catch(e) { campaignsList = []; }
+  renderCampaignHistory();
+}
+
+function renderCampaignHistory() {
+  const el = document.getElementById('campaignHistoryList');
+  if (campaignsList.length === 0) {
+    el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--ink4);font-size:12px">No campaigns yet. Create your first one above.</div>';
+    return;
+  }
+
+  const statusColors = {
+    draft: { bg: 'var(--sand)', text: 'var(--ink3)', label: 'Draft' },
+    sending: { bg: '#e8f0f8', text: '#3a6898', label: 'In progress' },
+    paused: { bg: '#fdf4e3', text: '#8a6010', label: 'Paused' },
+    complete: { bg: 'var(--accent-light)', text: 'var(--accent)', label: 'Complete' }
+  };
+
+  const modeLabels = { manual: 'Manual', assisted: 'Assisted', autopilot: 'Autopilot', broadcast: 'Broadcast' };
+
+  el.innerHTML = campaignsList.map(c => {
+    const sc = statusColors[c.status] || statusColors.draft;
+    const date = c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+    const progress = c.total_count > 0 ? `${c.sent_count || 0}/${c.total_count} sent` : '';
+    return `<div onclick="openExistingCampaign('${c.id}')" style="background:white;border:1px solid var(--sand3);border-radius:var(--radius);padding:14px 16px;cursor:pointer;transition:all 0.12s;display:flex;align-items:center;gap:12px" onmouseover="this.style.borderColor='var(--accent-mid)';this.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'" onmouseout="this.style.borderColor='var(--sand3)';this.style.boxShadow='none'">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;color:var(--ink);margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${c.name || 'Untitled'}</div>
+        <div style="font-size:11px;color:var(--ink3)">${date} · ${modeLabels[c.mode] || c.mode || 'Assisted'} · ${c.pipeline || 'kaya'} · ${progress || c.total_count + ' agents'}</div>
+      </div>
+      <span style="padding:3px 10px;border-radius:12px;font-size:10px;font-weight:600;background:${sc.bg};color:${sc.text};white-space:nowrap">${sc.label}</span>
+    </div>`;
+  }).join('');
+}
+
+function showCampaignList() {
+  document.getElementById('campaignList').style.display = '';
+  document.getElementById('campaignSetup').style.display = 'none';
+  document.getElementById('campaignQueue').style.display = 'none';
+  loadCampaigns();
+}
+
+function showCampaignSetup(existingCampaign) {
+  currentCampaignId = existingCampaign?.id || null;
+  const c = existingCampaign || {};
+
+  // Reset/populate setup form
+  document.getElementById('cbName').value = c.name || '';
+  document.getElementById('campaignContext').value = c.context || '';
+  document.getElementById('cbBroadcastMsg') && (document.getElementById('cbBroadcastMsg').value = c.broadcast_msg || '');
   document.getElementById('cbExcludeDays').value = '14';
-  document.querySelector('input[name="cbPipeline"][value="kaya"]').checked = true;
-  document.querySelector('input[name="cbMode"][value="assisted"]').checked = true;
-  campaignMode = 'assisted';
-  campaignBroadcastMsg = '';
-  campaignAttachments = [];
-  campaignAudienceMode = 'filter';
-  campaignSelectedAgentIds = new Set();
-  // Reset mode UI
-  document.querySelector('input[name="cbMode"][value="assisted"]').checked = true;
-  setCampaignMode('assisted');
-  // Reset audience mode toggle
-  setCampaignAudienceMode('filter');
+  document.getElementById('campaignSetupTitle').textContent = currentCampaignId ? 'Edit campaign' : 'New campaign';
+
+  // Pipeline
+  const pipeVal = c.pipeline || 'kaya';
+  const pipeRadio = document.querySelector('input[name="cbPipeline"][value="' + pipeVal + '"]');
+  if (pipeRadio) pipeRadio.checked = true;
+
+  // Mode
+  const modeVal = c.mode || 'assisted';
+  campaignMode = modeVal;
+  const modeRadio = document.querySelector('input[name="cbMode"][value="' + modeVal + '"]');
+  if (modeRadio) modeRadio.checked = true;
+  setCampaignMode(modeVal);
+
+  // Attachments
+  campaignAttachments = Array.isArray(c.attachments) ? [...c.attachments] : [];
+
+  // Audience mode
+  campaignAudienceMode = c.audience_mode || 'filter';
+  campaignSelectedAgentIds = new Set(Array.isArray(c.agent_ids) ? c.agent_ids : []);
+  setCampaignAudienceMode(campaignAudienceMode);
+
+  // Check status filter checkboxes
+  const selectedStatuses = c.audience_filter?.statuses || [];
 
   // Build status filter checkboxes
   const filterContainer = document.getElementById('cbStatusFilters');
   const allStatuses = [...new Set([...KAYA_STATUSES, ...SAMBA_STATUSES])];
   filterContainer.innerHTML = allStatuses.map(s => {
     const cfg = S_CFG[s] || {};
+    const checked = selectedStatuses.includes(s) ? 'checked' : '';
     return `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:4px 10px;border-radius:20px;background:${cfg.bg||'var(--sand)'};color:${cfg.text||'var(--ink2)'};font-size:11px;font-weight:500">
-      <input type="checkbox" name="cbStatus" value="${s}" onchange="updateCampaignPreview()" style="accent-color:currentColor"> ${s}
+      <input type="checkbox" name="cbStatus" value="${s}" ${checked} onchange="updateCampaignPreview()" style="accent-color:currentColor"> ${s}
     </label>`;
   }).join('');
 
   // Build brochure picker
   const picker = document.getElementById('cbBrochurePicker');
-  picker.innerHTML = BROCHURE_LIST.map(b => `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:5px 10px;border-radius:8px;border:1.5px solid var(--sand3);background:white;font-size:11px;font-weight:500;color:var(--ink2);transition:all 0.12s">
-    <input type="checkbox" name="cbBrochure" value="${b.key}" onchange="updateAttachments()" style="accent-color:var(--accent)"> ${b.label}
-  </label>`).join('');
-  document.getElementById('cbAttachmentChips').innerHTML = '';
+  picker.innerHTML = BROCHURE_LIST.map(b => {
+    const checked = campaignAttachments.some(a => a.key === b.key) ? 'checked' : '';
+    return `<label style="display:flex;align-items:center;gap:5px;cursor:pointer;padding:5px 10px;border-radius:8px;border:1.5px solid var(--sand3);background:white;font-size:11px;font-weight:500;color:var(--ink2);transition:all 0.12s">
+      <input type="checkbox" name="cbBrochure" value="${b.key}" ${checked} onchange="updateAttachments()" style="accent-color:var(--accent)"> ${b.label}
+    </label>`;
+  }).join('');
+  renderAttachmentChips();
 
-  // Show setup, hide queue
+  // Show setup, hide list and queue
+  document.getElementById('campaignList').style.display = 'none';
   document.getElementById('campaignSetup').style.display = '';
   document.getElementById('campaignQueue').style.display = 'none';
 
   updateCampaignPreview();
-  document.getElementById('campaignOverlay').classList.add('open');
+}
+
+async function openExistingCampaign(id) {
+  const c = campaignsList.find(x => x.id === id);
+  if (!c) return;
+
+  if (c.status === 'complete') {
+    // Show a read-only summary
+    showCampaignSummary(c);
+  } else {
+    // Open in setup mode for editing/resuming
+    showCampaignSetup(c);
+  }
+}
+
+function showCampaignSummary(c) {
+  const body = document.getElementById('campaignBody');
+  const modeLabels = { manual: 'Manual', assisted: 'Assisted', autopilot: 'Autopilot', broadcast: 'Broadcast' };
+  const date = c.created_at ? new Date(c.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+
+  document.getElementById('campaignList').style.display = 'none';
+  document.getElementById('campaignSetup').style.display = 'none';
+  document.getElementById('campaignQueue').style.display = 'flex';
+
+  document.getElementById('campaignTitle').textContent = c.name || 'Campaign';
+  document.getElementById('campaignSub').textContent = `${date} · ${modeLabels[c.mode] || c.mode} · ${c.pipeline || 'kaya'}`;
+  document.getElementById('campaignBarFill').style.width = '100%';
+  document.getElementById('campaignCount').textContent = `${c.sent_count || 0} sent · ${c.skip_count || 0} skipped · ${c.fail_count || 0} failed`;
+
+  body.innerHTML = `<div style="padding:20px;text-align:center">
+    <div style="font-size:32px;margin-bottom:8px">✅</div>
+    <h3 style="margin-bottom:4px">Campaign complete</h3>
+    <p style="font-size:13px;color:var(--ink3);margin-bottom:16px">${c.sent_count || 0} sent · ${c.skip_count || 0} skipped · ${c.fail_count || 0} failed</p>
+    <div style="display:flex;gap:8px;justify-content:center">
+      <button onclick="showCampaignSetup(campaignsList.find(x=>x.id==='${c.id}'))" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">Duplicate & edit</button>
+      <button onclick="showCampaignList()" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">← Back</button>
+    </div>
+  </div>`;
+}
+
+async function saveCampaignToDb(fields) {
+  const payload = { ...fields };
+  if (currentCampaignId) {
+    payload.id = currentCampaignId;
+  }
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_campaign', payload })
+    });
+    if (r.ok) {
+      const data = await r.json();
+      if (Array.isArray(data) && data[0]) {
+        currentCampaignId = data[0].id;
+        return data[0];
+      }
+    }
+  } catch(e) { console.warn('Campaign save failed:', e.message); }
+  return null;
 }
 
 let campaignAudienceMode = 'filter';
@@ -2848,7 +3013,7 @@ async function handleCampaignFileUpload(input) {
   updateCampaignPreview();
 }
 
-function startCampaign() {
+async function startCampaign() {
   const pipelineVal = document.querySelector('input[name="cbPipeline"]:checked')?.value || 'kaya';
   const name = document.getElementById('cbName').value.trim() || 'Campaign';
   campaignMode = document.querySelector('input[name="cbMode"]:checked')?.value || 'assisted';
@@ -2868,6 +3033,23 @@ function startCampaign() {
     return;
   }
 
+  // Save campaign to database
+  const selectedStatuses = [...document.querySelectorAll('input[name="cbStatus"]:checked')].map(el => el.value);
+  const savedCampaign = await saveCampaignToDb({
+    name,
+    pipeline: pipelineVal,
+    mode: campaignMode,
+    status: 'sending',
+    context: document.getElementById('campaignContext')?.value?.trim() || null,
+    broadcast_msg: campaignBroadcastMsg || null,
+    audience_mode: campaignAudienceMode,
+    audience_filter: { statuses: selectedStatuses, exclude_days: parseInt(document.getElementById('cbExcludeDays')?.value || '0') },
+    agent_ids: campaignAudienceMode === 'manual' ? [...campaignSelectedAgentIds] : campaignQueue.map(a => a.id),
+    attachments: campaignAttachments,
+    total_count: campaignQueue.length,
+    sent_count: 0, skip_count: 0, fail_count: 0
+  });
+
   // Set title
   document.getElementById('campaignTitle').textContent = name;
   const modeLabels = { manual: 'Manual messages', assisted: 'Claude drafts, you approve', autopilot: 'Claude sends automatically', broadcast: 'Broadcast message' };
@@ -2878,6 +3060,7 @@ function startCampaign() {
   if (pipelineVal === 'samba') fill.classList.add('samba'); else fill.classList.remove('samba');
 
   // Switch to queue view
+  document.getElementById('campaignList').style.display = 'none';
   document.getElementById('campaignSetup').style.display = 'none';
   const queueEl = document.getElementById('campaignQueue');
   queueEl.style.display = 'flex';
@@ -3119,6 +3302,14 @@ document.addEventListener('input', function(e) {
 
 function skipCampaignAgent() {
   campaignIndex++;
+  // Update campaign skip count in DB
+  if (currentCampaignId) {
+    const done = campaignIndex;
+    const sentCount = campaignQueue.slice(0, done).filter(a => a.last_campaign_sent).length;
+    fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'patch_campaign', payload: { id: currentCampaignId, fields: { skip_count: done - sentCount } } })
+    }).catch(() => {});
+  }
   updateCampaignProgress();
   renderCampaignAgent();
 }
@@ -3197,6 +3388,19 @@ async function advanceCampaign() {
 
   campaignIndex++;
   updateCampaignProgress();
+
+  // Update campaign sent count in DB
+  if (currentCampaignId) {
+    const sentCount = campaignQueue.slice(0, campaignIndex).filter(a => a.last_campaign_sent).length;
+    const isComplete = campaignIndex >= campaignQueue.length;
+    fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'patch_campaign', payload: { id: currentCampaignId, fields: {
+        sent_count: sentCount,
+        status: isComplete ? 'complete' : 'sending'
+      } } })
+    }).catch(() => {});
+  }
+
   setTimeout(() => renderCampaignAgent(), 300);
 }
 
@@ -3373,6 +3577,15 @@ async function runAutopilotCampaign() {
   campaignIndex = total;
   updateCampaignProgress();
   render();
+
+  // Save final campaign stats
+  if (currentCampaignId) {
+    fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'patch_campaign', payload: { id: currentCampaignId, fields: {
+        sent_count: sent, skip_count: skipped, fail_count: failed, status: 'complete'
+      } } })
+    }).catch(() => {});
+  }
 
   body.innerHTML = `<div style="padding:20px">
     <div style="text-align:center;margin-bottom:20px">

@@ -85,6 +85,20 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(r.status).json(data);
 
+    } else if (action === 'patch_campaign') {
+      const { id, fields } = payload;
+      r = await fetch(SUPABASE_URL + '/rest/v1/campaigns?id=eq.' + id, {
+        method: 'PATCH',
+        headers: { ...headers, 'Prefer': 'return=representation' },
+        body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() })
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        return res.status(r.status).json({ error: err });
+      }
+      const data = await r.json();
+      return res.status(200).json(data);
+
     } else if (action === 'get_settings') {
       r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.' + (payload?.key || 'automation') + '&select=value', { headers });
       const data = await r.json();
