@@ -433,9 +433,11 @@ Maya v1.0 ships with these changes (deployed together):
 - ✅ "Maya paused / Resume Maya" banner in the inbox thread view
 - ✅ Estimated cost tracking in `settings.daily_usage` (auto-pause Maya if > $2/day)
 
-## SQL Migration Required Before First Use
+## SQL Migrations Required Before First Use
 
-Run this in Supabase SQL Editor to enable Maya's auto-update logging:
+Run BOTH of these in Supabase SQL Editor (one-time setup):
+
+### 1. `maya_updates` table — enables Maya's auto-update audit log
 
 ```sql
 create table if not exists maya_updates (
@@ -452,7 +454,48 @@ create table if not exists maya_updates (
 create index if not exists maya_updates_agent_idx on maya_updates (agent_id, created_at desc);
 ```
 
-Maya will still function without this table (the auto-update writes are best-effort and silently no-op if the table is missing), but you won't get the audit trail / revert capability until it exists.
+Maya still functions without this table (writes are best-effort and silently no-op), but you lose the audit trail / revert capability.
+
+### 2. `projects` table — Maya's live knowledge base
+
+```sql
+create table if not exists projects (
+  id                   uuid primary key default gen_random_uuid(),
+  slug                 text unique not null,
+  display_order        int default 0,
+  active               boolean default true,
+  brand                text default 'KAYA',
+  name                 text not null,
+  tagline              text,
+  status               text,
+  area                 text,
+  full_location        text,
+  distances            text,
+  property_type        text,
+  tenure               text,
+  tenure_details       text,
+  furnished            text,
+  construction_status  text,
+  delivery_date        text,
+  commission_pct       numeric default 5,
+  payment_plan         text,
+  description          text,
+  features             text,
+  roi_projections      text,
+  rental_performance   text,
+  maya_notes           text,
+  brochure_url         text,
+  brochure_filename    text,
+  units                jsonb default '[]',
+  created_at           timestamptz default now(),
+  updated_at           timestamptz default now()
+);
+create index if not exists projects_active_idx on projects (active, display_order);
+```
+
+After running the SQL, open the CRM → ⋯ menu → **Projects** → click **⚙ Seed defaults** once to populate from the current `lib/kb.js` portfolio. Then edit/update from the form.
+
+The webhook falls back to the hardcoded `lib/kb.js` `PORTFOLIO_CONTEXT` if the projects table is empty or unreachable, so Maya keeps working even before you seed.
 
 ## Testing After Deploy
 

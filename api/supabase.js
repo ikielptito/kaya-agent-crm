@@ -162,6 +162,37 @@ export default async function handler(req, res) {
       });
       return res.status(r.status).end();
 
+    } else if (action === 'get_projects') {
+      // Returns all projects ordered by display_order then name
+      r = await fetch(SUPABASE_URL + '/rest/v1/projects?select=*&order=display_order.asc,name.asc', { headers });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+
+    } else if (action === 'upsert_project') {
+      // Insert a new project or update existing. payload = { project object }
+      const project = { ...payload, updated_at: new Date().toISOString() };
+      r = await fetch(SUPABASE_URL + '/rest/v1/projects', {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(project)
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        return res.status(r.status).json({ error: err });
+      }
+      const data = await r.json();
+      return res.status(200).json(data);
+
+    } else if (action === 'delete_project') {
+      // Soft delete via active=false. payload = { id }
+      const { id } = payload;
+      r = await fetch(SUPABASE_URL + '/rest/v1/projects?id=eq.' + id, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ active: false, updated_at: new Date().toISOString() })
+      });
+      return res.status(r.status).end();
+
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });
     }

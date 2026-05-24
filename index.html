@@ -647,6 +647,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
     <div class="more-dropdown-wrap">
       <button class="more-btn" id="moreBtn" onclick="toggleMoreMenu(event)">⋯</button>
       <div class="more-menu" id="moreMenu">
+        <button class="more-menu-item" onclick="openProjectsView();closeMoreMenu()">▣ Projects</button>
         <button class="more-menu-item" id="discoverBtn" onclick="openDiscoverPanel();closeMoreMenu()">⊕ Discover agents</button>
         <button class="more-menu-item" onclick="downloadExcel();closeMoreMenu()">↓ Export .xlsx</button>
       </div>
@@ -718,6 +719,24 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 </div>
 
 
+
+<!-- PROJECTS VIEW -->
+<div id="projectsView" style="display:none">
+  <div class="inbox-bar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="closeProjectsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+      <span style="font-size:13px;font-weight:600;color:var(--ink)">Projects</span>
+      <span id="projectsCount" style="font-size:11px;color:var(--ink3)"></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button onclick="seedProjectsOneTime()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="One-time: populate with current 5 projects from code">⚙ Seed defaults</button>
+      <button onclick="openProjectEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">+ New project</button>
+    </div>
+  </div>
+  <div id="projectsBody" style="padding:24px;max-width:1400px;margin:0 auto">
+    <div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Loading projects...</div>
+  </div>
+</div>
 
 <!-- CAMPAIGN PANEL -->
 <div class="campaign-overlay" id="campaignOverlay" onclick="closeCampaignOutside(event)">
@@ -4493,6 +4512,348 @@ async function resumeMaya(agentId) {
   a.automation_override = null;
   await saveAgent(a.id, { automation_override: null });
   openConversation(agentId); // refresh to hide banner
+}
+
+// ── PROJECTS MANAGEMENT ─────────────────────────────────────────────────
+let projectsData = []; // cached project list
+
+async function openProjectsView() {
+  document.getElementById('projectsView').style.display = '';
+  document.body.style.overflow = 'hidden';
+  await loadProjectsList();
+}
+
+function closeProjectsView() {
+  document.getElementById('projectsView').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+async function loadProjectsList() {
+  const body = document.getElementById('projectsBody');
+  body.innerHTML = '<div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Loading projects...</div>';
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_projects', payload: {} })
+    });
+    const data = await r.json();
+    projectsData = Array.isArray(data) ? data : [];
+    renderProjectsList();
+  } catch (e) {
+    body.innerHTML = `<div style="text-align:center;color:#c00;font-size:13px;padding:40px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderProjectsList() {
+  const body = document.getElementById('projectsBody');
+  document.getElementById('projectsCount').textContent = projectsData.length === 0 ? '' : `${projectsData.filter(p => p.active).length} active`;
+
+  if (projectsData.length === 0) {
+    body.innerHTML = `<div style="text-align:center;padding:60px 20px">
+      <div style="font-size:14px;color:var(--ink3);margin-bottom:16px">No projects yet.</div>
+      <div style="font-size:12px;color:var(--ink4);margin-bottom:24px">Click "Seed defaults" to populate with current 5 projects, or "+ New project" to start fresh.</div>
+      <div style="font-size:11px;color:var(--ink4)">First time? You may also need to run the SQL migration -- check the latest commit message.</div>
+    </div>`;
+    return;
+  }
+
+  const rows = projectsData.map(p => {
+    const unitCount = (p.units || []).length;
+    const availableCount = (p.units || []).filter(u => (u.availability || '').toLowerCase() === 'available').length;
+    const updatedDate = p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-GB') : '--';
+    const brochureBadge = p.brochure_url ? '<span style="color:#0a7a40;font-size:11px">✓</span>' : '<span style="color:#999;font-size:11px">--</span>';
+    const activeBadge = p.active ? '' : '<span style="font-size:10px;color:#c00;padding:1px 6px;background:#fdd;border-radius:4px;margin-left:6px">archived</span>';
+    return `<tr style="border-bottom:1px solid var(--sand2)">
+      <td style="padding:12px 10px">
+        <div style="font-weight:600;font-size:13px;color:var(--ink)">${escapeHtml(p.name)}${activeBadge}</div>
+        ${p.tagline ? `<div style="font-size:11px;color:var(--ink3);margin-top:2px">${escapeHtml(p.tagline)}</div>` : ''}
+      </td>
+      <td style="padding:12px 10px;font-size:12px;color:var(--ink2)">${escapeHtml(p.area || '')}</td>
+      <td style="padding:12px 10px;font-size:12px;color:var(--ink2)">${escapeHtml(p.brand || '')}</td>
+      <td style="padding:12px 10px;font-size:12px;color:var(--ink2)">${escapeHtml(p.status || '')}</td>
+      <td style="padding:12px 10px;font-size:12px;color:var(--ink2)">${availableCount}/${unitCount}</td>
+      <td style="padding:12px 10px;text-align:center">${brochureBadge}</td>
+      <td style="padding:12px 10px;font-size:11px;color:var(--ink3)">${updatedDate}</td>
+      <td style="padding:12px 10px;text-align:right">
+        <button onclick="openProjectEditor('${p.id}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Edit</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  body.innerHTML = `<div style="background:white;border:1px solid var(--sand3);border-radius:8px;overflow:hidden">
+    <table style="width:100%;border-collapse:collapse">
+      <thead style="background:var(--sand)"><tr>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Project</th>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Area</th>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Brand</th>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Status</th>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Units (avail/total)</th>
+        <th style="padding:10px;text-align:center;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">PDF</th>
+        <th style="padding:10px;text-align:left;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em">Updated</th>
+        <th style="padding:10px;text-align:right;font-size:10px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em"></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+async function seedProjectsOneTime() {
+  if (!confirm('Seed the database with the 5 default projects from code? This is safe to run multiple times -- existing slugs will be skipped.')) return;
+  try {
+    const r = await fetch('/api/seed-projects', { method: 'POST' });
+    const data = await r.json();
+    if (data.error) {
+      alert('Seed failed: ' + data.error);
+      return;
+    }
+    alert(data.message || 'Seeded.');
+    await loadProjectsList();
+  } catch (e) {
+    alert('Seed error: ' + e.message);
+  }
+}
+
+let editingProject = null; // staging object for the editor
+
+function openProjectEditor(id) {
+  const existing = id ? projectsData.find(p => p.id === id) : null;
+  editingProject = existing ? JSON.parse(JSON.stringify(existing)) : {
+    slug: '',
+    display_order: (projectsData.length + 1) * 10,
+    active: true,
+    brand: 'KAYA',
+    name: '',
+    tagline: '',
+    status: 'Available',
+    area: '',
+    full_location: '',
+    distances: '',
+    property_type: '',
+    tenure: '',
+    tenure_details: '',
+    furnished: '',
+    construction_status: '',
+    delivery_date: '',
+    commission_pct: 5,
+    payment_plan: '',
+    description: '',
+    features: '',
+    roi_projections: '',
+    rental_performance: '',
+    maya_notes: '',
+    brochure_url: '',
+    brochure_filename: '',
+    units: []
+  };
+  renderProjectEditor();
+}
+
+function renderProjectEditor() {
+  const body = document.getElementById('projectsBody');
+  const p = editingProject;
+  const isNew = !p.id;
+
+  const unitsHtml = (p.units || []).map((u, i) => renderUnitRow(u, i)).join('');
+
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--sand3)">
+      <div>
+        <button onclick="loadProjectsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;margin-bottom:8px">← Back to list</button>
+        <h2 style="margin:0;font-size:20px;color:var(--ink)">${isNew ? 'New project' : 'Edit project: ' + escapeHtml(p.name || '(unnamed)')}</h2>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${!isNew ? `<button onclick="archiveProject('${p.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">Archive</button>` : ''}
+        <button onclick="saveProject()" id="saveProjectBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+      </div>
+    </div>
+
+    ${section('Basics', `
+      ${twoCol(
+        field('Name *', `<input id="pf_name" value="${esc(p.name)}" oninput="editingProject.name=this.value;autoSlug()" style="${inputStyle}">`),
+        field('Slug *', `<input id="pf_slug" value="${esc(p.slug)}" oninput="editingProject.slug=this.value" placeholder="lowercase_with_underscores" style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Tagline (one-line summary, used in chat openers)', `<input value="${esc(p.tagline)}" oninput="editingProject.tagline=this.value" style="${inputStyle}">`),
+        field('Status', `<select onchange="editingProject.status=this.value" style="${inputStyle}">${['Available','Pre-construction','Coming Soon','Sold out','Paused'].map(s=>`<option ${p.status===s?'selected':''}>${s}</option>`).join('')}</select>`)
+      )}
+      ${twoCol(
+        field('Brand', `<select onchange="editingProject.brand=this.value" style="${inputStyle}">${['KAYA','Samba','Personal'].map(s=>`<option ${p.brand===s?'selected':''}>${s}</option>`).join('')}</select>`),
+        field('Display order', `<input type="number" value="${p.display_order||0}" oninput="editingProject.display_order=parseInt(this.value)||0" style="${inputStyle}">`)
+      )}
+      ${field('Active', `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2)"><input type="checkbox" ${p.active?'checked':''} onchange="editingProject.active=this.checked"> Project is active and visible to Maya</label>`)}
+    `)}
+
+    ${section('Location', `
+      ${twoCol(
+        field('Area / Neighbourhood', `<input value="${esc(p.area)}" oninput="editingProject.area=this.value" placeholder="e.g. Berawa, Cepaka, Ungasan" style="${inputStyle}">`),
+        field('Full location', `<input value="${esc(p.full_location)}" oninput="editingProject.full_location=this.value" placeholder="e.g. Cepaka (8 min from Pererenan)" style="${inputStyle}">`)
+      )}
+      ${field('Distances / nearby landmarks', `<textarea oninput="editingProject.distances=this.value" placeholder="e.g. 5 min to Atlas Beach Club, 7 min to Finns..." style="${textareaStyle}">${esc(p.distances)}</textarea>`)}
+    `)}
+
+    ${section('Property type', `
+      ${twoCol(
+        field('Property type', `<select onchange="editingProject.property_type=this.value" style="${inputStyle}">${['','Apartment','Villa','Townhouse','Studio','House','Land'].map(s=>`<option ${p.property_type===s?'selected':''} value="${s}">${s||'(select)'}</option>`).join('')}</select>`),
+        field('Tenure', `<select onchange="editingProject.tenure=this.value" style="${inputStyle}">${['','Freehold','Leasehold'].map(s=>`<option ${p.tenure===s?'selected':''} value="${s}">${s||'(select)'}</option>`).join('')}</select>`)
+      )}
+      ${twoCol(
+        field('Tenure details', `<input value="${esc(p.tenure_details)}" oninput="editingProject.tenure_details=this.value" placeholder="e.g. 30-year leasehold" style="${inputStyle}">`),
+        field('Furnished status', `<input value="${esc(p.furnished)}" oninput="editingProject.furnished=this.value" placeholder="e.g. Fully furnished" style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Construction & delivery', `
+      ${twoCol(
+        field('Construction status', `<input value="${esc(p.construction_status)}" oninput="editingProject.construction_status=this.value" placeholder="e.g. 75% complete" style="${inputStyle}">`),
+        field('Delivery date', `<input value="${esc(p.delivery_date)}" oninput="editingProject.delivery_date=this.value" placeholder="e.g. July 2026" style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Commercial', `
+      ${twoCol(
+        field('Commission %', `<input type="number" step="0.1" value="${p.commission_pct||5}" oninput="editingProject.commission_pct=parseFloat(this.value)||0" style="${inputStyle}">`),
+        field('', '')
+      )}
+      ${field('Payment plan', `<textarea oninput="editingProject.payment_plan=this.value" placeholder="e.g. 20% deposit, 30% at foundation..." style="${textareaStyle}">${esc(p.payment_plan)}</textarea>`)}
+    `)}
+
+    ${section('Units', `
+      <div id="unitsContainer">${unitsHtml}</div>
+      <button onclick="addUnitRow()" style="margin-top:8px;font-size:12px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">+ Add unit</button>
+    `)}
+
+    ${section('Description & features', `
+      ${field('Description', `<textarea oninput="editingProject.description=this.value" placeholder="Brief project description" style="${textareaStyle}height:80px">${esc(p.description)}</textarea>`)}
+      ${field('Features', `<textarea oninput="editingProject.features=this.value" placeholder="Key features and amenities" style="${textareaStyle}height:80px">${esc(p.features)}</textarea>`)}
+      ${field('ROI projections', `<textarea oninput="editingProject.roi_projections=this.value" placeholder="e.g. 60% occupancy = 12.5%..." style="${textareaStyle}">${esc(p.roi_projections)}</textarea>`)}
+      ${field('Rental performance (actuals)', `<textarea oninput="editingProject.rental_performance=this.value" placeholder="Real rental data if available" style="${textareaStyle}">${esc(p.rental_performance)}</textarea>`)}
+    `)}
+
+    ${section('Brochure', `
+      ${twoCol(
+        field('Brochure URL (public Supabase Storage link)', `<input value="${esc(p.brochure_url)}" oninput="editingProject.brochure_url=this.value" style="${inputStyle}">`),
+        field('Brochure filename', `<input value="${esc(p.brochure_filename)}" oninput="editingProject.brochure_filename=this.value" placeholder="e.g. Sabit House.pdf" style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Notes for Maya (instructions specific to this project)', `
+      ${field('', `<textarea oninput="editingProject.maya_notes=this.value" placeholder="e.g. 'Emphasize the 4 remaining units. Never quote the pre-launch price of $130K -- that's been retired.'" style="${textareaStyle}height:80px">${esc(p.maya_notes)}</textarea>`)}
+    `)}
+
+    <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--sand3);display:flex;justify-content:flex-end;gap:8px">
+      <button onclick="loadProjectsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Cancel</button>
+      <button onclick="saveProject()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+    </div>
+  `;
+}
+
+// Editor helpers (defined as global functions referenced in templates)
+const inputStyle = 'width:100%;height:34px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);outline:none';
+const textareaStyle = 'width:100%;min-height:60px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:8px 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;';
+
+function section(title, content) {
+  return `<div style="background:white;border:1px solid var(--sand3);border-radius:8px;padding:16px;margin-bottom:16px">
+    <div style="font-size:11px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:12px">${escapeHtml(title)}</div>
+    ${content}
+  </div>`;
+}
+
+function field(label, input) {
+  return `<div style="margin-bottom:10px">${label ? `<label style="display:block;font-size:11px;color:var(--ink3);margin-bottom:4px">${escapeHtml(label)}</label>` : ''}${input}</div>`;
+}
+
+function twoCol(a, b) {
+  return `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${a}${b}</div>`;
+}
+
+function esc(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function escapeHtml(v) { return esc(v); }
+
+function autoSlug() {
+  // Auto-fill slug from name if slug is empty
+  if (!editingProject.slug) {
+    editingProject.slug = (editingProject.name || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const slugInput = document.getElementById('pf_slug');
+    if (slugInput) slugInput.value = editingProject.slug;
+  }
+}
+
+function renderUnitRow(u, i) {
+  return `<div data-unit-idx="${i}" style="display:grid;grid-template-columns:120px 60px 60px 70px 90px 110px 110px 110px 1fr 30px;gap:6px;align-items:center;margin-bottom:6px;padding:8px;background:var(--sand);border-radius:6px;font-size:11px">
+    <input value="${esc(u.code)}" placeholder="Code" oninput="updateUnit(${i},'code',this.value)" style="${inputStyle}height:28px;font-size:11px">
+    <input type="number" value="${u.beds||''}" placeholder="Bd" oninput="updateUnit(${i},'beds',parseFloat(this.value)||null)" style="${inputStyle}height:28px;font-size:11px">
+    <input type="number" step="0.5" value="${u.baths||''}" placeholder="Ba" oninput="updateUnit(${i},'baths',parseFloat(this.value)||null)" style="${inputStyle}height:28px;font-size:11px">
+    <input type="number" step="0.1" value="${u.sqm||''}" placeholder="sqm" oninput="updateUnit(${i},'sqm',parseFloat(this.value)||null)" style="${inputStyle}height:28px;font-size:11px">
+    <input value="${esc(u.floor)}" placeholder="Floor" oninput="updateUnit(${i},'floor',this.value)" style="${inputStyle}height:28px;font-size:11px">
+    <input type="number" value="${u.price_usd||''}" placeholder="USD" oninput="updateUnit(${i},'price_usd',parseInt(this.value)||null)" style="${inputStyle}height:28px;font-size:11px">
+    <input type="number" value="${u.price_idr||''}" placeholder="IDR" oninput="updateUnit(${i},'price_idr',parseInt(this.value)||null)" style="${inputStyle}height:28px;font-size:11px">
+    <select onchange="updateUnit(${i},'availability',this.value)" style="${inputStyle}height:28px;font-size:11px">${['Available','Sold','Reserved','Coming Soon'].map(s=>`<option ${u.availability===s?'selected':''}>${s}</option>`).join('')}</select>
+    <input value="${esc(u.notes)}" placeholder="Notes" oninput="updateUnit(${i},'notes',this.value)" style="${inputStyle}height:28px;font-size:11px">
+    <button onclick="removeUnitRow(${i})" style="height:28px;width:28px;border:1px solid #f5c0c0;border-radius:4px;background:white;color:#c00;cursor:pointer;font-size:14px;padding:0">×</button>
+  </div>`;
+}
+
+function updateUnit(i, key, value) {
+  if (!editingProject.units[i]) return;
+  editingProject.units[i][key] = value;
+}
+
+function addUnitRow() {
+  if (!editingProject.units) editingProject.units = [];
+  editingProject.units.push({ code: '', beds: 1, baths: 1, sqm: null, floor: '', price_usd: null, price_idr: null, availability: 'Available', notes: '' });
+  // Re-render just the units section
+  const container = document.getElementById('unitsContainer');
+  if (container) container.innerHTML = editingProject.units.map((u, idx) => renderUnitRow(u, idx)).join('');
+}
+
+function removeUnitRow(i) {
+  editingProject.units.splice(i, 1);
+  const container = document.getElementById('unitsContainer');
+  if (container) container.innerHTML = editingProject.units.map((u, idx) => renderUnitRow(u, idx)).join('');
+}
+
+async function saveProject() {
+  const p = editingProject;
+  if (!p.name || !p.slug) {
+    alert('Name and slug are required.');
+    return;
+  }
+  const btn = document.getElementById('saveProjectBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_project', payload: p })
+    });
+    const data = await r.json();
+    if (data.error) {
+      alert('Save failed: ' + (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
+      if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+      return;
+    }
+    // Success — reload list view
+    await loadProjectsList();
+  } catch (e) {
+    alert('Save error: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+  }
+}
+
+async function archiveProject(id) {
+  if (!confirm('Archive this project? It will be hidden from Maya and the list but can be restored via SQL if needed.')) return;
+  try {
+    await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete_project', payload: { id } })
+    });
+    await loadProjectsList();
+  } catch (e) {
+    alert('Archive failed: ' + e.message);
+  }
 }
 
 function updateInboxBadge() {

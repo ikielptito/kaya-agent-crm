@@ -1,6 +1,79 @@
-import { PORTFOLIO_CONTEXT, BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
+import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
+
+// In-memory cache for projects (warm container only). 60s TTL.
+let _projectsCache = null;
+let _projectsCacheAt = 0;
+const PROJECTS_CACHE_TTL_MS = 60 * 1000;
+
+async function loadProjects(supabaseUrl, sbHeaders) {
+  const now = Date.now();
+  if (_projectsCache && (now - _projectsCacheAt) < PROJECTS_CACHE_TTL_MS) {
+    return _projectsCache;
+  }
+  try {
+    const r = await fetch(`${supabaseUrl}/rest/v1/projects?select=*&active=eq.true&order=display_order.asc`, { headers: sbHeaders });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (Array.isArray(data) && data.length > 0) {
+      _projectsCache = data;
+      _projectsCacheAt = now;
+      return data;
+    }
+  } catch (e) {
+    console.warn('loadProjects failed:', e.message);
+  }
+  return null;
+}
+
+// Build PORTFOLIO_CONTEXT string dynamically from the projects DB rows.
+// Falls back to the hardcoded version if DB is empty/unavailable.
+function buildPortfolioContext(projects) {
+  if (!projects || projects.length === 0) return FALLBACK_PORTFOLIO;
+  const blocks = projects.map((p, i) => {
+    const unitLines = (p.units || []).map(u => {
+      const price = u.price_usd ? `$${(u.price_usd / 1000).toFixed(0)}K USD` : (u.price_idr ? `IDR ${(u.price_idr / 1e9).toFixed(2)}B` : 'TBC');
+      const sqm = u.sqm ? `${u.sqm} sqm` : '';
+      const layout = [u.beds && `${u.beds} bed`, u.baths && `${u.baths} bath`].filter(Boolean).join(', ');
+      const status = u.availability && u.availability !== 'Available' ? ` -- ${u.availability.toUpperCase()}` : '';
+      const notes = u.notes ? ` (${u.notes})` : '';
+      return `   - ${u.code}: ${layout}${sqm ? ', ' + sqm : ''}${u.floor ? ', ' + u.floor : ''} -- ${price}${status}${notes}`;
+    }).join('\n');
+    const lines = [
+      `${i + 1}. ${p.name.toUpperCase()}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
+      p.tagline ? `   ${p.tagline}` : null,
+      p.property_type || p.tenure ? `   Type: ${[p.property_type, p.tenure_details || p.tenure, p.furnished].filter(Boolean).join(', ')}` : null,
+      unitLines ? `   Units:\n${unitLines}` : null,
+      p.construction_status || p.delivery_date ? `   Status: ${[p.construction_status, p.delivery_date].filter(Boolean).join(' -- ')}` : null,
+      p.payment_plan ? `   Payment plan: ${p.payment_plan}` : null,
+      p.features ? `   Features: ${p.features}` : null,
+      p.roi_projections ? `   ROI: ${p.roi_projections}` : null,
+      p.rental_performance ? `   Rental performance: ${p.rental_performance}` : null,
+      p.distances ? `   Location: ${p.distances}` : null,
+      p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
+      p.commission_pct ? `   Commission: ${p.commission_pct}%` : null
+    ].filter(Boolean);
+    return lines.join('\n');
+  });
+  return `KAYA portfolio (current, live from DB):\n\n${blocks.join('\n\n')}`;
+}
+
+// Build brochure map from projects: { slug: { url, filename, label } }
+function buildBrochures(projects) {
+  if (!projects || projects.length === 0) return FALLBACK_BROCHURES;
+  const map = {};
+  for (const p of projects) {
+    if (p.brochure_url) {
+      map[p.slug] = {
+        url: p.brochure_url,
+        filename: p.brochure_filename || `${p.name}.pdf`,
+        label: p.name
+      };
+    }
+  }
+  return Object.keys(map).length > 0 ? map : FALLBACK_BROCHURES;
+}
 
 // Maya operational windows (WITA = UTC+8)
 const ACTIVE_HOUR_START = 9;  // 9am WITA
@@ -132,8 +205,11 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
-    // Generate a reply with Claude
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode);
+    // Generate a reply with Claude — load live project data from DB first
+    const projects = await loadProjects(SUPABASE_URL, sbHeaders);
+    const liveContext = buildPortfolioContext(projects);
+    const liveBrochures = buildBrochures(projects);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures);
 
     // Increment today's spend by the estimated cost of this Claude call
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
@@ -170,8 +246,8 @@ export default async function handler(req, res) {
       await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply);
 
-      // Send brochure if Claude requested one
-      const doc = aiResult.send_doc && BROCHURES[aiResult.send_doc];
+      // Send brochure if Claude requested one (use live brochure map from DB)
+      const doc = aiResult.send_doc && liveBrochures[aiResult.send_doc];
       if (doc && doc.url) {
         await sendDocument(WA_PHONE_ID, WA_TOKEN, fromNum, doc.url, doc.filename);
         await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Document: ${doc.filename}]`);
@@ -319,14 +395,16 @@ async function sendDocument(phoneId, token, to, link, filename) {
   });
 }
 
-async function generateReply(apiKey, agent, inbound, mode) {
-  const brochureKeys = Object.keys(BROCHURES).join(', ');
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures) {
+  const brochureMap = brochures || FALLBACK_BROCHURES;
+  const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
+  const brochureKeys = Object.keys(brochureMap).join(', ');
   const isHybrid = mode === 'hybrid';
 
   const system = `${MAYA_PERSONA}
 
 PORTFOLIO KNOWLEDGE (factual reference, not a script to recite):
-${PORTFOLIO_CONTEXT}
+${portfolio}
 
 This conversation's context:
 Agent name: ${agent.name || 'unknown'}
