@@ -460,7 +460,7 @@ ${portfolio}
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
 - [Template: samba_intro] = "Hi {name}, I'm reaching out from Samba Realty Listings to make sure agents have up-to-date info on our current rentals. Can I send you the latest info?"
-When an agent replies with a short affirmative (Yes / Yes please / Sure / Please / Go ahead / Ok) and the previous outbound was one of these templates, they are saying yes to receiving KAYA or Samba project/property information. Respond by sending an overview or asking what they're most interested in -- never ask "what are you saying yes to?"
+When an agent replies with a short affirmative (Yes / Yes please / Sure / Please / Go ahead / Ok) after one of these templates, they are saying yes to receiving the info. Respond IMMEDIATELY with a concise overview of all active projects -- one line each (name, location, price, headline feature). Do NOT ask "which project?" or "what area?" first. Share everything upfront, then invite them to go deeper on whichever one interests them.
 
 This conversation's context:
 Agent name: ${agent.name || 'unknown'}
