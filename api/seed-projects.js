@@ -44,7 +44,7 @@ const SEED_PROJECTS = [
     display_order: 2,
     active: true,
     brand: 'KAYA',
-    name: 'Tropical Townhouses (Tropicana Valley)',
+    name: 'Tropical Townhouses',
     tagline: '1BR two-level townhouses with private plunge pool, 5 min from Pererenan',
     status: 'Available',
     area: 'Buduk',
@@ -64,7 +64,7 @@ const SEED_PROJECTS = [
     rental_performance: 'Unit A5 (managed by Samba Realty, PriceLabs data): Jan-May 2026 = 83.57% occupancy, ADR IDR 1.05M (~$63 USD), 18 bookings, avg stay 7.28 nights, RevPAR IDR 874.73K. Recent 30-day: 87.1% occupancy, ADR IDR 1.1M. Total revenue Jan-May 2026: IDR 122.46M (~$7,400 USD) from one unit. April 2026 payout: IDR 36.46M gross / IDR 26.29M net to owner. Typical monthly expenses ~IDR 4.7M (housekeeping 1M, pool 600K, complex mgr ~486K, electricity ~2M, water/cleaning/laundry ~600K). Samba Realty mgmt fee: 15% of gross. Strong long-stay demand: April booking was 27 nights (IDR 27.85M).',
     maya_notes: '4 units left: B2, B3, B5, B6. Garden View units (B5/B6) are premium with 387m2 private garden + gazebo. Rental management by Samba Realty available for hands-off ownership.',
     brochure_url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/Tropical%20Townhouses%20Agent%20Version%20May%202027.pdf',
-    brochure_filename: 'Tropicana Valley.pdf',
+    brochure_filename: 'Tropical Townhouses.pdf',
     units: [
       { code: 'B2', beds: 1, baths: 1, sqm: 75, floor: '2 levels', price_usd: 125000, price_idr: null, availability: 'Available', notes: '' },
       { code: 'B3', beds: 1, baths: 1, sqm: 75, floor: '2 levels', price_usd: 125000, price_idr: null, availability: 'Available', notes: '' },
@@ -191,7 +191,7 @@ export default async function handler(req, res) {
     'apikey': SUPABASE_KEY,
     'Authorization': 'Bearer ' + SUPABASE_KEY,
     'Content-Type': 'application/json',
-    'Prefer': 'resolution=ignore-duplicates,return=representation'
+    'Prefer': 'resolution=merge-duplicates,return=representation'
   };
 
   try {
