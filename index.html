@@ -4529,14 +4529,20 @@ async function resumeMaya(agentId) {
 let projectsData = []; // cached project list
 
 async function openProjectsView() {
+  document.getElementById('pipelineView').style.display = 'none';
+  document.getElementById('inboxView').style.display = 'none';
   document.getElementById('projectsView').style.display = '';
-  document.body.style.overflow = 'hidden';
   await loadProjectsList();
 }
 
 function closeProjectsView() {
   document.getElementById('projectsView').style.display = 'none';
-  document.body.style.overflow = '';
+  // Return to whichever view was active before
+  if (inboxOpen) {
+    document.getElementById('inboxView').style.display = '';
+  } else {
+    document.getElementById('pipelineView').style.display = '';
+  }
 }
 
 async function loadProjectsList() {
