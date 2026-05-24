@@ -209,7 +209,9 @@ export default async function handler(req, res) {
     const projects = await loadProjects(SUPABASE_URL, sbHeaders);
     const liveContext = buildPortfolioContext(projects);
     const liveBrochures = buildBrochures(projects);
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures);
+    // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
+    const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread);
 
     // Increment today's spend by the estimated cost of this Claude call
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
@@ -370,13 +372,32 @@ async function patchAgent(url, headers, id, fields) {
 }
 
 async function logOutbound(url, headers, agentId, waNum, content) {
+  const ts = new Date().toISOString();
   await fetch(`${url}/rest/v1/wa_messages`, {
     method: 'POST', headers,
     body: JSON.stringify({
       agent_id: agentId, wa_num: waNum, direction: 'outbound',
-      content, timestamp: new Date().toISOString(), source: 'api'
+      content, timestamp: ts, source: 'api'
     })
   }).catch(e => console.warn('logOutbound failed:', e.message));
+
+  // Also append outbound to the agent's conversation_summary so it's visible as context
+  if (agentId) {
+    try {
+      const agentRes = await fetch(`${url}/rest/v1/agents?id=eq.${agentId}&select=conversation_summary`, { headers });
+      const agentRow = (await agentRes.json())?.[0];
+      const dateStr = new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+      const snippet = content.slice(0, 120) + (content.length > 120 ? '...' : '');
+      const newLine = `\n[${dateStr}] Maya: ${snippet}`;
+      const updatedSummary = ((agentRow?.conversation_summary || '') + newLine).slice(-4000);
+      await fetch(`${url}/rest/v1/agents?id=eq.${agentId}`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ conversation_summary: updatedSummary })
+      });
+    } catch (e) {
+      console.warn('logOutbound summary update failed:', e.message);
+    }
+  }
 }
 
 async function sendText(phoneId, token, to, text) {
@@ -395,22 +416,56 @@ async function sendDocument(phoneId, token, to, link, filename) {
   });
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures) {
+// Fetch the last 30 messages (both directions) for an agent, ordered oldest→newest.
+// Returns a formatted string like:
+//   [09:44] KAYA: Hi jules, I'm reaching out from KAYA Developments...
+//   [09:45] Agent: Yes please
+async function fetchRecentThread(url, headers, agentId) {
+  try {
+    const r = await fetch(
+      `${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&order=timestamp.desc&limit=30`,
+      { headers }
+    );
+    if (!r.ok) return '';
+    const rows = await r.json();
+    if (!Array.isArray(rows) || rows.length === 0) return '';
+    // Reverse so oldest first
+    rows.reverse();
+    return rows.map(m => {
+      const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
+      const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
+      const content = m.content?.slice(0, 200) || '';
+      return `[${t}] ${sender}: ${content}`;
+    }).join('\n');
+  } catch (e) {
+    return '';
+  }
+}
+
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
   const isHybrid = mode === 'hybrid';
+
+  const threadBlock = recentThread
+    ? `Recent message thread (oldest → newest, both sides):\n${recentThread}`
+    : `Prior notes:\n${(agent.conversation_summary || '(no prior history)').slice(-2500)}`;
 
   const system = `${MAYA_PERSONA}
 
 PORTFOLIO KNOWLEDGE (factual reference, not a script to recite):
 ${portfolio}
 
+TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
+- [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
+- [Template: samba_intro] = "Hi {name}, I'm reaching out from Samba Realty Listings to make sure agents have up-to-date info on our current rentals. Can I send you the latest info?"
+When an agent replies with a short affirmative (Yes / Yes please / Sure / Please / Go ahead / Ok) and the previous outbound was one of these templates, they are saying yes to receiving KAYA or Samba project/property information. Respond by sending an overview or asking what they're most interested in -- never ask "what are you saying yes to?"
+
 This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
-Prior conversation summary (most recent first):
-${(agent.conversation_summary || '(no prior history)').slice(-2500)}
+${threadBlock}
 
 You can attach a project brochure PDF. Available brochure keys: ${brochureKeys}.
 

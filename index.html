@@ -2748,6 +2748,17 @@ function buildTemplateParams(agent, template) {
   return params;
 }
 
+// Render the template body with actual param values substituted (for logging / Maya context)
+function buildTemplateBodyText(agent, template) {
+  if (!template || !template.body) return null;
+  const params = buildTemplateParams(agent, template);
+  let body = template.body;
+  params.forEach((val, idx) => {
+    body = body.replace(new RegExp('\\{\\{' + (idx + 1) + '\\}\\}', 'g'), val);
+  });
+  return body;
+}
+
 // Check if an agent is within the 24h reply window
 function isAgentInWindow(agentId) {
   const lastInbound = agentLastInboundMap[agentId];
@@ -3543,7 +3554,7 @@ async function advanceCampaign() {
     if (sendLabel) sendLabel.textContent = useTemplate ? 'Sending template...' : 'Sending...';
     try {
       const sendBody = useTemplate
-        ? { waNum, useTemplate: true, templateName: selectedTemplateName, templateLanguage: template?.language, templateParams: buildTemplateParams(a, template), agentId: a.id, campaignId: currentCampaignId }
+        ? { waNum, useTemplate: true, templateName: selectedTemplateName, templateLanguage: template?.language, templateParams: buildTemplateParams(a, template), templateBodyText: buildTemplateBodyText(a, template), agentId: a.id, campaignId: currentCampaignId }
         : { waNum, message: msg, useTemplate: false, agentId: a.id, campaignId: currentCampaignId };
       const resp = await fetch('/api/whatsapp-send', {
         method: 'POST',
@@ -3719,7 +3730,7 @@ async function runAutopilotCampaign() {
 
     if (useTemplate) {
       log.unshift({ icon: '📋', name: agentName, detail: 'Sending template: ' + selectedTemplateName });
-      sendBody = { waNum, useTemplate: true, templateName: selectedTemplateName, templateLanguage: template?.language, templateParams: buildTemplateParams(a, template), agentId: a.id, campaignId: currentCampaignId };
+      sendBody = { waNum, useTemplate: true, templateName: selectedTemplateName, templateLanguage: template?.language, templateParams: buildTemplateParams(a, template), templateBodyText: buildTemplateBodyText(a, template), agentId: a.id, campaignId: currentCampaignId };
     } else {
       // In-window: generate free-form with Claude
       log.unshift({ icon: '✦', name: agentName, detail: 'Generating personalised reply...' });
