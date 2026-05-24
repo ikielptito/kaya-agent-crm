@@ -4735,6 +4735,9 @@ function renderProjectEditor() {
     `)}
 
     ${section('Units', `
+      <div style="display:grid;grid-template-columns:120px 60px 60px 70px 90px 110px 110px 110px 1fr 30px;gap:6px;margin-bottom:4px;padding:0 8px">
+        ${['Code','Beds','Baths','sqm','Floor','Price USD','Price IDR','Status','Notes',''].map(h=>`<div style="font-size:10px;font-weight:600;letter-spacing:0.04em;color:var(--ink3);text-transform:uppercase">${h}</div>`).join('')}
+      </div>
       <div id="unitsContainer">${unitsHtml}</div>
       <button onclick="addUnitRow()" style="margin-top:8px;font-size:12px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">+ Add unit</button>
     `)}
