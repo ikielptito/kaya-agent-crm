@@ -1,6 +1,15 @@
-import { PORTFOLIO_CONTEXT, BROCHURES, REPLY_TONE } from '../lib/kb.js';
+import { PORTFOLIO_CONTEXT, BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
+
+// Maya operational windows (WITA = UTC+8)
+const ACTIVE_HOUR_START = 9;  // 9am WITA
+const ACTIVE_HOUR_END = 21;   // 9pm WITA (inclusive of 9:xx, exclusive of 10pm)
+const DAILY_SPEND_CAP_USD = 2.00;
+
+// Rough estimate: Claude Sonnet 4 with system prompt ~5k input + ~500 output tokens per reply
+// $3/M input, $15/M output → ~$0.022 per reply. We'll round up for safety to $0.03.
+const ESTIMATED_COST_PER_REPLY_USD = 0.03;
 
 export default async function handler(req, res) {
   const VERIFY_TOKEN = process.env.META_WA_VERIFY_TOKEN;
@@ -75,13 +84,16 @@ export default async function handler(req, res) {
     };
 
     // Determine automation mode (per-agent override beats global)
+    // Special override value 'paused' = Ikiel is handling this thread manually, Maya stays silent.
     let globalMode = 'draft';
     try {
       const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
       const sRow = (await sRes.json())?.[0];
       if (sRow?.value?.mode) globalMode = sRow.value.mode;
     } catch (e) { /* default */ }
-    const mode = agent.automation_override || globalMode;
+
+    const override = agent.automation_override;
+    const mode = override === 'paused' ? 'paused' : (override || globalMode);
 
     const patch = {
       conversation_summary: updatedSummary,
@@ -90,8 +102,32 @@ export default async function handler(req, res) {
       unread_count: (agent.unread_count || 0) + 1
     };
 
+    // PAUSED — Ikiel is handling this thread, Maya stays silent. Just log + mark unread.
+    if (mode === 'paused') {
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
     // OFF — log only
     if (mode === 'off' || !ANTHROPIC_KEY) {
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
+    // HOURS OF OPERATION CHECK — Maya only auto-replies between 9am-9pm WITA
+    if (!isWithinOperationalHours()) {
+      // Outside hours: still draft a suggestion so Ikiel can review in the morning
+      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft');
+      patch.suggested_reply = aiResultOffHours.reply || '';
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
+    // SPEND CAP CHECK — pause Maya for the day if over $2 daily Claude spend
+    const todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
+    if (todaySpend >= DAILY_SPEND_CAP_USD) {
+      // Over cap: log + escalate as draft (no Claude call)
+      patch.suggested_reply = '[Maya is paused: daily spend cap reached. Please reply manually.]';
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
     }
@@ -99,8 +135,16 @@ export default async function handler(req, res) {
     // Generate a reply with Claude
     const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode);
 
+    // Increment today's spend by the estimated cost of this Claude call
+    await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
+
+    // Apply any CRM updates Maya suggested (status changes, tags)
+    // Each update is logged with evidence and a "by_maya: true" flag
+    if (Array.isArray(aiResult.crm_updates) && aiResult.crm_updates.length > 0) {
+      await applyCrmUpdates(SUPABASE_URL, sbHeaders, agent, aiResult.crm_updates, text);
+    }
+
     if (mode === 'draft') {
-      // Store suggestion only — nothing sent
       patch.suggested_reply = aiResult.reply || '';
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
@@ -114,6 +158,14 @@ export default async function handler(req, res) {
     }
 
     // HYBRID(auto) or AUTOPILOT — send the reply
+    // Edge case: if Claude returned action: "escalate" with an empty reply (e.g. spam/harassment),
+    // skip the send entirely.
+    if (aiResult.action === 'escalate' && !aiResult.reply) {
+      patch.suggested_reply = '[Maya escalated silently. Likely spam/harassment.]';
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
     if (aiResult.reply && WA_TOKEN && WA_PHONE_ID) {
       await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply);
@@ -141,6 +193,99 @@ export default async function handler(req, res) {
 }
 
 // ── Helpers ──────────────────────────────────────────────
+
+// Returns true if current time is between 9am and 9pm WITA (UTC+8).
+function isWithinOperationalHours() {
+  const nowUtc = new Date();
+  // WITA = UTC+8. Convert hour by adding 8.
+  const witaHour = (nowUtc.getUTCHours() + 8) % 24;
+  return witaHour >= ACTIVE_HOUR_START && witaHour < ACTIVE_HOUR_END;
+}
+
+// Returns the YYYY-MM-DD date string in WITA time zone (for daily spend tracking).
+function getTodayWitaDateStr() {
+  const nowUtc = new Date();
+  const witaTime = new Date(nowUtc.getTime() + 8 * 60 * 60 * 1000);
+  return witaTime.toISOString().slice(0, 10);
+}
+
+async function getTodaySpend(url, headers) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+    const row = (await r.json())?.[0];
+    const usage = row?.value || {};
+    const today = getTodayWitaDateStr();
+    return usage[today] || 0;
+  } catch (e) {
+    return 0;
+  }
+}
+
+async function incrementTodaySpend(url, headers, costUsd) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+    const row = (await r.json())?.[0];
+    const usage = row?.value || {};
+    const today = getTodayWitaDateStr();
+    usage[today] = (usage[today] || 0) + costUsd;
+    // Trim old days (keep last 30)
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    Object.keys(usage).forEach(k => { if (k < cutoff) delete usage[k]; });
+    await fetch(`${url}/rest/v1/settings`, {
+      method: 'POST',
+      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key: 'daily_usage', value: usage })
+    });
+  } catch (e) {
+    console.warn('incrementTodaySpend failed:', e.message);
+  }
+}
+
+async function applyCrmUpdates(url, headers, agent, updates, evidenceQuote) {
+  // updates: [{ field: 'projects.Clay House.status', value: 'Listed', reason: '...' }]
+  // Apply each update to the agent, log to maya_updates for review
+  const patch = {};
+  const logs = [];
+  for (const u of updates) {
+    if (!u.field || u.value === undefined) continue;
+    // Set nested path on patch object (e.g. "projects.Clay House.status")
+    const parts = u.field.split('.');
+    if (parts.length === 1) {
+      patch[parts[0]] = u.value;
+    } else {
+      // For nested, we need to merge with existing object. Pull from agent.
+      const root = parts[0];
+      const current = JSON.parse(JSON.stringify(agent[root] || {}));
+      let cursor = current;
+      for (let i = 1; i < parts.length - 1; i++) {
+        if (!cursor[parts[i]]) cursor[parts[i]] = {};
+        cursor = cursor[parts[i]];
+      }
+      cursor[parts[parts.length - 1]] = u.value;
+      patch[root] = current;
+    }
+    logs.push({
+      agent_id: agent.id,
+      field: u.field,
+      new_value: typeof u.value === 'object' ? JSON.stringify(u.value) : String(u.value),
+      reason: u.reason || '',
+      evidence: evidenceQuote.slice(0, 500),
+      by_maya: true,
+      created_at: new Date().toISOString()
+    });
+  }
+  // Apply the patch to the agent (in-place; the main patchAgent later will write conversation_summary too)
+  if (Object.keys(patch).length > 0) {
+    await patchAgent(url, headers, agent.id, patch);
+  }
+  // Log each change (best-effort; table may not exist yet)
+  for (const log of logs) {
+    await fetch(`${url}/rest/v1/maya_updates`, {
+      method: 'POST', headers,
+      body: JSON.stringify(log)
+    }).catch(e => console.warn('maya_updates log failed:', e.message));
+  }
+}
 
 async function patchAgent(url, headers, id, fields) {
   await fetch(`${url}/rest/v1/agents?id=eq.${id}`, {
@@ -178,36 +323,40 @@ async function generateReply(apiKey, agent, inbound, mode) {
   const brochureKeys = Object.keys(BROCHURES).join(', ');
   const isHybrid = mode === 'hybrid';
 
-  const system = `You are replying to a real estate agent on WhatsApp on behalf of Ikiel from KAYA Developments in Bali.
+  const system = `${MAYA_PERSONA}
 
+PORTFOLIO KNOWLEDGE (factual reference, not a script to recite):
 ${PORTFOLIO_CONTEXT}
 
-${REPLY_TONE}
-
-Reply length rules (CRITICAL):
-- Keep replies SHORT -- 1 to 4 sentences typically. WhatsApp is a chat, not an email.
-- Answer the agent's actual question directly. Don't dump portfolio facts they didn't ask for.
-- If they ask for more info, offer to send the brochure (use send_doc) rather than typing out all the details.
-- Treat the portfolio knowledge above as info you KNOW, not as a script. Only mention specific projects/figures when directly relevant to their question.
-
-The agent's profile and history:
-Name: ${agent.name || 'unknown'}
+This conversation's context:
+Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
-Conversation so far:
+Prior conversation summary (most recent first):
 ${(agent.conversation_summary || '(no prior history)').slice(-2500)}
 
 You can attach a project brochure PDF. Available brochure keys: ${brochureKeys}.
 
+You can suggest CRM updates when the agent's message clearly indicates a pipeline change. Examples:
+- "I'll list it" → update projects.<ProjectName>.status to "Listed"
+- "I have a client interested in Sabit House" → update projects.Sabit House.status to "Has client"
+- "Not focused on Berawa" / "Don't sell freehold" → update projects.<ProjectName>.status to "Declined"
+- "We agreed on the terms" → update projects.<ProjectName>.status to "Signed"
+Be conservative -- only suggest updates when the language is unambiguous.
+
 Respond with ONLY a JSON object (no markdown, no prose):
 {
   "action": "auto" | "escalate",
-  "reply": "the message to send to the agent",
-  "send_doc": null | one of [${brochureKeys}]
+  "reply": "the message to send to the agent (1-4 sentences typical)",
+  "send_doc": null | one of [${brochureKeys}],
+  "crm_updates": [
+    { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
+  ]
 }
 ${isHybrid
-  ? `Set "action" to "auto" ONLY if the agent's message is a simple, factual question you can answer with full confidence from the portfolio info above (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
-  : `Set "action" to "auto".`}
-Set "send_doc" to a brochure key only if the agent is asking for information/materials about that specific project.`;
+  ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
+  : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
+Set "send_doc" to a brochure key only if the agent is asking for information/materials about that specific project.
+Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
 
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -215,7 +364,7 @@ Set "send_doc" to a brochure key only if the agent is asking for information/mat
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 600,
+        max_tokens: 800,
         system,
         messages: [{ role: 'user', content: `The agent just sent: "${inbound}"` }]
       })
@@ -228,12 +377,13 @@ Set "send_doc" to a brochure key only if the agent is asking for information/mat
       return {
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
-        send_doc: parsed.send_doc || null
+        send_doc: parsed.send_doc || null,
+        crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : []
       };
     }
-    return { action: 'escalate', reply: raw.trim(), send_doc: null };
+    return { action: 'escalate', reply: raw.trim(), send_doc: null, crm_updates: [] };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null };
+    return { action: 'escalate', reply: '', send_doc: null, crm_updates: [] };
   }
 }

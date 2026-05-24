@@ -4360,7 +4360,8 @@ async function openConversation(agentId) {
     </div>
     <div class="inbox-thread-msgs" id="threadMsgs"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading messages...</div></div>
     <div class="inbox-reply">
-      ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Claude drafted a reply — review and send</span></div>` : ''}
+      ${a.automation_override === 'paused' ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#78350f"><span>⏸ Maya is paused for this conversation. You're in control.</span><button onclick="resumeMaya(${a.id})" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Resume Maya</button></div>` : ''}
+      ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Maya drafted a reply — review and send</span></div>` : ''}
       <div id="inboxAttachChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px"></div>
       <div class="inbox-reply-row">
         <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})" title="Claude suggests a reply">✦</button>
@@ -4470,9 +4471,12 @@ async function sendReply(agentId) {
       inboxAttachments = [];
       renderInboxAttachChips();
       if (a.suggested_reply) { a.suggested_reply = ''; saveAgent(a.id, { suggested_reply: '' }); }
+      // Manual reply pauses Maya for this agent — she stays silent until Ikiel clicks "Resume Maya"
+      a.automation_override = 'paused';
+      saveAgent(a.id, { automation_override: 'paused', suggested_reply: '' });
       // Invalidate inbox cache so next render fetches fresh
       window._inboxMsgAgentIds = null;
-      openConversation(agentId); // refresh thread
+      openConversation(agentId); // refresh thread (will show "Maya paused" banner)
     } else {
       alert('Send failed: ' + (errorMsg || 'No message or attachments sent'));
     }
@@ -4480,6 +4484,15 @@ async function sendReply(agentId) {
     alert('Send error: ' + e.message);
   }
   if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+}
+
+async function resumeMaya(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  if (!confirm('Resume Maya for this conversation? She will auto-reply to the next message from this agent based on the global automation mode.')) return;
+  a.automation_override = null;
+  await saveAgent(a.id, { automation_override: null });
+  openConversation(agentId); // refresh to hide banner
 }
 
 function updateInboxBadge() {
