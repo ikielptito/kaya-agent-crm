@@ -529,6 +529,8 @@ You can suggest CRM updates when the agent's message clearly indicates a pipelin
 For each project, set both .status (display) and .stage (lifecycle) when triggered:
 
 Trigger → fields to update:
+- You proactively mention/describe a project to an agent for the first time (no prior stage on that project) →
+    projects.<Name>.status = "Contacted", projects.<Name>.stage = "pitched"
 - Agent says they'll list a project ("I can list this", "Let's add it to my portfolio") →
     projects.<Name>.status = "Listing agreed", projects.<Name>.stage = "interested"
 - Agent asks to see the listing agreement, OR you proactively offer to send it →

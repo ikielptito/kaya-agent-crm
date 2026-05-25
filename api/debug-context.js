@@ -7,6 +7,17 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES } from '../lib/kb.js';
 
 export default async function handler(req, res) {
+  // Simple shared-secret gate. Allow either ?secret=XXX query param OR
+  // Authorization: Bearer XXX header. Falls back to allowing unauthenticated
+  // if no DEBUG_SECRET env var is set (preserves legacy behaviour for dev).
+  const expected = process.env.DEBUG_SECRET || process.env.CRON_SECRET;
+  if (expected) {
+    const provided = req.query?.secret || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (provided !== expected) {
+      return res.status(401).json({ error: 'Unauthorized. Append ?secret=YOUR_SECRET or send Authorization: Bearer YOUR_SECRET.' });
+    }
+  }
+
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
 

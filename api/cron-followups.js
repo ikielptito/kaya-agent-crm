@@ -47,6 +47,9 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 const FOLLOWUP_INTERVAL_DAYS = 3;
 const MAX_FOLLOWUPS = 4;
 const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
+const DAILY_SPEND_CAP_USD = 2.00;
+const COST_PER_REPLY_USD = 0.02; // Sonnet 4 ~$0.02/follow-up
+const WA_MESSAGE_RETENTION_DAYS = 90; // older rows are pruned on each cron run
 
 export default async function handler(req, res) {
   // Vercel Cron sends Authorization: Bearer ${CRON_SECRET}
@@ -99,6 +102,26 @@ export default async function handler(req, res) {
     let stalled = 0;
     let skipped = 0;
 
+    // Initial spend check — abort if already over cap from inbox auto-replies today
+    let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
+    if (todaySpend >= DAILY_SPEND_CAP_USD) {
+      return res.status(200).json({ ran_at: now.toISOString(), suspended: true, reason: `daily spend cap ($${DAILY_SPEND_CAP_USD}) already reached: $${todaySpend.toFixed(2)}` });
+    }
+
+    // Prune wa_messages older than retention window before doing anything else
+    const pruneCutoff = new Date(now.getTime() - WA_MESSAGE_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+    let pruned = 0;
+    try {
+      const pruneRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=lt.${pruneCutoff}`, {
+        method: 'DELETE',
+        headers: { ...sbHeaders, 'Prefer': 'return=representation' }
+      });
+      if (pruneRes.ok) {
+        const deleted = await pruneRes.json();
+        pruned = Array.isArray(deleted) ? deleted.length : 0;
+      }
+    } catch (e) { /* non-fatal */ }
+
     for (const agent of agents) {
       // Skip agents that Ikiel is handling manually (automation_override = 'paused')
       // or that have automation explicitly turned off for them.
@@ -125,10 +148,17 @@ export default async function handler(req, res) {
           continue;
         }
 
+        // Spend gate — abort if next Claude call would push us over the cap
+        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+          results.push({ agent: agent.name || agent.id, project: projectName, action: 'skipped_spend_cap' });
+          continue;
+        }
+
         // Generate follow-up message
         const followupText = await generateFollowupMessage(
           ANTHROPIC_KEY, agent, projectName, proj, portfolio, count + 1
         );
+        todaySpend += COST_PER_REPLY_USD;
         if (!followupText) {
           results.push({ agent: agent.name || agent.id, project: projectName, action: 'skipped_no_message' });
           continue;
@@ -173,10 +203,17 @@ export default async function handler(req, res) {
       }
     }
 
+    // Write back the accumulated daily spend
+    if (sent > 0) {
+      await persistTodaySpend(SUPABASE_URL, sbHeaders, todaySpend);
+    }
+
     return res.status(200).json({
       ran_at: now.toISOString(),
       total_agents: agents.length,
       sent, stalled, skipped,
+      pruned_wa_messages: pruned,
+      day_spend_after: todaySpend.toFixed(2),
       results
     });
 
@@ -249,6 +286,38 @@ async function sendText(phoneId, token, to, text) {
   } catch (e) {
     return false;
   }
+}
+
+function getTodayWitaDateStr() {
+  const witaTime = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  return witaTime.toISOString().slice(0, 10);
+}
+
+async function getTodaySpend(url, headers) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+    const row = (await r.json())?.[0];
+    const usage = row?.value || {};
+    return usage[getTodayWitaDateStr()] || 0;
+  } catch (e) { return 0; }
+}
+
+async function persistTodaySpend(url, headers, newTotal) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+    const row = (await r.json())?.[0];
+    const usage = row?.value || {};
+    const today = getTodayWitaDateStr();
+    usage[today] = newTotal;
+    // Trim history beyond 30 days
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    Object.keys(usage).forEach(k => { if (k < cutoff) delete usage[k]; });
+    await fetch(`${url}/rest/v1/settings`, {
+      method: 'POST',
+      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key: 'daily_usage', value: usage })
+    });
+  } catch (e) { /* non-fatal */ }
 }
 
 async function loadProjects(url, headers) {

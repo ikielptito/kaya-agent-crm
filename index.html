@@ -1310,6 +1310,30 @@ const savedView = localStorage.getItem('crm_viewMode');
 if (savedView === 'list') { viewMode = 'list'; setTimeout(() => setView('list'), 0); }
 
 loadAgents();
+checkSchema();
+
+async function checkSchema() {
+  try {
+    const r = await fetch('/api/check-schema');
+    const data = await r.json();
+    if (!data.ok && Array.isArray(data.missing) && data.missing.length > 0) {
+      showSchemaBanner(data.missing);
+    }
+  } catch (e) { /* silent */ }
+}
+
+function showSchemaBanner(missing) {
+  if (document.getElementById('schemaBanner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'schemaBanner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#fef3c7;border-bottom:1px solid #fbbf24;padding:10px 16px;font-size:12px;color:#78350f;display:flex;align-items:center;justify-content:space-between;gap:12px;font-family:Geist,sans-serif';
+  banner.innerHTML = `
+    <span><strong>⚠ Schema out of date.</strong> Missing: ${missing.slice(0,3).join(', ')}${missing.length>3?` + ${missing.length-3} more`:''}. Run <code style="background:white;padding:2px 5px;border-radius:3px">SCHEMA.sql</code> in Supabase SQL Editor.</span>
+    <button onclick="document.getElementById('schemaBanner').remove()" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Dismiss</button>
+  `;
+  document.body.appendChild(banner);
+  document.body.style.paddingTop = '38px';
+}
 
 function getWaNum(a) {
   if (a.wa_url && a.wa_url.startsWith('https://wa.me/')) return a.wa_url.replace('https://wa.me/','').replace(/\D/g,'');
@@ -4923,7 +4947,7 @@ function renderProjectEditor() {
 
     ${section('Basics', `
       ${twoCol(
-        field('Name *', `<input id="pf_name" value="${esc(p.name)}" oninput="editingProject.name=this.value;autoSlug()" style="${inputStyle}">`),
+        field('Name *', `<input id="pf_name" value="${esc(p.name)}" oninput="editingProject.name=this.value;autoSlug()" placeholder="No dots in the name — use - or _ instead" style="${inputStyle}">`),
         field('Slug *', `<input id="pf_slug" value="${esc(p.slug)}" oninput="editingProject.slug=this.value" placeholder="lowercase_with_underscores" style="${inputStyle}">`)
       )}
       ${twoCol(
