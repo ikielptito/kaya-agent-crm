@@ -255,10 +255,16 @@ export default async function handler(req, res) {
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply);
 
       // Send brochure if Claude requested one (use live brochure map from DB)
+      // Dedup: skip if the same filename was sent in the last 14 days (e.g. via campaign attachment).
       const doc = aiResult.send_doc && liveBrochures[aiResult.send_doc];
       if (doc && doc.url) {
-        await sendDocument(WA_PHONE_ID, WA_TOKEN, fromNum, doc.url, doc.filename);
-        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Document: ${doc.filename}]`);
+        const recentlySent = await wasDocRecentlySent(SUPABASE_URL, sbHeaders, agent.id, doc.filename, 14);
+        if (!recentlySent) {
+          await sendDocument(WA_PHONE_ID, WA_TOKEN, fromNum, doc.url, doc.filename);
+          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Document: ${doc.filename}]`);
+        } else {
+          console.log(`Skipping ${doc.filename} — already sent in last 14 days`);
+        }
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -414,6 +420,25 @@ async function sendText(phoneId, token, to, text) {
   });
 }
 
+// Returns true if a document with this filename was sent to this agent within
+// the last `days` days. Used to prevent Maya re-sending a brochure that the
+// campaign already attached.
+async function wasDocRecentlySent(url, headers, agentId, filename, days) {
+  try {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const r = await fetch(
+      `${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.outbound&timestamp=gte.${cutoff}&select=content&limit=200`,
+      { headers }
+    );
+    if (!r.ok) return false;
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return false;
+    return rows.some(m => (m.content || '').includes(`[Document: ${filename}]`));
+  } catch (e) {
+    return false;
+  }
+}
+
 async function sendDocument(phoneId, token, to, link, filename) {
   return fetch(`${GRAPH}/${phoneId}/messages`, {
     method: 'POST',
@@ -502,7 +527,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
 ${isHybrid
   ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
-Set "send_doc" to a brochure key only if the agent is asking for information/materials about that specific project.
+Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
 Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
 
   try {

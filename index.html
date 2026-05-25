@@ -3151,7 +3151,7 @@ function updateAttachments() {
   campaignAttachments = campaignAttachments.filter(a => a.source === 'upload');
   checked.forEach(key => {
     const b = BROCHURE_LIST.find(x => x.key === key);
-    if (b) campaignAttachments.push({ url: b.url, filename: b.filename, label: b.label, source: 'brochure' });
+    if (b) campaignAttachments.push({ key: b.key, url: b.url, filename: b.filename, label: b.label, source: 'brochure' });
   });
   renderAttachmentChips();
   updateCampaignPreview();
