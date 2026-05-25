@@ -176,6 +176,17 @@ export default async function handler(req, res) {
       unread_count: (agent.unread_count || 0) + 1
     };
 
+    // STOP CAMPAIGN SEQUENCE — any inbound message stops the active campaign
+    // template sequence for this agent. Their conversation is now live.
+    if (agent.campaign_engagement && agent.campaign_engagement.status === 'pending') {
+      patch.campaign_engagement = {
+        ...agent.campaign_engagement,
+        status: 'responded',
+        responded_at: timestamp,
+        next_template_at: null
+      };
+    }
+
     // PAUSED — Ikiel is handling this thread, Maya stays silent. Just log + mark unread.
     if (mode === 'paused') {
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);

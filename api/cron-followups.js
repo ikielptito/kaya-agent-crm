@@ -101,6 +101,8 @@ export default async function handler(req, res) {
     let sent = 0;
     let stalled = 0;
     let skipped = 0;
+    let sequenceSent = 0;
+    let sequenceCompleted = 0;
 
     // Initial spend check — abort if already over cap from inbox auto-replies today
     let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
@@ -122,6 +124,11 @@ export default async function handler(req, res) {
       }
     } catch (e) { /* non-fatal */ }
 
+    // Load all campaigns so we can resolve template_sequence per agent's engagement
+    const campaignsMap = await loadCampaignsMap(SUPABASE_URL, sbHeaders);
+    // Load all approved WhatsApp templates so we can find the body text + language for sends
+    const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
+
     for (const agent of agents) {
       // Skip agents that Ikiel is handling manually (automation_override = 'paused')
       // or that have automation explicitly turned off for them.
@@ -129,6 +136,77 @@ export default async function handler(req, res) {
         skipped++;
         continue;
       }
+
+      // ── CAMPAIGN SEQUENCE FOLLOW-UP ─────────────────────────────────
+      // If this agent is in a pending campaign sequence and their next template
+      // is due, send the next step.
+      const eng = agent.campaign_engagement;
+      if (eng && eng.status === 'pending' && eng.next_template_at) {
+        const dueAt = new Date(eng.next_template_at);
+        if (dueAt <= now) {
+          const campaign = campaignsMap[eng.campaign_id];
+          const sequence = campaign?.template_sequence || [];
+          const nextIdx = (eng.sequence_index || 0) + 1;
+          const nextStep = sequence[nextIdx];
+
+          if (!nextStep) {
+            // End of sequence — mark completed
+            await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent.id, {
+              ...eng,
+              status: 'completed_sequence',
+              next_template_at: null,
+              completed_at: now.toISOString()
+            });
+            sequenceCompleted++;
+            results.push({ agent: agent.name || agent.id, type: 'sequence_completed', campaign: campaign?.name });
+          } else {
+            // Spend gate
+            if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+              results.push({ agent: agent.name || agent.id, type: 'sequence_skipped', reason: 'spend_cap' });
+              continue;
+            }
+            // Send the next template
+            const tmpl = templatesMap[nextStep.template_name];
+            if (!tmpl) {
+              results.push({ agent: agent.name || agent.id, type: 'sequence_skipped', reason: 'template_not_found:' + nextStep.template_name });
+              continue;
+            }
+            const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+            const renderedBody = (tmpl.body || '').replace(/\{\{1\}\}/g, firstName);
+            const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
+            if (!ok) {
+              results.push({ agent: agent.name || agent.id, type: 'sequence_send_failed', template: nextStep.template_name });
+              continue;
+            }
+            // Log outbound
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({
+                agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+                content: renderedBody, timestamp: now.toISOString(),
+                source: 'cron', campaign_id: eng.campaign_id
+              })
+            }).catch(() => {});
+            // Advance engagement state
+            const waitDays = (sequence[nextIdx + 1]?.wait_days) || 1;
+            const nextTemplateAt = sequence[nextIdx + 1]
+              ? new Date(now.getTime() + waitDays * 86400000).toISOString()
+              : null;
+            await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent.id, {
+              ...eng,
+              sequence_index: nextIdx,
+              last_template_sent: nextStep.template_name,
+              last_template_sent_at: now.toISOString(),
+              next_template_at: nextTemplateAt
+            });
+            sequenceSent++;
+            todaySpend += COST_PER_REPLY_USD;
+            results.push({ agent: agent.name || agent.id, type: 'sequence_sent', template: nextStep.template_name, step: nextIdx + 1, of: sequence.length });
+          }
+        }
+      }
+
+      // ── LISTING LIFECYCLE FOLLOW-UPS (existing logic below) ─────────
       const projectsObj = agent.projects || {};
       for (const projectName of Object.keys(projectsObj)) {
         const proj = projectsObj[projectName];
@@ -211,7 +289,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ran_at: now.toISOString(),
       total_agents: agents.length,
-      sent, stalled, skipped,
+      listing_sent: sent, listing_stalled: stalled, skipped,
+      sequence_sent: sequenceSent, sequence_completed: sequenceCompleted,
       pruned_wa_messages: pruned,
       day_spend_after: todaySpend.toFixed(2),
       results
@@ -273,6 +352,65 @@ Respond with ONLY the message text — no JSON, no preamble.`;
     console.warn('generateFollowupMessage failed:', e.message);
     return null;
   }
+}
+
+async function loadCampaignsMap(url, headers) {
+  try {
+    const r = await fetch(`${url}/rest/v1/campaigns?select=id,name,template_sequence`, { headers });
+    if (!r.ok) return {};
+    const rows = await r.json();
+    const map = {};
+    if (Array.isArray(rows)) rows.forEach(c => { map[c.id] = c; });
+    return map;
+  } catch (e) { return {}; }
+}
+
+async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
+  // Fetch approved templates from Meta. We need WABA_ID for this.
+  const wabaId = process.env.META_WABA_ID;
+  if (!wabaId || !waToken) return {};
+  try {
+    const r = await fetch(`${GRAPH}/${wabaId}/message_templates?limit=100&access_token=${waToken}`);
+    if (!r.ok) return {};
+    const data = await r.json();
+    const map = {};
+    (data.data || []).filter(t => t.status === 'APPROVED').forEach(t => {
+      const bodyComponent = (t.components || []).find(c => c.type === 'BODY');
+      map[t.name] = {
+        name: t.name,
+        language: t.language,
+        body: bodyComponent?.text || '',
+        placeholderCount: ((bodyComponent?.text || '').match(/\{\{(\d+)\}\}/g) || []).length
+      };
+    });
+    return map;
+  } catch (e) { return {}; }
+}
+
+async function sendTemplate(phoneId, token, to, tmpl, params) {
+  try {
+    const components = (params && params.length > 0)
+      ? [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }]
+      : [];
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', to, type: 'template',
+        template: { name: tmpl.name, language: { code: tmpl.language || 'en' }, components }
+      })
+    });
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+async function patchAgentEngagement(url, headers, agentId, engagement) {
+  try {
+    await fetch(`${url}/rest/v1/agents?id=eq.${agentId}`, {
+      method: 'PATCH', headers,
+      body: JSON.stringify({ campaign_engagement: engagement })
+    });
+  } catch (e) { /* non-fatal */ }
 }
 
 async function sendText(phoneId, token, to, text) {

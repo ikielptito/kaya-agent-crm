@@ -214,7 +214,8 @@ export default async function handler(req, res) {
         automation_override: null,
         last_campaign_sent: null,
         projects: {},                                     // pipeline statuses + lifecycle stages set by Maya
-        samba: { status: 'Not contacted', notes: '' }     // Samba pipeline status
+        samba: { status: 'Not contacted', notes: '' },    // Samba pipeline status
+        campaign_engagement: null                         // active template sequence state
       };
       const r2 = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + agentId, {
         method: 'PATCH', headers, body: JSON.stringify(resetFields)
@@ -249,7 +250,8 @@ export default async function handler(req, res) {
           automation_override: null,
           last_campaign_sent: null,
           projects: {},
-          samba: { status: 'Not contacted', notes: '' }
+          samba: { status: 'Not contacted', notes: '' },
+          campaign_engagement: null
         })
       });
       return res.status(200).json({ success: true, count: testAgents.length, agents: testAgents });

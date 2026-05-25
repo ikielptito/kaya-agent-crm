@@ -865,16 +865,15 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
             </label>
           </div>
         </div>
-        <!-- Template selection (for first-contact agents outside 24h window) -->
+        <!-- Template sequence (for cold agents — initial + follow-ups if no reply) -->
         <div id="cbTemplateWrap">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
-            <span>FIRST-CONTACT TEMPLATE <span style="font-weight:400;color:var(--ink4)">(required for cold agents)</span></span>
+            <span>TEMPLATE SEQUENCE <span style="font-weight:400;color:var(--ink4)">(initial + follow-ups if no reply)</span></span>
             <button onclick="loadWaTemplates(true)" style="font-size:10px;padding:2px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
           </div>
-          <div id="cbTemplatePicker" style="background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:10px;min-height:48px;font-size:12px;color:var(--ink3)">
+          <div id="cbSequenceEditor" style="background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:10px;font-size:12px;color:var(--ink3)">
             <div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>
           </div>
-          <div id="cbTemplatePreview" style="display:none;margin-top:8px;background:var(--accent-light);border:1px solid var(--accent-mid);border-radius:var(--radius-sm);padding:10px 12px;font-size:11px;line-height:1.6;color:var(--ink2);white-space:pre-wrap"></div>
         </div>
         <!-- Context for Claude (assisted + autopilot modes) -->
         <div id="cbContextWrap">
@@ -1311,6 +1310,7 @@ if (savedView === 'list') { viewMode = 'list'; setTimeout(() => setView('list'),
 
 loadAgents();
 checkSchema();
+loadCampaigns().catch(() => {});  // pre-load so drawer can resolve campaign_engagement.campaign_id → name
 
 async function checkSchema() {
   try {
@@ -1728,6 +1728,7 @@ function openDrawer(id) {
         </label>
         <button onclick="resetAgentConversation(${a.id})" style="font-size:11px;padding:6px 12px;border:1px solid #d99850;border-radius:6px;background:white;color:#8a5a1a;cursor:pointer;font-family:Geist,sans-serif;font-weight:500;white-space:nowrap" title="Wipe all conversation history, unread state, and campaign-sent flags so you can re-test from scratch">↺ Reset conversation</button>
       </div>
+      ${renderCampaignEngagement(a)}
     </div>
 
     <div class="pipeline-section kaya-section" style="margin-bottom:14px">
@@ -1827,6 +1828,74 @@ function renderStageInfo(projectName, proj) {
 }
 
 function escAttr(s) { return String(s).replace(/'/g, "\\'"); }
+
+// ── CAMPAIGN ENGAGEMENT (sequence state per agent) ───────────────────────
+function renderCampaignEngagement(a) {
+  const eng = a.campaign_engagement;
+  if (!eng || !eng.campaign_id) return '';
+
+  const camp = (campaignsList || []).find(c => c.id === eng.campaign_id);
+  const seq = camp?.template_sequence || [];
+  const stepNum = (eng.sequence_index || 0) + 1;
+  const totalSteps = seq.length || 1;
+  const statusMeta = {
+    pending: { label: 'Active', color: '#1e40af', bg: '#dbeafe' },
+    responded: { label: 'Replied', color: '#166534', bg: '#dcfce7' },
+    completed_sequence: { label: 'No response', color: '#991b1b', bg: '#fee2e2' },
+    stopped: { label: 'Stopped', color: '#737373', bg: '#f5f5f5' }
+  }[eng.status] || { label: eng.status, color: '#737373', bg: '#f5f5f5' };
+
+  const detailParts = [];
+  if (eng.last_template_sent) detailParts.push(`<code style="background:white;padding:1px 5px;border-radius:3px">${eng.last_template_sent}</code> sent ${formatRelativeDate(eng.last_template_sent_at)}`);
+  if (eng.status === 'pending' && eng.next_template_at) {
+    const nextStep = seq[stepNum]; // next step (0-indexed)
+    detailParts.push(`next: <code style="background:white;padding:1px 5px;border-radius:3px">${nextStep?.template_name || '?'}</code> ${formatRelativeDate(eng.next_template_at)}`);
+  }
+  if (eng.status === 'responded' && eng.responded_at) {
+    detailParts.push(`agent replied ${formatRelativeDate(eng.responded_at)}`);
+  }
+
+  const actions = [];
+  if (eng.status === 'pending') {
+    actions.push(`<button onclick="skipNextSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">⏭ Skip next</button>`);
+    actions.push(`<button onclick="stopSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Stop sequence</button>`);
+  }
+
+  return `
+    <div style="margin-top:10px;padding:10px 12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;color:var(--ink3)">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:13px">🎯</span>
+          <strong style="color:var(--ink2)">${camp ? camp.name : 'Campaign'}</strong>
+          <span style="display:inline-block;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;color:${statusMeta.color};background:${statusMeta.bg}">${statusMeta.label.toUpperCase()}</span>
+          <span style="color:var(--ink4)">step ${stepNum}/${totalSteps}</span>
+        </div>
+        <span style="display:flex;gap:6px">${actions.join('')}</span>
+      </div>
+      <div style="color:var(--ink3);line-height:1.6">${detailParts.join(' · ')}</div>
+    </div>
+  `;
+}
+
+async function skipNextSequence(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a || !a.campaign_engagement) return;
+  const pushed = new Date(Date.now() + 7 * 86400000).toISOString();
+  const updated = { ...a.campaign_engagement, next_template_at: pushed };
+  a.campaign_engagement = updated;
+  await saveAgent(a.id, { campaign_engagement: updated });
+  openDrawer(agentId);
+}
+
+async function stopSequence(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a || !a.campaign_engagement) return;
+  if (!confirm('Stop the template sequence for this agent? No further follow-ups will be sent.')) return;
+  const updated = { ...a.campaign_engagement, status: 'stopped', next_template_at: null };
+  a.campaign_engagement = updated;
+  await saveAgent(a.id, { campaign_engagement: updated });
+  openDrawer(agentId);
+}
 
 function formatRelativeDate(iso) {
   if (!iso) return '';
@@ -2848,49 +2917,104 @@ async function loadWaTemplates(forceRefresh) {
   }
 }
 
-function renderTemplatePicker() {
-  const picker = document.getElementById('cbTemplatePicker');
-  if (!picker) return;
+// Template sequence state — array of { template_name, wait_days }
+// First step is sent immediately; subsequent steps fire only if no inbound reply.
+let campaignSequence = [];
 
+function renderTemplatePicker() {
+  // Legacy alias — now renders the sequence editor.
+  renderSequenceEditor();
+}
+
+function renderSequenceEditor() {
+  const editor = document.getElementById('cbSequenceEditor');
+  if (!editor) return;
   const approved = waTemplates.filter(t => t.status === 'APPROVED');
 
   if (approved.length === 0) {
-    picker.innerHTML = `<div style="font-size:11px;color:var(--ink3);line-height:1.6">
+    editor.innerHTML = `<div style="font-size:11px;color:var(--ink3);line-height:1.6">
       <strong style="color:var(--ink2)">No approved templates yet.</strong><br>
-      Create one in <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" style="color:var(--accent);text-decoration:underline">Meta Business Suite → WhatsApp Manager → Message Templates</a> (1-24h approval). For first-contact campaigns, you need at least one approved template. After approval, click ↻ Refresh.
+      Create one in <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" style="color:var(--accent);text-decoration:underline">Meta Business Suite → WhatsApp Manager → Message Templates</a> (1-24h approval). After approval, click ↻ Refresh.
     </div>`;
     return;
   }
 
-  picker.innerHTML = `<select id="cbTemplateSelect" onchange="onTemplateSelect()" style="width:100%;height:34px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);outline:none">
-    <option value="">-- No template (free-form only, fails for cold agents) --</option>
-    ${approved.map(t => {
-      const sel = t.name === selectedTemplateName ? 'selected' : '';
-      return `<option value="${t.name}" ${sel}>${t.name} (${t.category}, ${t.language}) — ${t.placeholderCount} param${t.placeholderCount !== 1 ? 's' : ''}</option>`;
-    }).join('')}
-  </select>`;
-  onTemplateSelect();
+  // If sequence is empty, initialise with the first approved template as Day 0
+  if (!Array.isArray(campaignSequence) || campaignSequence.length === 0) {
+    campaignSequence = [{ template_name: approved[0].name, wait_days: 0 }];
+  }
+
+  // Migrate legacy single-template state into a sequence on first render
+  if (selectedTemplateName && campaignSequence.length === 1 && campaignSequence[0].template_name !== selectedTemplateName) {
+    campaignSequence = [{ template_name: selectedTemplateName, wait_days: 0 }];
+  }
+
+  // Render the sequence as a vertical timeline
+  const html = campaignSequence.map((step, idx) => {
+    const tmpl = waTemplates.find(t => t.name === step.template_name);
+    const exampleBody = tmpl ? tmpl.body.replace(/\{\{1\}\}/g, 'Sarah').replace(/\{\{(\d+)\}\}/g, (m,n)=>`[${n}]`) : '(template not found)';
+    const dayLabel = idx === 0 ? 'Day 0 (immediately on campaign start)' : `Day ${cumulativeDays(idx)} (if no reply)`;
+    return `
+      ${idx > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px 12px;color:var(--ink4);font-size:11px"><span>↓ wait</span><input type="number" min="1" max="14" value="${step.wait_days || 1}" onchange="updateSequenceStep(${idx}, 'wait_days', parseInt(this.value) || 1)" style="width:50px;height:24px;background:white;border:1px solid var(--sand3);border-radius:4px;padding:0 6px;font-family:Geist,sans-serif;font-size:11px;text-align:center"> <span>day(s)</span></div>` : ''}
+      <div style="background:white;border:1px solid var(--sand3);border-radius:6px;padding:10px;margin-bottom:4px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <div style="font-size:10px;font-weight:600;color:var(--accent);letter-spacing:0.04em;text-transform:uppercase">${dayLabel}</div>
+          ${campaignSequence.length > 1 ? `<button onclick="removeSequenceStep(${idx})" style="font-size:10px;padding:2px 8px;border:1px solid #f5c0c0;border-radius:4px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Remove</button>` : ''}
+        </div>
+        <select onchange="updateSequenceStep(${idx}, 'template_name', this.value)" style="width:100%;height:30px;background:white;border:1px solid var(--sand3);border-radius:5px;padding:0 8px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);outline:none;margin-bottom:6px">
+          ${approved.map(t => `<option value="${t.name}" ${t.name === step.template_name ? 'selected' : ''}>${t.name} (${t.category}, ${t.language})</option>`).join('')}
+        </select>
+        <div style="font-size:10px;color:var(--ink3);line-height:1.4;background:var(--sand);border-radius:4px;padding:6px 8px;white-space:pre-wrap">${exampleBody.replace(/</g,'&lt;')}</div>
+      </div>
+    `;
+  }).join('');
+
+  editor.innerHTML = `
+    ${html}
+    <button onclick="addSequenceStep()" style="margin-top:8px;font-size:11px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;width:100%">+ Add follow-up step</button>
+    <div style="margin-top:8px;font-size:10px;color:var(--ink4);line-height:1.4">
+      Each step is sent ONLY if the agent hasn't replied yet. Any inbound reply stops the sequence immediately. After all steps run, the agent is marked as <code>no_response</code> and follow-ups stop.
+    </div>
+  `;
+
+  // Sync legacy state — keep selectedTemplateName as the Day 0 template
+  selectedTemplateName = campaignSequence[0]?.template_name || null;
 }
 
-function onTemplateSelect() {
-  const sel = document.getElementById('cbTemplateSelect');
-  if (!sel) return;
-  selectedTemplateName = sel.value || null;
-  const preview = document.getElementById('cbTemplatePreview');
-  if (!selectedTemplateName) {
-    preview.style.display = 'none';
-    return;
-  }
-  const t = waTemplates.find(x => x.name === selectedTemplateName);
-  if (!t) return;
-  // Show preview with placeholders filled with example agent data
-  const exampleName = 'Lisa';
-  const previewText = t.body
-    .replace(/\{\{1\}\}/g, exampleName)
-    .replace(/\{\{(\d+)\}\}/g, (m, n) => `[${n}]`);
-  preview.innerHTML = `<div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:6px;letter-spacing:0.05em">PREVIEW (with example: ${exampleName})</div>${previewText.replace(/</g,'&lt;')}`;
-  preview.style.display = '';
+function cumulativeDays(idx) {
+  let total = 0;
+  for (let i = 1; i <= idx; i++) total += (campaignSequence[i]?.wait_days || 1);
+  return total;
 }
+
+function updateSequenceStep(idx, key, value) {
+  if (!campaignSequence[idx]) return;
+  campaignSequence[idx][key] = value;
+  // Re-render only if a template name changed (preview needs refresh)
+  if (key === 'template_name') {
+    selectedTemplateName = campaignSequence[0]?.template_name || null;
+    renderSequenceEditor();
+  }
+}
+
+function addSequenceStep() {
+  const approved = waTemplates.filter(t => t.status === 'APPROVED');
+  if (approved.length === 0) return;
+  // Default to first approved template that isn't already used (preference), else any
+  const used = new Set(campaignSequence.map(s => s.template_name));
+  const next = approved.find(t => !used.has(t.name)) || approved[0];
+  campaignSequence.push({ template_name: next.name, wait_days: 1 });
+  renderSequenceEditor();
+}
+
+function removeSequenceStep(idx) {
+  if (campaignSequence.length <= 1) return; // always keep Day 0
+  campaignSequence.splice(idx, 1);
+  renderSequenceEditor();
+}
+
+// Legacy alias — onTemplateSelect was called on dropdown change pre-sequence.
+function onTemplateSelect() { /* no-op — sequence editor handles its own state */ }
 
 // Build template parameters for a given agent from their data
 function buildTemplateParams(agent, template) {
@@ -3075,6 +3199,14 @@ function showCampaignSetup(existingCampaign) {
 
   // Load templates for first-contact agents
   selectedTemplateName = c.template_name || null;
+  // Restore sequence from saved campaign (falls back to single-template legacy form)
+  if (Array.isArray(c.template_sequence) && c.template_sequence.length > 0) {
+    campaignSequence = c.template_sequence.map(s => ({ ...s }));
+  } else if (selectedTemplateName) {
+    campaignSequence = [{ template_name: selectedTemplateName, wait_days: 0 }];
+  } else {
+    campaignSequence = [];
+  }
   loadWaTemplates();
 
   updateCampaignPreview();
@@ -3423,6 +3555,7 @@ async function startCampaign() {
     agent_ids: campaignAudienceMode === 'manual' ? [...campaignSelectedAgentIds] : campaignQueue.map(a => a.id),
     attachments: campaignAttachments,
     template_name: selectedTemplateName || null,
+    template_sequence: campaignSequence || [],
     total_count: campaignQueue.length,
     sent_count: 0, skip_count: 0, fail_count: 0
   });
@@ -3984,7 +4117,27 @@ async function runAutopilotCampaign() {
         } else {
           KAYA_PROJECTS.forEach(p => { if (a.projects?.[p]?.status === 'Not contacted') a.projects[p].status = 'Contacted'; });
         }
-        saveAgent(a.id, { last_campaign_sent: today, notes: a.notes, projects: a.projects, samba: a.samba });
+
+        // Initialise campaign_engagement so the cron picks up the sequence
+        let engagementPatch = null;
+        if (useTemplate && campaignSequence.length > 1) {
+          const nextWait = campaignSequence[1]?.wait_days || 1;
+          const nextAt = new Date(Date.now() + nextWait * 86400000).toISOString();
+          engagementPatch = {
+            campaign_id: currentCampaignId,
+            sequence_index: 0,
+            last_template_sent: campaignSequence[0].template_name,
+            last_template_sent_at: new Date().toISOString(),
+            next_template_at: nextAt,
+            status: 'pending'
+          };
+          a.campaign_engagement = engagementPatch;
+        }
+
+        saveAgent(a.id, {
+          last_campaign_sent: today, notes: a.notes, projects: a.projects, samba: a.samba,
+          ...(engagementPatch ? { campaign_engagement: engagementPatch } : {})
+        });
 
         log[0] = { icon: useTemplate ? '📋✅' : '✅', name: agentName, detail: sentDetail.slice(0, 80) + (sentDetail.length > 80 ? '...' : '') };
         sent++;
@@ -4740,6 +4893,7 @@ async function resetAgentConversation(agentId) {
     a.last_campaign_sent = null;
     a.projects = {};
     a.samba = { status: 'Not contacted', notes: '' };
+    a.campaign_engagement = null;
     delete agentLastInboundMap[agentId];
     alert('✓ Conversation reset. ' + label + ' is now fresh for re-testing.');
     closeDrawer();
@@ -4777,6 +4931,7 @@ async function resetAllTestConversations() {
       a.last_campaign_sent = null;
       a.projects = {};
       a.samba = { status: 'Not contacted', notes: '' };
+      a.campaign_engagement = null;
       delete agentLastInboundMap[a.id];
     });
     alert('✓ Reset ' + data.count + ' test conversation(s). Ready for a fresh iteration.');

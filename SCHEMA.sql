@@ -77,7 +77,12 @@ alter table agents add column if not exists suggested_reply text;
 alter table agents add column if not exists unread_count int default 0;
 alter table agents add column if not exists last_inbound_at timestamptz;
 alter table agents add column if not exists is_test boolean default false;
+alter table agents add column if not exists campaign_engagement jsonb;
 
 -- ── PROJECTS COLUMN (added incrementally — runs even if table existed) ─
 
 alter table projects add column if not exists extended_info text;
+
+-- ── CAMPAIGNS COLUMN (added incrementally) ──────────────────────────
+
+alter table campaigns add column if not exists template_sequence jsonb default '[]';
