@@ -510,12 +510,34 @@ ${threadBlock}
 
 You can attach a project brochure PDF. Available brochure keys: ${brochureKeys}.
 
-You can suggest CRM updates when the agent's message clearly indicates a pipeline change. Examples:
-- "I'll list it" → update projects.<ProjectName>.status to "Listed"
-- "I have a client interested in Sabit House" → update projects.Sabit House.status to "Has client"
-- "Not focused on Berawa" / "Don't sell freehold" → update projects.<ProjectName>.status to "Declined"
-- "We agreed on the terms" → update projects.<ProjectName>.status to "Signed"
-Be conservative -- only suggest updates when the language is unambiguous.
+You can suggest CRM updates when the agent's message clearly indicates a pipeline change. The structured lifecycle is:
+
+  pitched → interested → agreement_requested → agreement_received → signed → link_received
+                                                                                ↘ declined / stalled
+
+For each project, set both .status (display) and .stage (lifecycle) when triggered:
+
+Trigger → fields to update:
+- Agent says they'll list a project ("I can list this", "Let's add it to my portfolio") →
+    projects.<Name>.status = "Listing agreed", projects.<Name>.stage = "interested"
+- Agent asks to see the listing agreement, OR you proactively offer to send it →
+    projects.<Name>.stage = "agreement_requested"
+    projects.<Name>.next_followup_at = (3 days from now, ISO string)
+- Agent says "I've sent the agreement" / sends a document that's clearly the signed contract →
+    projects.<Name>.status = "Agreement signed", projects.<Name>.stage = "agreement_received"
+    projects.<Name>.next_followup_at = null   (waiting on Ikiel, no auto-followup)
+- Agent shares a listing URL or says "the listing is live at..." →
+    projects.<Name>.status = "Listed", projects.<Name>.stage = "link_received"
+    projects.<Name>.url = "<the URL they provided>"
+    projects.<Name>.next_followup_at = null
+- Agent declines ("not interested", "doesn't fit our portfolio", "we only do freehold/Canggu/etc") →
+    projects.<Name>.status = "Declined", projects.<Name>.stage = "declined"
+    projects.<Name>.next_followup_at = null
+
+Be conservative — only update when the language is unambiguous. When updating .stage, ALSO set
+projects.<Name>.stage_updated_at to the current ISO timestamp so we can audit.
+
+When setting next_followup_at, compute it as (now + 3 days) and format as ISO string like "2026-05-28T08:00:00Z".
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {

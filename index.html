@@ -1664,11 +1664,16 @@ function openDrawer(id) {
     const isP = PERSONAL.includes(p);
     const opts = KAYA_STATUSES.map(s => `<option value="${s}" ${s===proj.status?'selected':''}>${s}</option>`).join('');
     const k = p.replace(/ /g,'_');
+    const stageInfo = renderStageInfo(p, proj);
     return `<div class="proj-table-row">
-      <div class="proj-table-name">${p}${isP ? ' <span class="personal-badge">personal</span>' : ''}</div>
+      <div class="proj-table-name">${p}${isP ? ' <span class="personal-badge">personal</span>' : ''}${stageInfo.badge}</div>
       <div class="proj-table-status"><select id="ps_${k}">${opts}</select></div>
       <div class="proj-table-link" onclick="toggleUrlRow('${k}')">✎</div>
     </div>
+    ${stageInfo.detail ? `<div style="padding:6px 12px;font-size:11px;color:var(--ink3);background:var(--sand);border-radius:6px;margin:4px 0;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <span>${stageInfo.detail}</span>
+      <span style="display:flex;gap:6px">${stageInfo.actions}</span>
+    </div>` : ''}
     <div class="url-row" id="ur_${k}">
       <div class="field-label" style="margin-bottom:4px">Listing URL ${proj.url && proj.url.startsWith('http') ? `<a href="${proj.url}" target="_blank" style="color:var(--accent);font-size:10px;margin-left:6px">↗ View listing</a>` : ''}</div>
       <div style="display:flex;gap:6px;align-items:center">
@@ -1745,6 +1750,125 @@ function toggleUrlRow(k) {
 
 function closeDrawer() { document.getElementById('overlay').classList.remove('open'); editingId = null; }
 function closeOverlay(e) { if (e.target === document.getElementById('overlay')) closeDrawer(); }
+
+// ── LISTING LIFECYCLE UI ─────────────────────────────────────────────────
+// Each agent×project tracks a `stage` field that progresses through the listing
+// pipeline. Below the standard status dropdown, render an inline strip showing
+// the stage, the next scheduled follow-up, and contextual action buttons.
+const STAGE_LABELS = {
+  pitched: { label: 'Pitched', color: '#9ca3af', bg: '#f3f4f6' },
+  interested: { label: 'Interested', color: '#8a5a1a', bg: '#fef3c7' },
+  agreement_requested: { label: 'Awaiting agreement', color: '#1e40af', bg: '#dbeafe' },
+  agreement_received: { label: 'Awaiting your signature', color: '#7c2d12', bg: '#fed7aa' },
+  signed: { label: 'Awaiting listing link', color: '#5b21b6', bg: '#ede9fe' },
+  link_received: { label: 'Live', color: '#166534', bg: '#dcfce7' },
+  declined: { label: 'Declined', color: '#737373', bg: '#f5f5f5' },
+  stalled: { label: 'Stalled', color: '#991b1b', bg: '#fee2e2' }
+};
+
+function renderStageInfo(projectName, proj) {
+  const stage = proj.stage;
+  if (!stage || stage === 'pitched') return { badge: '', detail: '', actions: '' };
+  const meta = STAGE_LABELS[stage];
+  if (!meta) return { badge: '', detail: '', actions: '' };
+
+  const badge = `<span style="display:inline-block;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;color:${meta.color};background:${meta.bg};margin-left:6px;vertical-align:middle">${meta.label.toUpperCase()}</span>`;
+
+  // Build detail line: dates
+  const parts = [];
+  if (proj.last_followup_at) {
+    parts.push(`Last nudge: ${formatRelativeDate(proj.last_followup_at)}`);
+  }
+  if (proj.next_followup_at && ['agreement_requested','signed'].includes(stage)) {
+    parts.push(`Next: ${formatRelativeDate(proj.next_followup_at)}`);
+  }
+  if (proj.followup_count) {
+    parts.push(`${proj.followup_count}/4 follow-ups`);
+  }
+  const detail = parts.join(' · ') || 'No follow-up scheduled';
+
+  // Action buttons by stage
+  const actions = [];
+  if (['agreement_requested', 'agreement_received'].includes(stage)) {
+    actions.push(`<button onclick="markProjectSigned(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;font-weight:500">✓ Mark signed</button>`);
+  }
+  if (['agreement_requested', 'signed'].includes(stage) && proj.next_followup_at) {
+    actions.push(`<button onclick="skipNextFollowup(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="Push the next follow-up out by 7 days">⏭ Skip next</button>`);
+  }
+  if (stage === 'stalled') {
+    actions.push(`<button onclick="restartFollowups(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif">↻ Restart follow-ups</button>`);
+  }
+
+  return { badge, detail, actions: actions.join('') };
+}
+
+function escAttr(s) { return String(s).replace(/'/g, "\\'"); }
+
+function formatRelativeDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = d.getTime() - now.getTime();
+  const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'today';
+  if (diffDays === 1) return 'tomorrow';
+  if (diffDays === -1) return 'yesterday';
+  if (diffDays > 0 && diffDays < 14) return `in ${diffDays}d`;
+  if (diffDays < 0 && diffDays > -14) return `${-diffDays}d ago`;
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+}
+
+async function markProjectSigned(agentId, projectName) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  if (!confirm(`Mark the ${projectName} listing agreement as signed?\n\nMaya will start following up every 3 days for the live listing link.`)) return;
+  const projectsObj = { ...(a.projects || {}) };
+  const proj = projectsObj[projectName] || {};
+  const next = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  projectsObj[projectName] = {
+    ...proj,
+    status: 'Agreement signed',
+    stage: 'signed',
+    signed_at: new Date().toISOString(),
+    stage_updated_at: new Date().toISOString(),
+    next_followup_at: next,
+    followup_count: 0   // reset counter for the new phase
+  };
+  a.projects = projectsObj;
+  await saveAgent(a.id, { projects: projectsObj });
+  openDrawer(agentId); // refresh
+}
+
+async function skipNextFollowup(agentId, projectName) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const projectsObj = { ...(a.projects || {}) };
+  const proj = projectsObj[projectName] || {};
+  const pushed = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  projectsObj[projectName] = { ...proj, next_followup_at: pushed };
+  a.projects = projectsObj;
+  await saveAgent(a.id, { projects: projectsObj });
+  openDrawer(agentId);
+}
+
+async function restartFollowups(agentId, projectName) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  if (!confirm(`Restart follow-ups for ${projectName}?\n\nResets the follow-up counter and schedules a nudge for 3 days from now.`)) return;
+  const projectsObj = { ...(a.projects || {}) };
+  const proj = projectsObj[projectName] || {};
+  const next = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  projectsObj[projectName] = {
+    ...proj,
+    stage: proj.signed_at ? 'signed' : 'agreement_requested',
+    followup_count: 0,
+    next_followup_at: next,
+    stage_updated_at: new Date().toISOString()
+  };
+  a.projects = projectsObj;
+  await saveAgent(a.id, { projects: projectsObj });
+  openDrawer(agentId);
+}
 
 function saveDrawer() {
   if (!editingId) return;
