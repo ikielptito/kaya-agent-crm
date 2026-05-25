@@ -2896,13 +2896,13 @@ let selectedTemplateName = null;
 let agentLastInboundMap = {};
 
 async function loadWaTemplates(forceRefresh) {
-  const picker = document.getElementById('cbTemplatePicker');
-  if (!picker) return;
+  const editor = document.getElementById('cbSequenceEditor');
+  if (!editor) return;
   if (waTemplates.length > 0 && !forceRefresh) {
     renderTemplatePicker();
     return;
   }
-  picker.innerHTML = '<div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>';
+  editor.innerHTML = '<div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>';
   try {
     const r = await fetch('/api/whatsapp-templates', { method: 'GET' });
     const data = await r.json();
@@ -2910,10 +2910,10 @@ async function loadWaTemplates(forceRefresh) {
       waTemplates = data.templates;
       renderTemplatePicker();
     } else {
-      picker.innerHTML = '<div style="font-size:11px;color:#a32d2d">Could not load templates: ' + (data.error || 'unknown error') + '</div>';
+      editor.innerHTML = '<div style="font-size:11px;color:#a32d2d">Could not load templates: ' + (data.error || 'unknown error') + '</div>';
     }
   } catch(e) {
-    picker.innerHTML = '<div style="font-size:11px;color:#a32d2d">Failed to fetch templates: ' + e.message + '</div>';
+    editor.innerHTML = '<div style="font-size:11px;color:#a32d2d">Failed to fetch templates: ' + e.message + '</div>';
   }
 }
 
