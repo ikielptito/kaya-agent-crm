@@ -460,8 +460,16 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
 
   const system = `${MAYA_PERSONA}
 
-PORTFOLIO KNOWLEDGE (factual reference, not a script to recite):
+PORTFOLIO KNOWLEDGE (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
+
+DATA PRIORITY RULES (critical — read carefully):
+1. The structured "Units:" list under each project is the AUTHORITATIVE record of what is available, sold, reserved, or coming soon. Trust the per-unit availability tag (-- SOLD, -- RESERVED, -- COMING SOON) over any other text.
+2. When quoting prices: only quote prices from units that are NOT marked SOLD/RESERVED. Never quote a sold unit's price as if it's available.
+3. When counting availability: count units WITHOUT a SOLD/RESERVED/COMING SOON tag. Do not parrot a number from "Notes for Maya" if it conflicts with the actual unit count.
+4. The "Notes for Maya" line is supplementary context (tone, positioning, edge-case framing). It is NOT the source of truth for prices, availability counts, or unit specs. If notes conflict with structured fields, the structured fields win.
+5. Brochure URLs, commission %, status, delivery date, payment plan — also authoritative as written in the structured fields.
+6. If a field is empty in the portfolio data, do not guess or fill in from memory. Say you'll check with Ikiel.
 
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
