@@ -212,7 +212,9 @@ export default async function handler(req, res) {
         unread_count: 0,
         suggested_reply: '',
         automation_override: null,
-        last_campaign_sent: null
+        last_campaign_sent: null,
+        projects: {},                                     // pipeline statuses + lifecycle stages set by Maya
+        samba: { status: 'Not contacted', notes: '' }     // Samba pipeline status
       };
       const r2 = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + agentId, {
         method: 'PATCH', headers, body: JSON.stringify(resetFields)
@@ -245,7 +247,9 @@ export default async function handler(req, res) {
           unread_count: 0,
           suggested_reply: '',
           automation_override: null,
-          last_campaign_sent: null
+          last_campaign_sent: null,
+          projects: {},
+          samba: { status: 'Not contacted', notes: '' }
         })
       });
       return res.status(200).json({ success: true, count: testAgents.length, agents: testAgents });

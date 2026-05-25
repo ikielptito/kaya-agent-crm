@@ -4714,6 +4714,8 @@ async function resetAgentConversation(agentId) {
     a.suggested_reply = '';
     a.automation_override = null;
     a.last_campaign_sent = null;
+    a.projects = {};
+    a.samba = { status: 'Not contacted', notes: '' };
     delete agentLastInboundMap[agentId];
     alert('✓ Conversation reset. ' + label + ' is now fresh for re-testing.');
     closeDrawer();
@@ -4749,6 +4751,8 @@ async function resetAllTestConversations() {
       a.suggested_reply = '';
       a.automation_override = null;
       a.last_campaign_sent = null;
+      a.projects = {};
+      a.samba = { status: 'Not contacted', notes: '' };
       delete agentLastInboundMap[a.id];
     });
     alert('✓ Reset ' + data.count + ' test conversation(s). Ready for a fresh iteration.');
