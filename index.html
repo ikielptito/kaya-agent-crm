@@ -2900,6 +2900,16 @@ function showCampaignSetup(existingCampaign) {
     </label>`;
   }).join('');
 
+  // Migrate legacy attachments: brochures saved before the 'key' field was
+  // persisted can be re-matched against BROCHURE_LIST by URL or filename so
+  // their checkboxes restore correctly on load.
+  campaignAttachments.forEach(a => {
+    if (a.source === 'brochure' && !a.key) {
+      const match = BROCHURE_LIST.find(b => b.url === a.url || b.filename === a.filename);
+      if (match) a.key = match.key;
+    }
+  });
+
   // Build brochure picker
   const picker = document.getElementById('cbBrochurePicker');
   picker.innerHTML = BROCHURE_LIST.map(b => {
@@ -3160,13 +3170,31 @@ function updateAttachments() {
 function renderAttachmentChips() {
   const container = document.getElementById('cbAttachmentChips');
   if (!container) return;
-  const uploads = campaignAttachments.filter(a => a.source === 'upload');
-  container.innerHTML = uploads.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:var(--sand);border:1px solid var(--sand3);border-radius:6px;font-size:11px;color:var(--ink2)">
-    📎 ${a.filename}
-    <span onclick="removeUpload(${i})" style="cursor:pointer;color:var(--ink4);font-size:13px;line-height:1">&times;</span>
-  </span>`).join('');
+  // Show ALL attachments (brochures + uploads) so nothing is ever invisibly attached.
+  container.innerHTML = campaignAttachments.map((a, i) => {
+    const icon = a.source === 'brochure' ? '📘' : '📎';
+    const tag = a.source === 'brochure' ? '<span style="font-size:9px;color:var(--ink4);margin-left:4px">brochure</span>' : '';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;background:var(--sand);border:1px solid var(--sand3);border-radius:6px;font-size:11px;color:var(--ink2)">
+      ${icon} ${a.filename}${tag}
+      <span onclick="removeAttachment(${i})" style="cursor:pointer;color:var(--ink4);font-size:13px;line-height:1;margin-left:4px" title="Remove">&times;</span>
+    </span>`;
+  }).join('');
 }
 
+function removeAttachment(idx) {
+  const a = campaignAttachments[idx];
+  if (!a) return;
+  campaignAttachments.splice(idx, 1);
+  // If it was a brochure, also uncheck its checkbox in the picker
+  if (a.source === 'brochure' && a.key) {
+    const cb = document.querySelector(`input[name="cbBrochure"][value="${a.key}"]`);
+    if (cb) cb.checked = false;
+  }
+  renderAttachmentChips();
+  updateCampaignPreview();
+}
+
+// Kept for backward compatibility — old code paths may still call removeUpload
 function removeUpload(idx) {
   const uploads = campaignAttachments.filter(a => a.source === 'upload');
   const toRemove = uploads[idx];
