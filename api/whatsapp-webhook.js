@@ -334,31 +334,42 @@ async function incrementTodaySpend(url, headers, costUsd) {
 
 async function applyCrmUpdates(url, headers, agent, updates, evidenceQuote) {
   // updates: [{ field: 'projects.Clay House.status', value: 'Listed', reason: '...' }]
-  // Apply each update to the agent, log to maya_updates for review
+  // Apply each update to the agent, log to maya_updates for review.
+  // CRITICAL: when multiple updates target the same root (e.g. projects.X.status and
+  // projects.X.stage), they must accumulate into the SAME patch[root] object, not
+  // each overwrite the previous with a fresh clone of agent[root].
   const patch = {};
   const logs = [];
   for (const u of updates) {
     if (!u.field || u.value === undefined) continue;
-    // Set nested path on patch object (e.g. "projects.Clay House.status")
+    // Resolve time markers — Maya outputs __NOW__ / __NOW+3D__ etc, server fills the real ISO.
+    let value = u.value;
+    if (typeof value === 'string') {
+      if (value === '__NOW__') value = new Date().toISOString();
+      else if (value === '__NOW+3D__') value = new Date(Date.now() + 3 * 86400000).toISOString();
+      else if (value === '__NOW+7D__') value = new Date(Date.now() + 7 * 86400000).toISOString();
+    }
     const parts = u.field.split('.');
     if (parts.length === 1) {
       patch[parts[0]] = u.value;
     } else {
-      // For nested, we need to merge with existing object. Pull from agent.
       const root = parts[0];
-      const current = JSON.parse(JSON.stringify(agent[root] || {}));
-      let cursor = current;
+      // Initialise patch[root] from agent[root] on FIRST touch only.
+      // On subsequent updates targeting the same root, build on the in-progress patch.
+      if (!(root in patch)) {
+        patch[root] = JSON.parse(JSON.stringify(agent[root] || {}));
+      }
+      let cursor = patch[root];
       for (let i = 1; i < parts.length - 1; i++) {
-        if (!cursor[parts[i]]) cursor[parts[i]] = {};
+        if (!cursor[parts[i]] || typeof cursor[parts[i]] !== 'object') cursor[parts[i]] = {};
         cursor = cursor[parts[i]];
       }
-      cursor[parts[parts.length - 1]] = u.value;
-      patch[root] = current;
+      cursor[parts[parts.length - 1]] = value;
     }
     logs.push({
       agent_id: agent.id,
       field: u.field,
-      new_value: typeof u.value === 'object' ? JSON.stringify(u.value) : String(u.value),
+      new_value: typeof value === 'object' ? JSON.stringify(value) : String(value),
       reason: u.reason || '',
       evidence: evidenceQuote.slice(0, 500),
       by_maya: true,
@@ -534,10 +545,14 @@ Trigger → fields to update:
     projects.<Name>.status = "Declined", projects.<Name>.stage = "declined"
     projects.<Name>.next_followup_at = null
 
-Be conservative — only update when the language is unambiguous. When updating .stage, ALSO set
-projects.<Name>.stage_updated_at to the current ISO timestamp so we can audit.
+Be conservative — only update when the language is unambiguous.
 
-When setting next_followup_at, compute it as (now + 3 days) and format as ISO string like "2026-05-28T08:00:00Z".
+For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
+- For "right now" → use the literal string "__NOW__"
+- For "3 days from now" → use the literal string "__NOW+3D__"
+- For "null / no follow-up needed" → use null
+
+When updating .stage, ALSO set projects.<Name>.stage_updated_at = "__NOW__" so we can audit.
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {

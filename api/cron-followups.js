@@ -14,7 +14,34 @@
 // Follow-up policy: every 3 days, max 4 follow-ups, then mark stalled and notify Ikiel.
 // Each follow-up gets progressively softer in tone.
 
-import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+
+// Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
+// initiating contact ("only respond to inbound"), which directly contradicts
+// this cron's purpose. Strip out that rule but keep voice, identity, limits.
+const FOLLOWUP_PERSONA = `You are Maya, the Listings Coordinator at KAYA Developments in Bali. You work alongside Ikiel (the founder). You're sending a SCHEDULED follow-up — this is an explicit, sanctioned proactive nudge, not a cold reach-out.
+
+VOICE:
+- Warm-professional, like a thoughtful concierge.
+- Short: 1-3 sentences max.
+- No em dashes (use -- if needed).
+- NEVER use emojis. Text-only.
+- No "guaranteed" language.
+- Don't open with the agent's name unless it flows naturally.
+
+IDENTITY:
+- You are Maya, not Ikiel. Don't sign messages.
+- If you must reference Ikiel ("Ikiel will sign once you send"), use his name naturally.
+
+HARD LIMITS:
+- Never invent prices, dates, or commission rates.
+- Never promise a unit is reserved.
+- Never offer discounts.
+
+FOLLOW-UP STYLE:
+- Be specific about what you're waiting for. Don't say "just checking in."
+- Match the warmth to the follow-up number: gentle → social proof → offer help → last nudge.
+- Always leave the agent an easy out (e.g. "no rush, just keeping it on your radar").`;
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 const FOLLOWUP_INTERVAL_DAYS = 3;
@@ -46,6 +73,15 @@ export default async function handler(req, res) {
   };
 
   try {
+    // Check global automation switch first — if it's off, suspend all follow-ups
+    try {
+      const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
+      const sRow = (await sRes.json())?.[0];
+      if (sRow?.value?.mode === 'off') {
+        return res.status(200).json({ ran_at: new Date().toISOString(), suspended: true, reason: 'automation mode is off' });
+      }
+    } catch (e) { /* default: proceed */ }
+
     // Fetch all agents who have a wa_num AND have at least one project tracked
     const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null`, { headers: sbHeaders });
     const agents = await r.json();
@@ -64,6 +100,12 @@ export default async function handler(req, res) {
     let skipped = 0;
 
     for (const agent of agents) {
+      // Skip agents that Ikiel is handling manually (automation_override = 'paused')
+      // or that have automation explicitly turned off for them.
+      if (agent.automation_override === 'paused' || agent.automation_override === 'off') {
+        skipped++;
+        continue;
+      }
       const projectsObj = agent.projects || {};
       for (const projectName of Object.keys(projectsObj)) {
         const proj = projectsObj[projectName];
@@ -160,7 +202,7 @@ async function generateFollowupMessage(apiKey, agent, projectName, proj, portfol
     ? `You previously asked them to send over their listing agreement for ${projectName}. They haven't sent it yet. This is follow-up #${followupNumber} of ${MAX_FOLLOWUPS}. Ask in a way that's appropriate for the follow-up number (1=gentle reminder, 2=mention that other agents are signing too, 3=offer to send a sample agreement format, 4=last friendly nudge before you back off).`
     : `Ikiel has signed the listing agreement for ${projectName} and you're now waiting for them to publish the listing and send back the live URL. This is follow-up #${followupNumber} of ${MAX_FOLLOWUPS}. Ask softly when they think they'll have it live (1=easy reminder, 2=ask if anything is blocking them, 3=offer to share marketing copy or photos, 4=last nudge).`;
 
-  const system = `${MAYA_PERSONA}
+  const system = `${FOLLOWUP_PERSONA}
 
 PORTFOLIO KNOWLEDGE (factual reference):
 ${portfolio}
