@@ -187,8 +187,12 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
+    // TEST CONTACTS — bypass hours gate and spend cap so iteration works any time.
+    // Real agents still get the production guardrails.
+    const isTestContact = agent.is_test === true;
+
     // HOURS OF OPERATION CHECK — Maya only auto-replies between 9am-9pm WITA
-    if (!isWithinOperationalHours()) {
+    if (!isTestContact && !isWithinOperationalHours()) {
       // Outside hours: still draft a suggestion so Ikiel can review in the morning
       const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft');
       patch.suggested_reply = aiResultOffHours.reply || '';
@@ -197,12 +201,14 @@ export default async function handler(req, res) {
     }
 
     // SPEND CAP CHECK — pause Maya for the day if over $2 daily Claude spend
-    const todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
-    if (todaySpend >= DAILY_SPEND_CAP_USD) {
-      // Over cap: log + escalate as draft (no Claude call)
-      patch.suggested_reply = '[Maya is paused: daily spend cap reached. Please reply manually.]';
-      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
-      return res.status(200).end();
+    if (!isTestContact) {
+      const todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
+      if (todaySpend >= DAILY_SPEND_CAP_USD) {
+        // Over cap: log + escalate as draft (no Claude call)
+        patch.suggested_reply = '[Maya is paused: daily spend cap reached. Please reply manually.]';
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+        return res.status(200).end();
+      }
     }
 
     // Generate a reply with Claude — load live project data from DB first
