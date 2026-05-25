@@ -343,7 +343,9 @@ export default async function handler(req, res) {
   };
 
   try {
-    const r = await fetch(SUPABASE_URL + '/rest/v1/projects', {
+    // on_conflict=slug tells PostgREST to UPSERT on the slug unique constraint
+    // (otherwise merge-duplicates is ignored and we hit a 23505 duplicate-key error).
+    const r = await fetch(SUPABASE_URL + '/rest/v1/projects?on_conflict=slug', {
       method: 'POST',
       headers,
       body: JSON.stringify(SEED_PROJECTS)
