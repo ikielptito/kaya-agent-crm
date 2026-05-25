@@ -28,6 +28,31 @@ const SEED_PROJECTS = [
     roi_projections: '60% occupancy = 12.5%. 70% occupancy = 14.55%. 80% occupancy = 16.95%. Projected ADR ~$100 USD (net of expenses).',
     rental_performance: '',
     maya_notes: '4 units left as of latest. Units 1-3 at IDR 2.18B, Unit 5 at IDR 1.66B. Units 4 and 6 are sold.',
+    extended_info: `ARCHITECTS:
+- Tyler Johnson (Executive Director): American architect with a decade of international experience. Blends vernacular design with modern techniques to create buildings that are contextually grounded, high-performing, and environmentally conscious.
+- Ngurah Risyana (Lead Architect): Nearly 20 years of experience in Balinese design. Emphasises simplicity, functionality, and sustainability — uses natural materials to create timeless spaces that evolve with the needs of their users.
+
+DESIGN PHILOSOPHY:
+Quiet luxury, thoughtfully designed. Soft lighting, natural textures, clean lines. Boutique studio residences built with Western construction standards — a rare quality level at this price point in Bali. Designed to support a grounded, restful lifestyle and create lasting impressions on guests.
+
+KEY ARCHITECTURAL DETAILS:
+- Breezeblock façade for passive cooling: provides shade in front of floor-to-ceiling glass, filters light into soft shifting patterns, glows from within at night. Both functional (reduces heat buildup) and beautiful.
+- Resort-style pool: tranquil, framed by lush greenery, beside a gentle stream. Couple's loungers. Designed for guest-shareable moments that boost Airbnb visibility, booking rate, and nightly value.
+- Shared rooftops, private comfort: 4 rooftops total across the complex, each shared between just two units, with private dedicated seating per apartment. Natural materials, surrounded by jungle views. Used for sunset BBQs, open-air dining.
+- Dedicated workspaces in select units: custom-built desks with warm lighting and natural finishes — one of the most-searched Airbnb amenities, drives longer stays and stronger returns.
+
+LOCATION DETAIL:
+Set in a quiet lane in Cepaka, beside a gentle ravine, shaded by trees. Free from construction noise, traffic, roosters. Surrounded by tropical greenery and high-end villas. 8 min to Tiying Tutul / Nüde / Copenhagen / House of Creambath. 10 min to Canggu / Jungle Padel / Obsidian Gym / Pepito / Frestive. 15 min to Pererenan Beach and La Brisa. 60 min to airport.
+
+CONSTRUCTION QUALITY:
+Professional-grade waterproofing, passive cooling, proper drainage. Every detail designed to reduce maintenance and ensure long-term comfort. Western construction standards.
+
+PAYMENT MILESTONES (construction-linked):
+1. 20% at Construction Start
+2. 30% at Foundation Complete
+3. 30% at Structure Finalised
+4. 20% at Finishing Concluded
+Each payment tied to a clear milestone so investor capital progresses in lockstep with project development.`,
     brochure_url: 'https://viftknpkeitbovvxcdez.supabase.co/storage/v1/object/public/brochures/The%20Clay%20House%20February%202028.pdf',
     brochure_filename: 'The Clay House.pdf',
     units: [

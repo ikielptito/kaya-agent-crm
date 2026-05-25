@@ -52,7 +52,8 @@ function buildPortfolioContext(projects) {
       p.rental_performance ? `   Rental performance: ${p.rental_performance}` : null,
       p.distances ? `   Location: ${p.distances}` : null,
       p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
-      p.commission_pct ? `   Commission: ${p.commission_pct}%` : null
+      p.commission_pct ? `   Commission: ${p.commission_pct}%` : null,
+      p.extended_info ? `   Extended details (from brochure):\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null
     ].filter(Boolean);
     return lines.join('\n');
   });
@@ -494,7 +495,8 @@ DATA PRIORITY RULES (critical — read carefully):
 3. When counting availability: count units WITHOUT a SOLD/RESERVED/COMING SOON tag. Do not parrot a number from "Notes for Maya" if it conflicts with the actual unit count.
 4. The "Notes for Maya" line is supplementary context (tone, positioning, edge-case framing). It is NOT the source of truth for prices, availability counts, or unit specs. If notes conflict with structured fields, the structured fields win.
 5. Brochure URLs, commission %, status, delivery date, payment plan — also authoritative as written in the structured fields.
-6. If a field is empty in the portfolio data, do not guess or fill in from memory. Say you'll check with Ikiel.
+6. The "Extended details (from brochure)" block is supplementary information pulled from the project's sales brochure. Use it for questions that aren't covered by structured fields (architects, builder/contractor, design philosophy, materials, construction methodology, amenity rationale, etc.). Quote it freely when relevant.
+7. If a field is empty AND there's nothing in extended_info that covers the question, do not guess or fill in from memory. Say "Let me check with Ikiel and come back to you."
 
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"

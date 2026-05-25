@@ -4856,6 +4856,7 @@ function renderProjectEditor() {
       ${field('Features', `<textarea oninput="editingProject.features=this.value" placeholder="Key features and amenities" style="${textareaStyle}height:80px">${esc(p.features)}</textarea>`)}
       ${field('ROI projections', `<textarea oninput="editingProject.roi_projections=this.value" placeholder="e.g. 60% occupancy = 12.5%..." style="${textareaStyle}">${esc(p.roi_projections)}</textarea>`)}
       ${field('Rental performance (actuals)', `<textarea oninput="editingProject.rental_performance=this.value" placeholder="Real rental data if available" style="${textareaStyle}">${esc(p.rental_performance)}</textarea>`)}
+      ${field('Extended details (architect, builder, design philosophy, materials, full amenity descriptions, etc. — anything from the brochure not captured above)', `<textarea oninput="editingProject.extended_info=this.value" placeholder="Paste in supplementary info from the brochure: architect bios, design rationale, materials sourcing, full amenity descriptions, FAQ answers..." style="${textareaStyle}height:140px">${esc(p.extended_info)}</textarea>`)}
     `)}
 
     ${section('Brochure', `
