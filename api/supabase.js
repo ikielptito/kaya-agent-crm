@@ -193,6 +193,63 @@ export default async function handler(req, res) {
       });
       return res.status(r.status).end();
 
+    } else if (action === 'reset_agent_conversation') {
+      // Test-mode reset: wipe all conversation state for one agent so the next
+      // iteration starts from scratch (no Maya context, no template-sent flag,
+      // no 24h window inheritance).
+      const { agentId } = payload || {};
+      if (!agentId) return res.status(400).json({ error: 'agentId required' });
+
+      await fetch(SUPABASE_URL + '/rest/v1/wa_messages?agent_id=eq.' + agentId, {
+        method: 'DELETE', headers
+      });
+      await fetch(SUPABASE_URL + '/rest/v1/maya_updates?agent_id=eq.' + agentId, {
+        method: 'DELETE', headers
+      }).catch(() => {});
+      const resetFields = {
+        conversation_summary: '',
+        last_inbound_at: null,
+        unread_count: 0,
+        suggested_reply: '',
+        automation_override: null,
+        last_campaign_sent: null
+      };
+      const r2 = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + agentId, {
+        method: 'PATCH', headers, body: JSON.stringify(resetFields)
+      });
+      if (!r2.ok) {
+        const err = await r2.text();
+        return res.status(r2.status).json({ error: err });
+      }
+      return res.status(200).json({ success: true, agentId });
+
+    } else if (action === 'reset_all_test_conversations') {
+      // Wipe every agent flagged is_test=true
+      const r1 = await fetch(SUPABASE_URL + '/rest/v1/agents?is_test=eq.true&select=id,name,agency', { headers });
+      const testAgents = await r1.json();
+      if (!Array.isArray(testAgents) || testAgents.length === 0) {
+        return res.status(200).json({ success: true, count: 0, agents: [] });
+      }
+      const idList = testAgents.map(a => a.id).join(',');
+      await fetch(SUPABASE_URL + '/rest/v1/wa_messages?agent_id=in.(' + idList + ')', {
+        method: 'DELETE', headers
+      });
+      await fetch(SUPABASE_URL + '/rest/v1/maya_updates?agent_id=in.(' + idList + ')', {
+        method: 'DELETE', headers
+      }).catch(() => {});
+      await fetch(SUPABASE_URL + '/rest/v1/agents?id=in.(' + idList + ')', {
+        method: 'PATCH', headers,
+        body: JSON.stringify({
+          conversation_summary: '',
+          last_inbound_at: null,
+          unread_count: 0,
+          suggested_reply: '',
+          automation_override: null,
+          last_campaign_sent: null
+        })
+      });
+      return res.status(200).json({ success: true, count: testAgents.length, agents: testAgents });
+
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });
     }

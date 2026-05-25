@@ -650,6 +650,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <button class="more-menu-item" onclick="openProjectsView();closeMoreMenu()">▣ Projects</button>
         <button class="more-menu-item" id="discoverBtn" onclick="openDiscoverPanel();closeMoreMenu()">⊕ Discover agents</button>
         <button class="more-menu-item" onclick="downloadExcel();closeMoreMenu()">↓ Export .xlsx</button>
+        <button class="more-menu-item" onclick="resetAllTestConversations();closeMoreMenu()" style="color:#8a5a1a">🧪 Reset all test conversations</button>
       </div>
     </div>
   </div>
@@ -1691,6 +1692,13 @@ function openDrawer(id) {
         <div><div class="field-label">Follow-up date (DD/MM/YY)</div><input class="field-input" type="text" id="df_followup" value="${a.followup_date||''}" placeholder="e.g. 25/04/26"></div>
         <div class="form-full"><div class="field-label">Tags (comma separated)</div><input class="field-input" type="text" id="df_tags" value="${(a.tags||[]).join(', ')}" placeholder="e.g. Canggu focus, has buyer, French"></div>
       </div>
+      <div style="margin-top:14px;padding:12px;background:#fdf3e3;border:1px solid #f0d9a8;border-radius:8px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink2);cursor:pointer">
+          <input type="checkbox" id="df_is_test" ${a.is_test ? 'checked' : ''}>
+          <span><strong>🧪 Test contact</strong> — flag to enable bulk reset from the more menu</span>
+        </label>
+        <button onclick="resetAgentConversation(${a.id})" style="font-size:11px;padding:6px 12px;border:1px solid #d99850;border-radius:6px;background:white;color:#8a5a1a;cursor:pointer;font-family:Geist,sans-serif;font-weight:500;white-space:nowrap" title="Wipe all conversation history, unread state, and campaign-sent flags so you can re-test from scratch">↺ Reset conversation</button>
+      </div>
     </div>
 
     <div class="pipeline-section kaya-section" style="margin-bottom:14px">
@@ -1751,6 +1759,8 @@ function saveDrawer() {
   a.followup_date = document.getElementById('df_followup').value.trim() || null;
   const tagsRaw = document.getElementById('df_tags').value.trim();
   a.tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+  const isTestEl = document.getElementById('df_is_test');
+  if (isTestEl) a.is_test = isTestEl.checked;
   if (!a.samba) a.samba = { status: 'Not contacted', notes: '' };
   a.samba.status = document.getElementById('df_samba_status').value;
   a.samba.notes = document.getElementById('df_samba_notes').value.trim();
@@ -4523,6 +4533,77 @@ async function resumeMaya(agentId) {
   a.automation_override = null;
   await saveAgent(a.id, { automation_override: null });
   openConversation(agentId); // refresh to hide banner
+}
+
+// ── TEST-MODE CONVERSATION RESET ────────────────────────────────────────
+// Wipes all conversation state for an agent so testing starts from scratch.
+// Use case: same friend / personal number being re-used to test Maya's behaviour
+// across iterations. Without this, previous threads taint each new attempt.
+async function resetAgentConversation(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a) return;
+  const label = a.name || a.agency || ('Agent #' + agentId);
+  const msg = 'Reset conversation for ' + label + '?\n\nThis will permanently delete:\n  • All WhatsApp messages (both inbound and outbound)\n  • Conversation summary and unread count\n  • Maya pending draft and pause state\n  • Last-campaign-sent flag (so templates can be re-sent)\n\nThe agent record itself stays. This cannot be undone.';
+  if (!confirm(msg)) return;
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_agent_conversation', payload: { agentId } })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      alert('Reset failed: ' + (data.error || r.status));
+      return;
+    }
+    // Update local agent state so the UI reflects the wipe immediately
+    a.conversation_summary = '';
+    a.last_inbound_at = null;
+    a.unread_count = 0;
+    a.suggested_reply = '';
+    a.automation_override = null;
+    a.last_campaign_sent = null;
+    delete agentLastInboundMap[agentId];
+    alert('✓ Conversation reset. ' + label + ' is now fresh for re-testing.');
+    closeDrawer();
+    render();
+  } catch (e) {
+    alert('Reset failed: ' + e.message);
+  }
+}
+
+async function resetAllTestConversations() {
+  const testAgents = agents.filter(a => a.is_test);
+  if (testAgents.length === 0) {
+    alert('No agents are flagged as test contacts.\n\nOpen an agent and check "🧪 Test contact" in their profile, then come back here.');
+    return;
+  }
+  const names = testAgents.map(a => '  • ' + (a.name || a.agency || ('#' + a.id))).join('\n');
+  if (!confirm('Reset conversation history for these ' + testAgents.length + ' test contact(s)?\n\n' + names + '\n\nThis wipes wa_messages, conversation_summary, unread state, Maya drafts, and campaign-sent flags. The agent records themselves stay. Cannot be undone.')) return;
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reset_all_test_conversations', payload: {} })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      alert('Bulk reset failed: ' + (data.error || r.status));
+      return;
+    }
+    // Update local state for the reset agents
+    testAgents.forEach(a => {
+      a.conversation_summary = '';
+      a.last_inbound_at = null;
+      a.unread_count = 0;
+      a.suggested_reply = '';
+      a.automation_override = null;
+      a.last_campaign_sent = null;
+      delete agentLastInboundMap[a.id];
+    });
+    alert('✓ Reset ' + data.count + ' test conversation(s). Ready for a fresh iteration.');
+    render();
+  } catch (e) {
+    alert('Bulk reset failed: ' + e.message);
+  }
 }
 
 // ── PROJECTS MANAGEMENT ─────────────────────────────────────────────────
