@@ -632,7 +632,13 @@ ${campaignContext ? `
 CAMPAIGN-SPECIFIC FOCUS (this agent was reached via the "${campaignContext.name}" campaign — use this as your North Star for the current conversation; weave it in naturally rather than reciting it):
 ${campaignContext.context}${campaignContext.purpose ? `\nCampaign purpose: ${campaignContext.purpose}` : ''}` : ''}
 
-You can attach a project brochure PDF. Available brochure keys: ${brochureKeys}.
+You can attach a project brochure PDF for KAYA SALES projects only. Available brochure keys: ${brochureKeys}.
+
+IMPORTANT — SAMBA RENTALS HAVE NO PDF BROCHURES.
+For Samba rental properties (HAUS Canggu, LaneHAUS rental units, Villa Saturno, Tropicana Valley monthly rentals) there are NO PDF brochures to send. All photos, availability calendars, and listing details live in the portal at https://sambarentals.vercel.app.
+- If an agent asks for rental photos, the brochure, or "info to share with a client," direct them to the portal — agents can download photos there directly.
+- Never offer to send a rental brochure. Never list "which property would you like a brochure for" for Samba rentals.
+- For KAYA sales projects (Clay House, Sabit House, Palem Kembar, Tropical Townhouses-as-sales, LaneHAUS-as-sales), PDF brochures DO exist and can be attached via send_doc.
 
 You can suggest CRM updates when the agent's message clearly indicates a pipeline change. The structured lifecycle is:
 
