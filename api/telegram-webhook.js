@@ -20,11 +20,20 @@ export default async function handler(req, res) {
 
   try {
     const update = req.body;
+    const expectedChat = String(process.env.TELEGRAM_CHAT_ID);
+
+    // ── Button tap (inline keyboard callback) ─────────────────────
+    if (update?.callback_query) {
+      const cb = update.callback_query;
+      if (String(cb.from?.id) !== expectedChat) return res.status(200).end();
+      await handleCallback(cb);
+      return res.status(200).end();
+    }
+
     const msg = update?.message;
     if (!msg) return res.status(200).end();
 
     // Security: only act on messages from the configured chat ID
-    const expectedChat = String(process.env.TELEGRAM_CHAT_ID);
     if (String(msg.chat?.id) !== expectedChat) return res.status(200).end();
 
     const text = (msg.text || '').trim();
@@ -86,7 +95,7 @@ async function handleSetup(req, res) {
   try {
     const setRes = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'edited_message'], drop_pending_updates: false })
+      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'edited_message', 'callback_query'], drop_pending_updates: false })
     });
     const setData = await setRes.json();
     let confirmSent = false;
@@ -118,30 +127,32 @@ async function handleCommand(cmd, argsStr) {
   if (cmd === '/help' || cmd === '/start') {
     await postToTelegram(
       `<b>KAYA Listings Inbox</b>\n\n` +
-      `<b>Reply to any forwarded message</b> to send a message to that agent via WhatsApp. Your reply will pause Maya for that conversation.\n\n` +
-      `<b>Slash commands:</b>\n` +
+      `<b>Tap the button</b> on any forwarded message to pause or resume Maya instantly.\n\n` +
+      `<b>Reply to any forwarded message</b> (Telegram's "Reply" feature) to send a WhatsApp message to that agent. Your reply pauses Maya automatically.\n\n` +
+      `<b>Slash commands</b> (accept name or ID):\n` +
       `/help — this message\n` +
-      `/resume &lt;agent_id&gt; — re-enable Maya for an agent\n` +
-      `/pause &lt;agent_id&gt; — pause Maya for an agent\n` +
-      `/stats — quick activity summary`
+      `/resume &lt;name or id&gt; — e.g. /resume ikiel or /resume 10000\n` +
+      `/pause &lt;name or id&gt; — pause Maya for an agent\n` +
+      `/stats — today's activity summary`
     );
     return;
   }
   if (cmd === '/resume' || cmd === '/pause') {
-    const id = parseInt(argsStr, 10);
-    if (!id) {
-      await postToTelegram(`<i>Usage: ${cmd} &lt;agent_id&gt; (the number shown as "agent #N" in forwarded messages)</i>`);
+    if (!argsStr) {
+      await postToTelegram(`<i>Usage: ${cmd} &lt;agent_name_or_id&gt; — e.g. ${cmd} ikiel or ${cmd} 10000</i>`);
       return;
     }
-    const agent = await getAgent(id);
-    if (!agent) {
-      await postToTelegram(`<i>Agent #${id} not found.</i>`);
+    // Look up by ID (if numeric) or by name (fuzzy match)
+    const lookup = await resolveAgent(argsStr);
+    if (lookup.error) {
+      await postToTelegram(`<i>${lookup.error}</i>`);
       return;
     }
+    const agent = lookup.agent;
     const override = cmd === '/pause' ? 'paused' : null;
-    await patchAgent(id, { automation_override: override });
+    await patchAgent(agent.id, { automation_override: override });
     const label = cmd === '/pause' ? '⏸ Maya paused' : '▶ Maya resumed';
-    await postToTelegram(`${label} for <b>${escapeHtml(agent.name || ('agent #' + id))}</b>.`);
+    await postToTelegram(`${label} for <b>${escapeHtml(agent.name || ('agent #' + agent.id))}</b>.`);
     return;
   }
   if (cmd === '/stats') {
@@ -157,6 +168,67 @@ async function handleCommand(cmd, argsStr) {
     return;
   }
   await postToTelegram(`<i>Unknown command. Try /help.</i>`);
+}
+
+// ── Callback (inline button tap) handler ───────────────────────────
+async function handleCallback(cb) {
+  const data = cb.data || '';
+  const [action, agentIdStr] = data.split(':');
+  const agentId = parseInt(agentIdStr, 10);
+  if (!agentId || !['pause', 'resume'].includes(action)) {
+    await answerCallback(cb.id, 'Unknown action');
+    return;
+  }
+  const agent = await getAgent(agentId);
+  if (!agent) {
+    await answerCallback(cb.id, `Agent #${agentId} not found`);
+    return;
+  }
+  const override = action === 'pause' ? 'paused' : null;
+  await patchAgent(agentId, { automation_override: override });
+  const label = action === 'pause' ? '⏸ Maya paused' : '▶ Maya resumed';
+  // Toast confirmation on the button press
+  await answerCallback(cb.id, `${label} for ${agent.name || ('agent #' + agentId)}`);
+  // Persistent confirmation in the chat
+  await postToTelegram(`${label} for <b>${escapeHtml(agent.name || ('agent #' + agentId))}</b>.`);
+}
+
+async function answerCallback(callbackQueryId, text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text, show_alert: false })
+    });
+  } catch (e) { /* non-fatal */ }
+}
+
+// Resolve an agent by ID (if numeric) or by name (fuzzy match).
+// Returns { agent } on success or { error } on failure.
+async function resolveAgent(input) {
+  const trimmed = input.trim();
+  // If purely numeric → treat as ID
+  if (/^\d+$/.test(trimmed)) {
+    const agent = await getAgent(parseInt(trimmed, 10));
+    if (!agent) return { error: `Agent #${trimmed} not found.` };
+    return { agent };
+  }
+  // Otherwise → search by name (case-insensitive, prefers prefix match)
+  try {
+    const url = `${process.env.SUPABASE_URL}/rest/v1/agents?name=ilike.*${encodeURIComponent(trimmed)}*&select=id,name,agency&limit=10`;
+    const r = await fetch(url, { headers: sbHeaders() });
+    const rows = await r.json();
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return { error: `No agent matching "${trimmed}".` };
+    }
+    if (rows.length === 1) return { agent: rows[0] };
+    // Multiple matches → ask user to disambiguate
+    const list = rows.slice(0, 5).map(a => `• ${escapeHtml(a.name)}${a.agency ? ' (' + escapeHtml(a.agency) + ')' : ''} — #${a.id}`).join('\n');
+    return { error: `Multiple agents match "${trimmed}":\n\n${list}\n\nTry the agent ID instead.` };
+  } catch (e) {
+    return { error: `Lookup failed: ${e.message}` };
+  }
 }
 
 // ── Supabase helpers ───────────────────────────────────────────────
