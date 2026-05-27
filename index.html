@@ -647,7 +647,8 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
     <div class="more-dropdown-wrap">
       <button class="more-btn" id="moreBtn" onclick="toggleMoreMenu(event)">⋯</button>
       <div class="more-menu" id="moreMenu">
-        <button class="more-menu-item" onclick="openProjectsView();closeMoreMenu()">▣ Projects</button>
+        <button class="more-menu-item" onclick="openProjectsView();closeMoreMenu()">▣ Projects (sales)</button>
+        <button class="more-menu-item" onclick="openRentalsView();closeMoreMenu()">⌂ Rentals (Samba)</button>
         <button class="more-menu-item" id="discoverBtn" onclick="openDiscoverPanel();closeMoreMenu()">⊕ Discover agents</button>
         <button class="more-menu-item" onclick="downloadExcel();closeMoreMenu()">↓ Export .xlsx</button>
         <button class="more-menu-item" onclick="resetAllTestConversations();closeMoreMenu()" style="color:#8a5a1a">🧪 Reset all test conversations</button>
@@ -736,6 +737,23 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   </div>
   <div id="projectsBody" style="padding:24px;max-width:1400px;margin:0 auto">
     <div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Loading projects...</div>
+  </div>
+</div>
+
+<!-- RENTALS VIEW (Samba Realty portfolio) -->
+<div id="rentalsView" style="display:none">
+  <div class="inbox-bar">
+    <div style="display:flex;align-items:center;gap:10px">
+      <button onclick="closeRentalsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+      <span style="font-size:13px;font-weight:600;color:var(--ink)">Rentals (Samba Realty)</span>
+      <span id="rentalsCount" style="font-size:11px;color:var(--ink3)"></span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <button onclick="openRentalEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">+ New rental</button>
+    </div>
+  </div>
+  <div id="rentalsBody" style="padding:24px;max-width:1400px;margin:0 auto">
+    <div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Loading rentals...</div>
   </div>
 </div>
 
@@ -5331,6 +5349,236 @@ async function archiveProject(id) {
       body: JSON.stringify({ action: 'delete_project', payload: { id } })
     });
     await loadProjectsList();
+  } catch (e) {
+    alert('Archive failed: ' + e.message);
+  }
+}
+
+// ── RENTALS MANAGEMENT (Samba Realty) ───────────────────────────────────
+// Parallel to projects but with rental-specific fields. Maya pulls from this
+// table when discussing the Samba side with agents.
+let rentalsData = [];
+let editingRental = null;
+
+async function openRentalsView() {
+  document.getElementById('pipelineView').style.display = 'none';
+  document.getElementById('inboxView').style.display = 'none';
+  document.getElementById('projectsView').style.display = 'none';
+  document.getElementById('rentalsView').style.display = '';
+  await loadRentalsList();
+}
+
+function closeRentalsView() {
+  document.getElementById('rentalsView').style.display = 'none';
+  if (inboxOpen) document.getElementById('inboxView').style.display = '';
+  else document.getElementById('pipelineView').style.display = '';
+}
+
+async function loadRentalsList() {
+  const body = document.getElementById('rentalsBody');
+  body.innerHTML = '<div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Loading rentals...</div>';
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_rentals', payload: {} })
+    });
+    const data = await r.json();
+    rentalsData = Array.isArray(data) ? data : [];
+    renderRentalsList();
+  } catch (e) {
+    body.innerHTML = `<div style="text-align:center;color:#c00;font-size:13px;padding:40px">Failed to load: ${e.message}</div>`;
+  }
+}
+
+function renderRentalsList() {
+  const body = document.getElementById('rentalsBody');
+  document.getElementById('rentalsCount').textContent = rentalsData.length === 0 ? '' : `${rentalsData.filter(r => r.active).length} active`;
+  if (rentalsData.length === 0) {
+    body.innerHTML = `
+      <div style="text-align:center;padding:60px 20px;color:var(--ink3)">
+        <div style="font-size:14px;margin-bottom:8px;color:var(--ink2)">No rentals yet.</div>
+        <div style="font-size:12px;line-height:1.6;max-width:540px;margin:0 auto">
+          Click <strong>+ New rental</strong> to add a Samba Realty property. Maya pulls from this list when agents ask about rental availability, nightly rates, and commission.<br><br>
+          <em style="color:var(--ink4)">First time? You may also need to run the SQL migration to create the rentals table — check SCHEMA.sql.</em>
+        </div>
+      </div>`;
+    return;
+  }
+  body.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12px;background:white;border:1px solid var(--sand3);border-radius:8px;overflow:hidden">
+      <thead>
+        <tr style="background:var(--sand);color:var(--ink3);font-size:10px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase">
+          <th style="text-align:left;padding:10px 12px">Name</th>
+          <th style="text-align:left;padding:10px 12px">Area</th>
+          <th style="text-align:left;padding:10px 12px">Type</th>
+          <th style="text-align:left;padding:10px 12px">Capacity</th>
+          <th style="text-align:left;padding:10px 12px">Rate</th>
+          <th style="text-align:left;padding:10px 12px">Occupancy</th>
+          <th style="text-align:right;padding:10px 12px">Updated</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rentalsData.map(r => {
+          const rate = r.nightly_rate_usd ? `$${r.nightly_rate_usd}/n` : (r.nightly_rate_idr ? `IDR ${(r.nightly_rate_idr/1000).toFixed(0)}K/n` : '—');
+          const cap = [r.beds && `${r.beds}br`, r.max_guests && `sleeps ${r.max_guests}`].filter(Boolean).join(' · ');
+          const occ = r.occupancy_pct ? `${r.occupancy_pct}%` : '—';
+          return `<tr style="border-top:1px solid var(--sand3);${r.active ? '' : 'opacity:0.45'}">
+            <td style="padding:10px 12px"><strong style="color:var(--ink)">${escapeHtml(r.name)}</strong>${r.tagline ? `<div style="font-size:10px;color:var(--ink3);margin-top:2px">${escapeHtml(r.tagline)}</div>` : ''}</td>
+            <td style="padding:10px 12px">${escapeHtml(r.area || '—')}</td>
+            <td style="padding:10px 12px">${escapeHtml(r.property_type || '—')}</td>
+            <td style="padding:10px 12px">${cap || '—'}</td>
+            <td style="padding:10px 12px">${rate}</td>
+            <td style="padding:10px 12px">${occ}</td>
+            <td style="padding:10px 12px;text-align:right;color:var(--ink3);font-size:11px">${r.updated_at ? new Date(r.updated_at).toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—'}</td>
+            <td style="padding:6px 10px;text-align:right"><button onclick="openRentalEditor('${r.id}')" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Edit</button></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+}
+
+function openRentalEditor(id) {
+  if (id) {
+    editingRental = JSON.parse(JSON.stringify(rentalsData.find(r => r.id == id) || {}));
+  } else {
+    editingRental = { active: true, display_order: rentalsData.length + 1, commission_pct: 10, min_stay_nights: 1 };
+  }
+  renderRentalEditor();
+}
+
+function renderRentalEditor() {
+  const body = document.getElementById('rentalsBody');
+  const r = editingRental;
+  const isNew = !r.id;
+  body.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--sand3)">
+      <div>
+        <button onclick="loadRentalsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;margin-bottom:8px">← Back to list</button>
+        <h2 style="margin:0;font-size:20px;color:var(--ink)">${isNew ? 'New rental' : 'Edit rental: ' + escapeHtml(r.name || '(unnamed)')}</h2>
+      </div>
+      <div style="display:flex;gap:8px">
+        ${!isNew ? `<button onclick="archiveRental('${r.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">Archive</button>` : ''}
+        <button onclick="saveRental()" id="saveRentalBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+      </div>
+    </div>
+
+    ${section('Basics', `
+      ${twoCol(
+        field('Name *', `<input value="${esc(r.name)}" oninput="editingRental.name=this.value;autoSlugRental()" placeholder="e.g. Tropicana Valley A5" style="${inputStyle}">`),
+        field('Slug *', `<input id="rf_slug" value="${esc(r.slug)}" oninput="editingRental.slug=this.value" placeholder="lowercase_with_underscores" style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Display order', `<input type="number" value="${r.display_order||0}" oninput="editingRental.display_order=parseInt(this.value)||0" style="${inputStyle}">`),
+        field('Active', `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--ink2);height:32px"><input type="checkbox" ${r.active?'checked':''} onchange="editingRental.active=this.checked"> Visible to Maya</label>`)
+      )}
+    `)}
+
+    ${section('Location', `
+      ${twoCol(
+        field('Area / Neighbourhood', `<input value="${esc(r.area)}" oninput="editingRental.area=this.value" placeholder="e.g. Canggu, Pererenan, Seminyak" style="${inputStyle}">`),
+        field('Full location', `<input value="${esc(r.full_location)}" oninput="editingRental.full_location=this.value" placeholder="e.g. Buduk, 5 min from Pererenan" style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Property', `
+      ${twoCol(
+        field('Type', `<select onchange="editingRental.property_type=this.value" style="${inputStyle}">${['','Villa','Townhouse','Apartment','Studio','House'].map(s=>`<option ${r.property_type===s?'selected':''} value="${s}">${s||'(select)'}</option>`).join('')}</select>`),
+        field('Size (sqm)', `<input type="number" step="0.1" value="${r.sqm||''}" oninput="editingRental.sqm=parseFloat(this.value)||null" style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Bedrooms', `<input type="number" value="${r.beds||''}" oninput="editingRental.beds=parseInt(this.value)||null" style="${inputStyle}">`),
+        field('Bathrooms', `<input type="number" step="0.5" value="${r.baths||''}" oninput="editingRental.baths=parseFloat(this.value)||null" style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Max guests', `<input type="number" value="${r.max_guests||''}" oninput="editingRental.max_guests=parseInt(this.value)||null" style="${inputStyle}">`),
+        field('Minimum stay (nights)', `<input type="number" min="1" value="${r.min_stay_nights||1}" oninput="editingRental.min_stay_nights=parseInt(this.value)||1" style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Pricing & performance', `
+      ${twoCol(
+        field('Nightly rate USD', `<input type="number" step="1" value="${r.nightly_rate_usd||''}" oninput="editingRental.nightly_rate_usd=parseFloat(this.value)||null" placeholder="e.g. 63" style="${inputStyle}">`),
+        field('Nightly rate IDR', `<input type="number" step="1000" value="${r.nightly_rate_idr||''}" oninput="editingRental.nightly_rate_idr=parseFloat(this.value)||null" placeholder="e.g. 1050000" style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Recent occupancy %', `<input type="number" min="0" max="100" value="${r.occupancy_pct||''}" oninput="editingRental.occupancy_pct=parseInt(this.value)||null" placeholder="e.g. 83" style="${inputStyle}">`),
+        field('Typical monthly revenue (IDR)', `<input type="number" step="100000" value="${r.monthly_revenue_idr||''}" oninput="editingRental.monthly_revenue_idr=parseFloat(this.value)||null" placeholder="e.g. 24500000" style="${inputStyle}">`)
+      )}
+      ${field('Commission % (per booking)', `<input type="number" step="0.5" value="${r.commission_pct||10}" oninput="editingRental.commission_pct=parseFloat(this.value)||10" style="${inputStyle};max-width:180px">`)}
+    `)}
+
+    ${section('Amenities & features', `
+      ${field('Amenities (comma separated)', `<input value="${esc(r.amenities)}" oninput="editingRental.amenities=this.value" placeholder="e.g. Pool, Wifi, Workspace, Kitchen, Parking, Air-con" style="${inputStyle}">`)}
+      ${field('Features', `<textarea oninput="editingRental.features=this.value" placeholder="Free-form notes about standout features" style="${textareaStyle};height:80px">${esc(r.features)}</textarea>`)}
+    `)}
+
+    ${section('Links', `
+      ${twoCol(
+        field('Portal URL (sambarentals.vercel.app)', `<input value="${esc(r.portal_url)}" oninput="editingRental.portal_url=this.value" placeholder="https://sambarentals.vercel.app/..." style="${inputStyle}">`),
+        field('Airbnb URL', `<input value="${esc(r.airbnb_url)}" oninput="editingRental.airbnb_url=this.value" placeholder="https://airbnb.com/..." style="${inputStyle}">`)
+      )}
+      ${twoCol(
+        field('Booking.com URL', `<input value="${esc(r.booking_url)}" oninput="editingRental.booking_url=this.value" placeholder="https://booking.com/..." style="${inputStyle}">`),
+        field('Hero image URL', `<input value="${esc(r.hero_image_url)}" oninput="editingRental.hero_image_url=this.value" placeholder="https://..." style="${inputStyle}">`)
+      )}
+    `)}
+
+    ${section('Maya context', `
+      ${field('Notes for Maya (positioning, tone, edge cases)', `<textarea oninput="editingRental.maya_notes=this.value" placeholder="e.g. 'Best for families with kids — pool has shallow end. Mention proximity to Berawa Beach Club.'" style="${textareaStyle};height:80px">${esc(r.maya_notes)}</textarea>`)}
+      ${field('Extended details', `<textarea oninput="editingRental.extended_info=this.value" placeholder="Anything else Maya might need: host details, special instructions, neighbourhood detail, FAQ answers..." style="${textareaStyle};height:120px">${esc(r.extended_info)}</textarea>`)}
+    `)}
+
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--sand3)">
+      <button onclick="loadRentalsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Cancel</button>
+      <button onclick="saveRental()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+    </div>
+  `;
+}
+
+function autoSlugRental() {
+  const slugInput = document.getElementById('rf_slug');
+  if (slugInput && !slugInput.value) {
+    const slug = (editingRental.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    slugInput.value = slug;
+    editingRental.slug = slug;
+  }
+}
+
+async function saveRental() {
+  const r = editingRental;
+  if (!r.name || !r.slug) {
+    alert('Name and slug are required.');
+    return;
+  }
+  const btn = document.getElementById('saveRentalBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    const resp = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'upsert_rental', payload: r })
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      alert('Save failed: ' + (data.error || resp.status));
+      return;
+    }
+    await loadRentalsList();
+  } catch (e) {
+    alert('Save error: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+  }
+}
+
+async function archiveRental(id) {
+  if (!confirm('Archive this rental? It will be hidden from Maya and the list but can be restored via SQL if needed.')) return;
+  try {
+    await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete_rental', payload: { id } })
+    });
+    await loadRentalsList();
   } catch (e) {
     alert('Archive failed: ' + e.message);
   }

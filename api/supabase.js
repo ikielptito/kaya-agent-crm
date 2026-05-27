@@ -193,6 +193,34 @@ export default async function handler(req, res) {
       });
       return res.status(r.status).end();
 
+    } else if (action === 'get_rentals') {
+      r = await fetch(SUPABASE_URL + '/rest/v1/rentals?select=*&order=display_order.asc,name.asc', { headers });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+
+    } else if (action === 'upsert_rental') {
+      const rental = { ...payload, updated_at: new Date().toISOString() };
+      r = await fetch(SUPABASE_URL + '/rest/v1/rentals?on_conflict=slug', {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(rental)
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        return res.status(r.status).json({ error: err });
+      }
+      const data = await r.json();
+      return res.status(200).json(data);
+
+    } else if (action === 'delete_rental') {
+      const { id } = payload;
+      r = await fetch(SUPABASE_URL + '/rest/v1/rentals?id=eq.' + id, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ active: false, updated_at: new Date().toISOString() })
+      });
+      return res.status(r.status).end();
+
     } else if (action === 'reset_agent_conversation') {
       // Test-mode reset: wipe all conversation state for one agent so the next
       // iteration starts from scratch (no Maya context, no template-sent flag,

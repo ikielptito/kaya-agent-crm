@@ -28,7 +28,8 @@ export default async function handler(req, res) {
     { name: 'agents.automation_override', url: '/rest/v1/agents?select=automation_override&limit=1' },
     { name: 'projects.extended_info',  url: '/rest/v1/projects?select=extended_info&limit=1' },
     { name: 'agents.campaign_engagement',  url: '/rest/v1/agents?select=campaign_engagement&limit=1' },
-    { name: 'campaigns.template_sequence', url: '/rest/v1/campaigns?select=template_sequence&limit=1' }
+    { name: 'campaigns.template_sequence', url: '/rest/v1/campaigns?select=template_sequence&limit=1' },
+    { name: 'rentals table',           url: '/rest/v1/rentals?select=id&limit=1' }
   ];
 
   const results = [];

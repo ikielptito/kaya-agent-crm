@@ -6,6 +6,55 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 let _projectsCache = null;
 let _projectsCacheAt = 0;
 const PROJECTS_CACHE_TTL_MS = 60 * 1000;
+let _rentalsCache = null;
+let _rentalsCacheAt = 0;
+
+async function loadRentals(supabaseUrl, sbHeaders) {
+  const now = Date.now();
+  if (_rentalsCache && (now - _rentalsCacheAt) < PROJECTS_CACHE_TTL_MS) {
+    return _rentalsCache;
+  }
+  try {
+    const r = await fetch(`${supabaseUrl}/rest/v1/rentals?select=*&active=eq.true&order=display_order.asc`, { headers: sbHeaders });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (Array.isArray(data) && data.length > 0) {
+      _rentalsCache = data;
+      _rentalsCacheAt = now;
+      return data;
+    }
+  } catch (e) {
+    console.warn('loadRentals failed:', e.message);
+  }
+  return null;
+}
+
+function buildRentalsContext(rentals) {
+  if (!rentals || rentals.length === 0) {
+    return `SAMBA REALTY RENTAL PORTFOLIO:
+Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, and Seminyak. Commission is 10% per booking. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
+  }
+  const blocks = rentals.map((p, i) => {
+    const rate = p.nightly_rate_usd ? `$${p.nightly_rate_usd}/night` : (p.nightly_rate_idr ? `IDR ${(p.nightly_rate_idr / 1e6).toFixed(2)}M/night` : 'rate TBC');
+    const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
+    const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
+    const monthly = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo typical revenue` : null;
+    const links = [p.portal_url && `portal: ${p.portal_url}`, p.airbnb_url && `airbnb: ${p.airbnb_url}`, p.booking_url && `booking: ${p.booking_url}`].filter(Boolean).join(' · ');
+    const lines = [
+      `${i + 1}. ${p.name.toUpperCase()}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
+      p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
+      `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
+      occ || monthly ? `   Performance: ${[occ, monthly].filter(Boolean).join(', ')}` : null,
+      p.amenities ? `   Amenities: ${p.amenities}` : null,
+      p.features ? `   Features: ${p.features}` : null,
+      links ? `   Links: ${links}` : null,
+      p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
+      p.commission_pct ? `   Commission: ${p.commission_pct}% per booking` : null
+    ].filter(Boolean);
+    return lines.join('\n');
+  });
+  return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB):\n\n${blocks.join('\n\n')}\n\nFor live nightly availability, direct agents to the portal: sambarentals.vercel.app`;
+}
 
 async function loadProjects(supabaseUrl, sbHeaders) {
   const now = Date.now();
@@ -223,13 +272,15 @@ export default async function handler(req, res) {
       }
     }
 
-    // Generate a reply with Claude — load live project data from DB first
+    // Generate a reply with Claude — load live project + rental data from DB first
     const projects = await loadProjects(SUPABASE_URL, sbHeaders);
+    const rentals = await loadRentals(SUPABASE_URL, sbHeaders);
     const liveContext = buildPortfolioContext(projects);
+    const rentalsContext = buildRentalsContext(rentals);
     const liveBrochures = buildBrochures(projects);
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
     const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext);
 
     // Increment today's spend by the estimated cost of this Claude call
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
@@ -496,7 +547,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread) {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -508,8 +559,15 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
 
   const system = `${MAYA_PERSONA}
 
-PORTFOLIO KNOWLEDGE (the single source of truth — Ikiel keeps this current via the Projects admin page):
+KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
+
+${rentalsContext || ''}
+
+WHICH PORTFOLIO TO REFERENCE:
+KAYA Sales = freehold/leasehold property SALES (Clay House, Tropical Townhouses, Palem Kembar, Sabit House, LaneHAUS). For agents looking to LIST properties for sale.
+Samba Realty = short-term RENTALS. For agents whose clients are looking for vacation/longer-stay accommodation, OR for agents who want to refer rental clients for a 10% commission per booking.
+Pick the right portfolio based on what the agent is asking about. If they're ambiguous, ask which side they're focused on (sales listings or rental referrals). Some agents do both.
 
 DATA PRIORITY RULES (critical — read carefully):
 1. The structured "Units:" list under each project is the AUTHORITATIVE record of what is available, sold, reserved, or coming soon. Trust the per-unit availability tag (-- SOLD, -- RESERVED, -- COMING SOON) over any other text.

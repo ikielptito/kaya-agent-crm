@@ -86,3 +86,36 @@ alter table projects add column if not exists extended_info text;
 -- ── CAMPAIGNS COLUMN (added incrementally) ──────────────────────────
 
 alter table campaigns add column if not exists template_sequence jsonb default '[]';
+
+-- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
+
+create table if not exists rentals (
+  id                bigserial primary key,
+  slug              text unique not null,
+  display_order     int default 99,
+  active            boolean default true,
+  name              text not null,                 -- e.g. "Tropicana Valley A5"
+  area              text,                           -- e.g. "Buduk", "Berawa", "Canggu"
+  full_location     text,
+  property_type     text,                           -- Villa | Townhouse | Apartment | Studio | House
+  beds              int,
+  baths             numeric,
+  max_guests        int,
+  sqm               numeric,
+  amenities         text,                           -- comma-sep: Pool, Wifi, Workspace, Kitchen, Parking
+  features          text,                           -- free-form
+  nightly_rate_usd  numeric,
+  nightly_rate_idr  numeric,
+  min_stay_nights   int default 1,
+  occupancy_pct     int,                            -- recent occupancy rate
+  monthly_revenue_idr numeric,                      -- typical
+  airbnb_url        text,
+  booking_url       text,
+  portal_url        text,                           -- sambarentals.vercel.app/...
+  hero_image_url    text,
+  commission_pct    numeric default 10,
+  maya_notes        text,
+  extended_info     text,
+  created_at        timestamptz default now(),
+  updated_at        timestamptz default now()
+);
