@@ -3327,7 +3327,13 @@ async function saveCampaignToDb(fields) {
       const data = await r.json();
       if (Array.isArray(data) && data[0]) {
         currentCampaignId = data[0].id;
-        return data[0];
+        const saved = data[0];
+        // Keep the in-memory campaignsList in sync so the drawer's campaign_engagement
+        // strip can resolve campaign_id → name + template_sequence right after creation.
+        const existingIdx = campaignsList.findIndex(c => c.id === saved.id);
+        if (existingIdx >= 0) campaignsList[existingIdx] = saved;
+        else campaignsList.unshift(saved);
+        return saved;
       }
     }
   } catch(e) { console.warn('Campaign save failed:', e.message); }
@@ -4956,6 +4962,7 @@ async function resetAgentConversation(agentId) {
     a.projects = {};
     a.samba = { status: 'Not contacted', notes: '' };
     a.campaign_engagement = null;
+    if (a.is_test) a.notes = '';   // mirrors backend behaviour: test contacts get notes cleared
     delete agentLastInboundMap[agentId];
     alert('✓ Conversation reset. ' + label + ' is now fresh for re-testing.');
     closeDrawer();
@@ -4994,6 +5001,7 @@ async function resetAllTestConversations() {
       a.projects = {};
       a.samba = { status: 'Not contacted', notes: '' };
       a.campaign_engagement = null;
+      a.notes = '';
       delete agentLastInboundMap[a.id];
     });
     alert('✓ Reset ' + data.count + ' test conversation(s). Ready for a fresh iteration.');

@@ -234,6 +234,15 @@ export default async function handler(req, res) {
       await fetch(SUPABASE_URL + '/rest/v1/maya_updates?agent_id=eq.' + agentId, {
         method: 'DELETE', headers
       }).catch(() => {});
+      // For TEST contacts, also clear notes (which accumulate autopilot send logs).
+      // For real agents, preserve notes since they may contain genuine business context.
+      let isTest = false;
+      try {
+        const probe = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + agentId + '&select=is_test', { headers });
+        const probeData = await probe.json();
+        isTest = probeData?.[0]?.is_test === true;
+      } catch (e) { /* default false */ }
+
       const resetFields = {
         conversation_summary: '',
         last_inbound_at: null,
@@ -243,7 +252,8 @@ export default async function handler(req, res) {
         last_campaign_sent: null,
         projects: {},                                     // pipeline statuses + lifecycle stages set by Maya
         samba: { status: 'Not contacted', notes: '' },    // Samba pipeline status
-        campaign_engagement: null                         // active template sequence state
+        campaign_engagement: null,                        // active template sequence state
+        ...(isTest ? { notes: '' } : {})                  // test contacts get a fully clean slate
       };
       const r2 = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + agentId, {
         method: 'PATCH', headers, body: JSON.stringify(resetFields)
@@ -279,7 +289,8 @@ export default async function handler(req, res) {
           last_campaign_sent: null,
           projects: {},
           samba: { status: 'Not contacted', notes: '' },
-          campaign_engagement: null
+          campaign_engagement: null,
+          notes: ''                              // is_test=true agents → clear notes too
         })
       });
       return res.status(200).json({ success: true, count: testAgents.length, agents: testAgents });
