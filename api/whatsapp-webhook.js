@@ -1,4 +1,5 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
+import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -226,6 +227,9 @@ export default async function handler(req, res) {
     const override = agent.automation_override;
     const mode = override === 'paused' ? 'paused' : (override || globalMode);
 
+    // Forward to Telegram (fire and forget — never block the webhook on it)
+    forwardInbound(agent, text, mode).catch(() => {});
+
     const patch = {
       conversation_summary: updatedSummary,
       conversation_history: updatedHistory,
@@ -324,6 +328,8 @@ export default async function handler(req, res) {
     if (aiResult.reply && WA_TOKEN && WA_PHONE_ID) {
       await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply);
+      // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
+      forwardMayaReply(agent, aiResult.reply).catch(() => {});
 
       // Send brochure if Claude requested one (use live brochure map from DB)
       // Dedup: skip if the same filename was sent in the last 14 days (e.g. via campaign attachment).
