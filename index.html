@@ -4262,15 +4262,22 @@ async function runAutopilotCampaign() {
           KAYA_PROJECTS.forEach(p => { if (a.projects?.[p]?.status === 'Not contacted') a.projects[p].status = 'Contacted'; });
         }
 
-        // Initialise campaign_engagement so the cron picks up the sequence
+        // Initialise campaign_engagement so the cron picks up the sequence.
+        // Resolve the sequence from the SAVED campaign (campaignsList) rather than
+        // the in-memory campaignSequence — the former is the source of truth and
+        // can't get truncated by UI race conditions.
         let engagementPatch = null;
-        if (useTemplate && campaignSequence.length > 1) {
-          const nextWait = campaignSequence[1]?.wait_days || 1;
+        const savedCampaign = (campaignsList || []).find(cc => cc.id === currentCampaignId);
+        const effectiveSequence = (savedCampaign?.template_sequence && savedCampaign.template_sequence.length > 0)
+          ? savedCampaign.template_sequence
+          : campaignSequence;
+        if (useTemplate && effectiveSequence.length > 1) {
+          const nextWait = effectiveSequence[1]?.wait_days || 1;
           const nextAt = new Date(Date.now() + nextWait * 86400000).toISOString();
           engagementPatch = {
             campaign_id: currentCampaignId,
             sequence_index: 0,
-            last_template_sent: campaignSequence[0].template_name,
+            last_template_sent: effectiveSequence[0].template_name,
             last_template_sent_at: new Date().toISOString(),
             next_template_at: nextAt,
             status: 'pending'
