@@ -3,14 +3,18 @@
 //      + auto-pauses Maya for that thread (matches CRM inbox behavior).
 //   2. Slash commands: /help, /resume <id>, /pause <id>, /stats
 //
-// Telegram setup (one-time): hit /api/telegram-setup with ?token=<bot_token>
-// to register this URL as the bot's webhook.
+// Telegram setup (one-time): hit this endpoint via GET (in a browser) to
+// register the webhook URL with Telegram and send a confirmation message.
 
 import { postToTelegram, extractAgentIdFromReply, telegramEnabled } from '../lib/telegram.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
 export default async function handler(req, res) {
+  // GET = one-time setup (registers this URL as the Telegram bot's webhook)
+  if (req.method === 'GET') {
+    return handleSetup(req, res);
+  }
   if (req.method !== 'POST') return res.status(200).end();
   if (!telegramEnabled()) return res.status(200).end();
 
@@ -64,6 +68,47 @@ export default async function handler(req, res) {
   } catch (err) {
     console.error('telegram-webhook error:', err);
     return res.status(200).end();
+  }
+}
+
+// ── Setup handler (GET) ───────────────────────────────────────────
+// Hit /api/telegram-webhook in a browser after deploying to register the
+// webhook URL with Telegram. Sends a confirmation message if successful.
+async function handleSetup(req, res) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token) {
+    return res.status(500).json({ ok: false, error: 'TELEGRAM_BOT_TOKEN not configured.' });
+  }
+  const protocol = req.headers['x-forwarded-proto'] || 'https';
+  const host = req.headers.host;
+  const webhookUrl = `${protocol}://${host}/api/telegram-webhook`;
+  try {
+    const setRes = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: webhookUrl, allowed_updates: ['message', 'edited_message'], drop_pending_updates: false })
+    });
+    const setData = await setRes.json();
+    let confirmSent = false;
+    if (chatId && setData.ok) {
+      const confirmRes = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: '✓ <b>KAYA Listings Inbox is connected.</b>\n\nYou\'ll get push notifications for every inbound agent message. Reply to any forwarded message to send via WhatsApp. Try /help for commands.',
+          parse_mode: 'HTML'
+        })
+      });
+      confirmSent = (await confirmRes.json())?.ok || false;
+    }
+    return res.status(200).json({
+      ok: setData.ok, webhook_url: webhookUrl,
+      telegram_response: setData,
+      confirmation_message_sent: confirmSent,
+      next_step: confirmSent ? 'Check Telegram for the confirmation message.' : 'Webhook registered.'
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
   }
 }
 
