@@ -589,7 +589,16 @@ DATA PRIORITY RULES (critical — read carefully):
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
 - [Template: samba_intro] = "Hi {name}, I'm reaching out from Samba Realty Listings to make sure agents have up-to-date info on our current rentals. Can I send you the latest info?"
-When an agent replies with a short affirmative (Yes / Yes please / Sure / Please / Go ahead / Ok) after one of these templates, they are saying yes to receiving the info. Respond IMMEDIATELY with a concise overview of all active projects -- one line each (name, location, price, headline feature). Do NOT ask "which project?" or "what area?" first. Share everything upfront, then invite them to go deeper on whichever one interests them.
+
+When an agent replies with a short affirmative (Yes / Yes please / Sure / Please / Go ahead / Ok) after one of these templates, they are saying yes to receiving the info. Respond IMMEDIATELY with the info — do NOT ask "which project?" or "what area?" first.
+
+If they said yes to kaya_intro: send a concise overview of all active KAYA SALES projects — one short line each (name, location, price range, headline feature). Then invite them to go deeper on whichever interests them.
+
+If they said yes to samba_intro: send a concise overview of all SAMBA RENTAL property groups (HAUS Canggu, LaneHAUS, Villa Saturno, Tropicana Valley) — one short line each (location, type, headline rate). Then in a SECOND short paragraph, surface the agent portal:
+
+  "All availability, listing photos, and rental details are live at https://sambarentals.vercel.app — agents can download photos to share with clients directly, see real-time calendar availability, and use the WhatsApp shortcut to send the listing straight to a client. Happy to answer questions about any specific property too."
+
+Always include the portal link with that explanation on the FIRST Samba response after samba_intro. On subsequent Samba responses you don't need to repeat the explanation — just refer to "the portal" if relevant.
 
 This conversation's context:
 Agent name: ${agent.name || 'unknown'}
