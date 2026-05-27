@@ -83,6 +83,11 @@ alter table agents add column if not exists campaign_engagement jsonb;
 
 alter table projects add column if not exists extended_info text;
 
+-- ── RENTALS COLUMNS (added incrementally — runs even if table existed) ─
+
+alter table rentals add column if not exists monthly_rate_idr numeric;
+alter table rentals add column if not exists yearly_rate_idr numeric;
+
 -- ── CAMPAIGNS COLUMN (added incrementally) ──────────────────────────
 
 alter table campaigns add column if not exists template_sequence jsonb default '[]';
@@ -108,7 +113,9 @@ create table if not exists rentals (
   nightly_rate_idr  numeric,
   min_stay_nights   int default 1,
   occupancy_pct     int,                            -- recent occupancy rate
-  monthly_revenue_idr numeric,                      -- typical
+  monthly_revenue_idr numeric,                      -- typical revenue (actuals if known)
+  monthly_rate_idr  numeric,                        -- asking monthly rent
+  yearly_rate_idr   numeric,                        -- asking yearly rent
   airbnb_url        text,
   booking_url       text,
   portal_url        text,                           -- sambarentals.vercel.app/...

@@ -35,10 +35,17 @@ function buildRentalsContext(rentals) {
 Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, and Seminyak. Commission is 10% per booking. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
   }
   const blocks = rentals.map((p, i) => {
-    const rate = p.nightly_rate_usd ? `$${p.nightly_rate_usd}/night` : (p.nightly_rate_idr ? `IDR ${(p.nightly_rate_idr / 1e6).toFixed(2)}M/night` : 'rate TBC');
+    // Build rate string covering both long-term (monthly/yearly) and short-term (nightly)
+    const rateParts = [];
+    if (p.monthly_rate_idr) rateParts.push(`IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/mo`);
+    if (p.yearly_rate_idr) rateParts.push(`IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/yr`);
+    if (p.nightly_rate_usd) rateParts.push(`$${p.nightly_rate_usd}/night`);
+    else if (p.nightly_rate_idr) rateParts.push(`IDR ${(p.nightly_rate_idr / 1e3).toFixed(0)}K/night`);
+    const rate = rateParts.length ? rateParts.join(' / ') : 'rate TBC';
+
     const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
     const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
-    const monthly = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo typical revenue` : null;
+    const monthly = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo actual revenue` : null;
     const links = [p.portal_url && `portal: ${p.portal_url}`, p.airbnb_url && `airbnb: ${p.airbnb_url}`, p.booking_url && `booking: ${p.booking_url}`].filter(Boolean).join(' · ');
     const lines = [
       `${i + 1}. ${p.name.toUpperCase()}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
@@ -47,6 +54,7 @@ Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, 
       occ || monthly ? `   Performance: ${[occ, monthly].filter(Boolean).join(', ')}` : null,
       p.amenities ? `   Amenities: ${p.amenities}` : null,
       p.features ? `   Features: ${p.features}` : null,
+      p.extended_info ? `   Details:\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null,
       links ? `   Links: ${links}` : null,
       p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
       p.commission_pct ? `   Commission: ${p.commission_pct}% per booking` : null

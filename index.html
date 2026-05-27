@@ -749,6 +749,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
       <span id="rentalsCount" style="font-size:11px;color:var(--ink3)"></span>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
+      <button onclick="syncRentalsFromPortal()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="Live-fetch latest rentals from sambarentals.vercel.app and upsert">↻ Sync from portal</button>
       <button onclick="openRentalEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">+ New rental</button>
     </div>
   </div>
@@ -5420,7 +5421,7 @@ function renderRentalsList() {
       </thead>
       <tbody>
         ${rentalsData.map(r => {
-          const rate = r.nightly_rate_usd ? `$${r.nightly_rate_usd}/n` : (r.nightly_rate_idr ? `IDR ${(r.nightly_rate_idr/1000).toFixed(0)}K/n` : '—');
+          const rate = r.monthly_rate_idr ? `${(r.monthly_rate_idr/1e6).toFixed(0)}jt/mo` : (r.nightly_rate_usd ? `$${r.nightly_rate_usd}/n` : (r.nightly_rate_idr ? `IDR ${(r.nightly_rate_idr/1000).toFixed(0)}K/n` : '—'));
           const cap = [r.beds && `${r.beds}br`, r.max_guests && `sleeps ${r.max_guests}`].filter(Boolean).join(' · ');
           const occ = r.occupancy_pct ? `${r.occupancy_pct}%` : '—';
           return `<tr style="border-top:1px solid var(--sand3);${r.active ? '' : 'opacity:0.45'}">
@@ -5497,13 +5498,20 @@ function renderRentalEditor() {
     `)}
 
     ${section('Pricing & performance', `
+      <div style="font-size:10px;color:var(--ink3);margin-bottom:8px;line-height:1.4">Portal rates (long-term):</div>
+      ${twoCol(
+        field('Monthly rate IDR', `<input type="number" step="100000" value="${r.monthly_rate_idr||''}" oninput="editingRental.monthly_rate_idr=parseFloat(this.value)||null" placeholder="e.g. 27000000 (27jt)" style="${inputStyle}">`),
+        field('Yearly rate IDR', `<input type="number" step="1000000" value="${r.yearly_rate_idr||''}" oninput="editingRental.yearly_rate_idr=parseFloat(this.value)||null" placeholder="e.g. 270000000 (270jt)" style="${inputStyle}">`)
+      )}
+      <div style="font-size:10px;color:var(--ink3);margin:12px 0 8px;line-height:1.4">Short-term / Airbnb rates (optional):</div>
       ${twoCol(
         field('Nightly rate USD', `<input type="number" step="1" value="${r.nightly_rate_usd||''}" oninput="editingRental.nightly_rate_usd=parseFloat(this.value)||null" placeholder="e.g. 63" style="${inputStyle}">`),
         field('Nightly rate IDR', `<input type="number" step="1000" value="${r.nightly_rate_idr||''}" oninput="editingRental.nightly_rate_idr=parseFloat(this.value)||null" placeholder="e.g. 1050000" style="${inputStyle}">`)
       )}
+      <div style="font-size:10px;color:var(--ink3);margin:12px 0 8px;line-height:1.4">Performance & commission:</div>
       ${twoCol(
         field('Recent occupancy %', `<input type="number" min="0" max="100" value="${r.occupancy_pct||''}" oninput="editingRental.occupancy_pct=parseInt(this.value)||null" placeholder="e.g. 83" style="${inputStyle}">`),
-        field('Typical monthly revenue (IDR)', `<input type="number" step="100000" value="${r.monthly_revenue_idr||''}" oninput="editingRental.monthly_revenue_idr=parseFloat(this.value)||null" placeholder="e.g. 24500000" style="${inputStyle}">`)
+        field('Typical monthly revenue (IDR)', `<input type="number" step="100000" value="${r.monthly_revenue_idr||''}" oninput="editingRental.monthly_revenue_idr=parseFloat(this.value)||null" placeholder="actuals if known" style="${inputStyle}">`)
       )}
       ${field('Commission % (per booking)', `<input type="number" step="0.5" value="${r.commission_pct||10}" oninput="editingRental.commission_pct=parseFloat(this.value)||10" style="${inputStyle};max-width:180px">`)}
     `)}
@@ -5581,6 +5589,25 @@ async function archiveRental(id) {
     await loadRentalsList();
   } catch (e) {
     alert('Archive failed: ' + e.message);
+  }
+}
+
+async function syncRentalsFromPortal() {
+  if (!confirm('Sync rentals from sambarentals.vercel.app?\n\nThis will pull the latest listing data from the portal and UPSERT each property by slug. Existing rentals you have edited locally (occupancy %, nightly rates, etc.) will be PRESERVED if those fields are blank in the portal — but core fields like name, area, rates, amenities will be overwritten with portal data.\n\nSafe to run repeatedly.')) return;
+  const body = document.getElementById('rentalsBody');
+  body.innerHTML = '<div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Syncing from portal...</div>';
+  try {
+    const r = await fetch('/api/seed-rentals', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      alert('Sync failed: ' + (data.error || r.status));
+    } else {
+      alert('✓ ' + (data.message || `Synced ${data.slugs?.length || 0} rentals`));
+    }
+    await loadRentalsList();
+  } catch (e) {
+    alert('Sync error: ' + e.message);
+    await loadRentalsList();
   }
 }
 
