@@ -292,7 +292,17 @@ export default async function handler(req, res) {
     const liveBrochures = buildBrochures(projects);
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
     const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext);
+    // If this agent is engaged in an active campaign, fetch the campaign's context
+    // so Maya knows the specific focus / promo / framing for this batch.
+    let campaignContext = null;
+    if (agent.campaign_engagement?.campaign_id) {
+      try {
+        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${agent.campaign_engagement.campaign_id}&select=name,context,purpose`, { headers: sbHeaders });
+        const cRow = (await cRes.json())?.[0];
+        if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
+      } catch (e) { /* non-fatal */ }
+    }
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext);
 
     // Increment today's spend by the estimated cost of this Claude call
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
@@ -561,7 +571,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext) {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -617,6 +627,10 @@ This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${threadBlock}
+${campaignContext ? `
+
+CAMPAIGN-SPECIFIC FOCUS (this agent was reached via the "${campaignContext.name}" campaign — use this as your North Star for the current conversation; weave it in naturally rather than reciting it):
+${campaignContext.context}${campaignContext.purpose ? `\nCampaign purpose: ${campaignContext.purpose}` : ''}` : ''}
 
 You can attach a project brochure PDF. Available brochure keys: ${brochureKeys}.
 
