@@ -1876,6 +1876,7 @@ function renderCampaignEngagement(a) {
 
   const actions = [];
   if (eng.status === 'pending') {
+    actions.push(`<button onclick="sendNextSequenceNow(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif" title="Fires the next template immediately, bypassing the wait_days schedule">▶ Send next now</button>`);
     actions.push(`<button onclick="skipNextSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">⏭ Skip next</button>`);
     actions.push(`<button onclick="stopSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Stop sequence</button>`);
   }
@@ -1914,6 +1915,81 @@ async function stopSequence(agentId) {
   a.campaign_engagement = updated;
   await saveAgent(a.id, { campaign_engagement: updated });
   openDrawer(agentId);
+}
+
+// Force the next sequence step to fire NOW, bypassing the wait_days schedule.
+// Sends the next template directly via /api/whatsapp-send (avoids the cron
+// endpoint's auth gate). Updates campaign_engagement to reflect the send.
+async function sendNextSequenceNow(agentId) {
+  const a = agents.find(x => x.id === agentId);
+  if (!a || !a.campaign_engagement) return;
+
+  // Resolve the campaign + next step
+  const eng = a.campaign_engagement;
+  const camp = (campaignsList || []).find(c => c.id === eng.campaign_id);
+  if (!camp) {
+    alert('Could not find the campaign for this agent. Make sure it still exists.');
+    return;
+  }
+  const seq = camp.template_sequence || [];
+  const nextIdx = (eng.sequence_index || 0) + 1;
+  const nextStep = seq[nextIdx];
+  if (!nextStep) {
+    alert('No more steps in the sequence. Already on the last one.');
+    return;
+  }
+
+  // Find the template in the loaded Meta templates list
+  const tmpl = waTemplates.find(t => t.name === nextStep.template_name);
+  if (!tmpl) {
+    alert(`Template "${nextStep.template_name}" not found in your Meta approved list. Refresh templates and try again.`);
+    return;
+  }
+
+  if (!confirm(`Send "${nextStep.template_name}" to ${a.name || 'this agent'} right now?\n\nThis bypasses the normal ${nextStep.wait_days || 1}-day wait between steps.`)) return;
+
+  const waNum = getWaNum(a);
+  if (!waNum) {
+    alert('No WhatsApp number on this agent.');
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        waNum, useTemplate: true,
+        templateName: tmpl.name,
+        templateLanguage: tmpl.language,
+        templateParams: buildTemplateParams(a, tmpl),
+        templateBodyText: buildTemplateBodyText(a, tmpl),
+        agentId: a.id, campaignId: eng.campaign_id
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.success) {
+      alert(`Send failed: ${data.error || resp.status}`);
+      return;
+    }
+
+    // Advance the engagement state to match what the cron would do
+    const afterNext = seq[nextIdx + 1];
+    const newNextAt = afterNext ? new Date(Date.now() + (afterNext.wait_days || 1) * 86400000).toISOString() : null;
+    const updated = {
+      ...eng,
+      sequence_index: nextIdx,
+      last_template_sent: nextStep.template_name,
+      last_template_sent_at: new Date().toISOString(),
+      next_template_at: newNextAt
+    };
+    a.campaign_engagement = updated;
+    await saveAgent(a.id, { campaign_engagement: updated });
+
+    alert(`✓ Sent "${nextStep.template_name}". Check the agent's WhatsApp.\n\n${afterNext ? `Next step (${afterNext.template_name}) scheduled for ${new Date(newNextAt).toLocaleString()}.` : 'This was the last step — sequence will complete after the next cron run.'}`);
+    openDrawer(agentId);
+  } catch (e) {
+    alert(`Send error: ${e.message}`);
+  }
 }
 
 function formatRelativeDate(iso) {
