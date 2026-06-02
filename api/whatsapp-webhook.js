@@ -127,6 +127,22 @@ function buildPortfolioContext(projects) {
   return `KAYA portfolio (current, live from DB):\n\n${blocks.join('\n\n')}`;
 }
 
+// Build hero photo map from rentals: { slug: { imageUrl, caption } }
+// Used when Maya wants to send a property photo inline ("send me a photo of HAUS Canggu").
+function buildRentalPhotos(rentals) {
+  if (!rentals || rentals.length === 0) return {};
+  const map = {};
+  for (const r of rentals) {
+    if (r.hero_image_url && r.slug) {
+      map[r.slug] = {
+        imageUrl: r.hero_image_url,
+        caption: `${r.name}${r.area ? ' · ' + r.area : ''}${r.monthly_rate_idr ? ' · IDR ' + (r.monthly_rate_idr / 1e6).toFixed(0) + 'M/month' : ''}`
+      };
+    }
+  }
+  return map;
+}
+
 // Build brochure map from projects: { slug: { url, filename, label } }
 function buildBrochures(projects) {
   if (!projects || projects.length === 0) return FALLBACK_BROCHURES;
@@ -185,6 +201,14 @@ export default async function handler(req, res) {
     const text = msg.text?.body || '';
     const waMessageId = msg.id;
     const timestamp = new Date(parseInt(msg.timestamp) * 1000).toISOString();
+
+    // Mark the inbound as read + show typing indicator immediately. This gives
+    // the agent the "blue ticks" + a brief "Maya is typing..." while we
+    // generate the reply, making the auto-response feel attentive rather than
+    // robotic. Fire-and-forget so it never blocks the rest of the webhook.
+    if (WA_TOKEN && WA_PHONE_ID && waMessageId) {
+      markAsReadWithTyping(WA_PHONE_ID, WA_TOKEN, waMessageId).catch(() => {});
+    }
 
     if (!SUPABASE_URL || !SUPABASE_KEY) return res.status(200).end();
 
@@ -296,6 +320,7 @@ export default async function handler(req, res) {
     const liveContext = buildPortfolioContext(projects);
     const rentalsContext = buildRentalsContext(rentals);
     const liveBrochures = buildBrochures(projects);
+    const rentalPhotos = buildRentalPhotos(rentals);
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
     const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
     // If this agent is engaged in an active campaign, fetch the campaign's context
@@ -310,7 +335,7 @@ export default async function handler(req, res) {
         if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
       } catch (e) { /* non-fatal */ }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos);
 
     // Increment today's spend by the estimated cost of this Claude call
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
@@ -360,6 +385,12 @@ export default async function handler(req, res) {
         } else {
           console.log(`Skipping ${doc.filename} — already sent in last 14 days`);
         }
+      }
+      // Send rental hero photo if Claude requested one ("show me HAUS Canggu")
+      const photo = aiResult.send_photo && rentalPhotos[aiResult.send_photo];
+      if (photo && photo.imageUrl) {
+        await sendImage(WA_PHONE_ID, WA_TOKEN, fromNum, photo.imageUrl, photo.caption);
+        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Image: ${photo.caption}]`);
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -526,6 +557,24 @@ async function sendText(phoneId, token, to, text) {
   });
 }
 
+// Mark an inbound message as read AND show a typing indicator. The typing
+// indicator runs for ~25 seconds OR until our next message lands, whichever is
+// first — so by the time Maya's auto-reply sends, the indicator clears cleanly.
+// Per Meta Cloud API (added Sep 2024): single call to /messages with status=read
+// + typing_indicator { type: 'text' }.
+async function markAsReadWithTyping(phoneId, token, messageId) {
+  return fetch(`${GRAPH}/${phoneId}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      status: 'read',
+      message_id: messageId,
+      typing_indicator: { type: 'text' }
+    })
+  });
+}
+
 // Returns true if a document with this filename was sent to this agent within
 // the last `days` days. Used to prevent Maya re-sending a brochure that the
 // campaign already attached.
@@ -543,6 +592,17 @@ async function wasDocRecentlySent(url, headers, agentId, filename, days) {
   } catch (e) {
     return false;
   }
+}
+
+async function sendImage(phoneId, token, to, link, caption) {
+  return fetch(`${GRAPH}/${phoneId}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp', to, type: 'image',
+      image: { link, ...(caption ? { caption } : {}) }
+    })
+  });
 }
 
 async function sendDocument(phoneId, token, to, link, filename) {
@@ -579,7 +639,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext) {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -688,6 +748,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "action": "auto" | "escalate",
   "reply": "the message to send to the agent (1-4 sentences typical)",
   "send_doc": null | one of [${brochureKeys}],
+  "send_photo": null | one of [${Object.keys(rentalPhotos).join(', ') || '(no rental hero photos available)'}],
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ]
@@ -695,7 +756,8 @@ Respond with ONLY a JSON object (no markdown, no prose):
 ${isHybrid
   ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
-Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
+Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific KAYA sales project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
+Set "send_photo" when the agent asks to SEE a Samba rental ("can you send a photo of HAUS Canggu", "what does Villa Saturno look like", "show me LaneHAUS"). Pick the slug of the specific property they asked about — exact match required. The system will send the property's hero photo inline. ALSO mention in your text reply that the photo is for [property name] and that the full set is in the portal. If multiple units are in a property group (e.g. Tropicana has 7 units), prefer the first unit's slug (e.g. tropicana_a4). If no specific property was asked about, set send_photo to null.
 Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
 
   try {
@@ -718,12 +780,13 @@ Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
         send_doc: parsed.send_doc || null,
+        send_photo: parsed.send_photo || null,
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : []
       };
     }
-    return { action: 'escalate', reply: raw.trim(), send_doc: null, crm_updates: [] };
+    return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [] };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, crm_updates: [] };
+    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [] };
   }
 }

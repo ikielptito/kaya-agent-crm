@@ -90,6 +90,11 @@ alter table rentals add column if not exists yearly_rate_idr numeric;
 alter table rentals add column if not exists photos_url text;       -- Google Drive folder for listing photos
 alter table rentals add column if not exists maps_url text;         -- Google Maps location link
 
+-- ── WA_MESSAGES COLUMNS (added incrementally) ───────────────────────
+
+alter table wa_messages add column if not exists edited_at  timestamptz;  -- set when message text was edited
+alter table wa_messages add column if not exists deleted_at timestamptz;  -- set when message was recalled
+
 -- ── CAMPAIGNS COLUMN (added incrementally) ──────────────────────────
 
 alter table campaigns add column if not exists template_sequence jsonb default '[]';

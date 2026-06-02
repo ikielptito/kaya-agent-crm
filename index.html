@@ -453,6 +453,8 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .bubble.in { align-self: flex-start; background: white; color: var(--ink); border-bottom-left-radius: 3px; }
 .bubble.out { align-self: flex-end; background: var(--wa); color: white; border-bottom-right-radius: 3px; }
 .bubble-time { font-size: 9px; opacity: 0.6; margin-top: 3px; }
+.bubble.bubble-deleted { opacity: 0.55; font-style: italic; background: var(--sand); color: var(--ink3); border: 1px dashed var(--sand3); }
+.bubble.out.bubble-deleted { background: var(--sand); color: var(--ink3); }
 .inbox-reply { background: white; border-top: 1px solid var(--sand3); padding: 12px 16px; flex-shrink: 0; }
 .inbox-reply-row { display: flex; gap: 8px; align-items: flex-end; }
 .inbox-reply textarea { flex: 1; min-height: 38px; max-height: 120px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 8px; padding: 9px 12px; font-family: 'Geist',sans-serif; font-size: 13px; color: var(--ink); resize: vertical; outline: none; }
@@ -4857,6 +4859,7 @@ async function renderInbox(silent) {
         const map = {};
         allMsgs.forEach(m => {
           if (m.agent_id == null) return;
+          if (m.deleted_at) return;  // recalled messages don't represent the conversation's last beat
           if (!map[m.agent_id] || new Date(m.timestamp) > new Date(map[m.agent_id].lastTimestamp)) {
             map[m.agent_id] = {
               lastTimestamp: m.timestamp,
@@ -4969,14 +4972,89 @@ async function openConversation(agentId) {
     }
     // Messages come desc; render ascending
     const asc = msgs.slice().reverse();
-    box.innerHTML = asc.map(m => {
-      const t = new Date(m.timestamp).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
-      return `<div class="bubble ${m.direction === 'inbound' ? 'in' : 'out'}">${(m.content||'').replace(/</g,'&lt;')}<div class="bubble-time">${t}</div></div>`;
-    }).join('');
+    box.innerHTML = asc.map(m => renderMessageBubble(m)).join('');
     box.scrollTop = box.scrollHeight;
   } catch(e) {
     document.getElementById('threadMsgs').innerHTML = '<div style="text-align:center;color:#a32d2d;font-size:12px;padding:20px">Failed to load messages.</div>';
   }
+}
+
+// Time windows (per WhatsApp Cloud API). Buttons only render inside these.
+const EDIT_WINDOW_MS = 15 * 60 * 1000;        // 15 minutes
+const RECALL_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function renderMessageBubble(m) {
+  const t = new Date(m.timestamp).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+  const ageMs = Date.now() - new Date(m.timestamp).getTime();
+  const isOut = m.direction !== 'inbound';
+  const isDeleted = !!m.deleted_at;
+  const isEdited  = !!m.edited_at;
+
+  if (isDeleted) {
+    return `<div class="bubble ${isOut ? 'out' : 'in'} bubble-deleted">
+      🚫 <i>Message recalled</i>
+      <div class="bubble-time">${t}</div>
+    </div>`;
+  }
+
+  const safeContent = (m.content || '').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  const editedLabel = isEdited
+    ? `<span style="font-size:9px;color:var(--ink4);margin-left:6px">(edited)</span>` : '';
+
+  // Outbound-only action buttons: appear on hover. Eligibility by send age + flag presence.
+  let actions = '';
+  if (isOut && m.wa_message_id && !isDeleted) {
+    const canEdit = ageMs < EDIT_WINDOW_MS;
+    const canRecall = ageMs < RECALL_WINDOW_MS;
+    if (canEdit || canRecall) {
+      const editBtn = canEdit
+        ? `<button onclick="editMessage('${m.wa_message_id}', ${m.id})" title="Edit (within 15 min)" style="background:none;border:none;cursor:pointer;color:var(--ink4);font-size:10px;padding:2px 4px">✏️</button>` : '';
+      const recallBtn = canRecall
+        ? `<button onclick="recallMessage('${m.wa_message_id}', ${m.id})" title="Recall (within 24h)" style="background:none;border:none;cursor:pointer;color:#c00;font-size:10px;padding:2px 4px">🗑</button>` : '';
+      actions = `<span class="bubble-actions" style="position:absolute;top:4px;right:6px;display:none;gap:2px">${editBtn}${recallBtn}</span>`;
+    }
+  }
+
+  return `<div class="bubble ${isOut ? 'out' : 'in'}" style="position:relative" onmouseenter="this.querySelector('.bubble-actions')?.style.setProperty('display','flex')" onmouseleave="this.querySelector('.bubble-actions')?.style.setProperty('display','none')">
+    ${actions}
+    ${safeContent}${editedLabel}
+    <div class="bubble-time">${t}</div>
+  </div>`;
+}
+
+async function editMessage(waMessageId, rowId) {
+  const current = prompt('Edit the message text:');
+  if (current === null) return;
+  const newText = current.trim();
+  if (!newText) { alert('Empty text — not sending.'); return; }
+  try {
+    const r = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit', waMessageId, newText })
+    });
+    const data = await r.json();
+    if (!data.success) { alert('Edit failed: ' + (data.error || JSON.stringify(data))); return; }
+    if (!data.meta_edited) {
+      alert('CRM updated, but WhatsApp itself didn\'t accept the edit ' + (data.meta_error ? '(' + data.meta_error + ')' : '') + '. The agent will still see the original message on their phone.');
+    }
+    if (activeConvId) openConversation(activeConvId);
+  } catch (e) { alert('Edit error: ' + e.message); }
+}
+
+async function recallMessage(waMessageId, rowId) {
+  if (!confirm('Recall this message? It will be marked as recalled in your view. WhatsApp may or may not also delete it on the agent\'s side depending on Meta\'s current API support.')) return;
+  try {
+    const r = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'recall', waMessageId })
+    });
+    const data = await r.json();
+    if (!data.success) { alert('Recall failed: ' + (data.error || JSON.stringify(data))); return; }
+    if (!data.meta_recalled) {
+      alert('CRM updated, but WhatsApp itself didn\'t delete the message ' + (data.meta_error ? '(' + data.meta_error + ')' : '') + '. The agent will still see it on their phone. (Consider sending a correction.)');
+    }
+    if (activeConvId) openConversation(activeConvId);
+  } catch (e) { alert('Recall error: ' + e.message); }
 }
 
 async function suggestReply(agentId) {

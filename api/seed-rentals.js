@@ -6,6 +6,7 @@
 // the data without creating duplicates).
 
 const PORTAL_URL = 'https://sambarentals.vercel.app/api/listings';
+const PROPERTIES_URL = 'https://sambarentals.vercel.app/api/properties';  // for cover images
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -22,7 +23,12 @@ export default async function handler(req, res) {
 
   try {
     // Fetch live data from the Samba portal
-    const portalRes = await fetch(PORTAL_URL);
+    // Pull listings (descriptions, rates, features) AND properties (cover photos)
+    // in parallel, then merge by hostexId so each rental gets its cover image.
+    const [portalRes, propsRes] = await Promise.all([
+      fetch(PORTAL_URL),
+      fetch(PROPERTIES_URL).catch(() => null)
+    ]);
     if (!portalRes.ok) {
       return res.status(500).json({ error: `Portal fetch failed: ${portalRes.status}` });
     }
@@ -32,8 +38,21 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'Portal returned no listings' });
     }
 
-    // Map portal listings → rentals schema
-    const rentals = listings.map((l, idx) => mapListingToRental(l, idx));
+    // Build hostexId → cover URL map (10/14 portal properties currently have one)
+    const coverMap = {};
+    if (propsRes && propsRes.ok) {
+      try {
+        const propsData = await propsRes.json();
+        const props = propsData?.data?.properties || [];
+        for (const p of props) {
+          const url = p?.cover?.large_url || p?.cover?.original_url;
+          if (p?.id && url) coverMap[String(p.id)] = url;
+        }
+      } catch (e) { /* non-fatal — covers stay null */ }
+    }
+
+    // Map portal listings → rentals schema (with cover lookup)
+    const rentals = listings.map((l, idx) => mapListingToRental(l, idx, coverMap));
 
     // Upsert to Supabase
     const headers = {
@@ -123,7 +142,7 @@ function guessPropertyType(listing) {
   return 'Apartment';
 }
 
-function mapListingToRental(l, idx) {
+function mapListingToRental(l, idx, coverMap = {}) {
   const features = l.features || [];
   const inclusions = l.inclusions || [];
   const locationHighlights = l.locationHighlights || [];
@@ -180,7 +199,7 @@ function mapListingToRental(l, idx) {
     maps_url: l.location || null,                             // Google Maps link from portal
     photos_url: l.folder ? `https://drive.google.com/drive/folders/${l.folder}` : null,  // Google Drive photos folder
     portal_url: `https://sambarentals.vercel.app/?property=${l.slug}`,
-    hero_image_url: null,
+    hero_image_url: (l.hostexId && coverMap[String(l.hostexId)]) || null,
     commission_pct: 10,
     maya_notes: mayaNotes,
     extended_info: extendedSections.join('\n\n')

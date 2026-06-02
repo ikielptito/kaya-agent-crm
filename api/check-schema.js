@@ -31,7 +31,9 @@ export default async function handler(req, res) {
     { name: 'campaigns.template_sequence', url: '/rest/v1/campaigns?select=template_sequence&limit=1' },
     { name: 'rentals table',           url: '/rest/v1/rentals?select=id&limit=1' },
     { name: 'rentals.photos_url',      url: '/rest/v1/rentals?select=photos_url&limit=1' },
-    { name: 'rentals.maps_url',        url: '/rest/v1/rentals?select=maps_url&limit=1' }
+    { name: 'rentals.maps_url',        url: '/rest/v1/rentals?select=maps_url&limit=1' },
+    { name: 'wa_messages.edited_at',   url: '/rest/v1/wa_messages?select=edited_at&limit=1' },
+    { name: 'wa_messages.deleted_at',  url: '/rest/v1/wa_messages?select=deleted_at&limit=1' }
   ];
 
   const results = [];
