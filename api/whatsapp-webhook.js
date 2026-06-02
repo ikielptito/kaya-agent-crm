@@ -34,7 +34,7 @@ async function loadRentals(supabaseUrl, sbHeaders) {
 function buildRentalsContext(rentals) {
   if (!rentals || rentals.length === 0) {
     return `SAMBA REALTY RENTAL PORTFOLIO:
-Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, and Seminyak. Commission is 10% per booking. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
+Samba Realty manages a portfolio of monthly rental properties across Canggu, Pererenan, and Seminyak. Agent commission is 10%. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
   }
   const blocks = rentals.map((p, i) => {
     // Samba rentals are long-term — quote monthly IDR only. Nightly fields exist
@@ -61,7 +61,7 @@ Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, 
       p.extended_info ? `   Details:\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null,
       links ? `   Links: ${links}` : null,
       p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
-      p.commission_pct ? `   Commission: ${p.commission_pct}% per booking` : null
+      p.commission_pct ? `   Agent commission: ${p.commission_pct}%` : null
     ].filter(Boolean);
     return lines.join('\n');
   });
@@ -598,7 +598,7 @@ ${rentalsContext || ''}
 
 WHICH PORTFOLIO TO REFERENCE:
 KAYA Sales = freehold/leasehold property SALES (Clay House, Tropical Townhouses, Palem Kembar, Sabit House, LaneHAUS). For agents looking to LIST properties for sale.
-Samba Realty = short-term RENTALS. For agents whose clients are looking for vacation/longer-stay accommodation, OR for agents who want to refer rental clients for a 10% commission per booking.
+Samba Realty = monthly RENTALS (30-night minimum, properties in Canggu / Pererenan / Seminyak). For agents whose clients are looking for longer-stay accommodation. Agent commission is 10%.
 Pick the right portfolio based on what the agent is asking about. If they're ambiguous, ask which side they're focused on (sales listings or rental referrals). Some agents do both.
 
 NAME-DROPPING IKIEL (important for cold rental agents):
