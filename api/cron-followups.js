@@ -131,12 +131,18 @@ export default async function handler(req, res) {
     // Load all approved WhatsApp templates so we can find the body text + language for sends
     const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
 
-    // ── PENDING DRAFTS FROM OFF-HOURS — auto-send at the start of business hours ─
+    // ── PENDING DRAFTS FROM OFF-HOURS — regenerate fresh + send at 9am WITA ─
     // When an inbound arrives between 9pm-9am WITA, the webhook generates a draft
-    // but doesn't send it. Now that business hours have started (this cron runs at
-    // 9am WITA), send those drafts via WhatsApp so agents get prompt morning replies.
-    // Only acts when global automation mode is 'autopilot' — hybrid/draft/off all
-    // require user review and aren't auto-released.
+    // but doesn't send it. At 9am we send a fresh response — but we ALWAYS
+    // regenerate via the suggest_reply server action rather than blindly sending
+    // the stored draft. This guarantees: (1) the latest prompts/anti-hallucination
+    // rules apply, (2) the latest portfolio/rentals data is used, (3) any
+    // additional messages the agent sent overnight are factored in.
+    //
+    // (We learned this the hard way: a draft generated with an early buggy prompt
+    // was sent verbatim by an early version of this cron — the stale draft
+    // hallucinated USD nightly rates instead of monthly IDR. Always-regenerate
+    // prevents that class of bug entirely.)
     let globalMode = 'draft';
     try {
       const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
@@ -144,27 +150,54 @@ export default async function handler(req, res) {
       if (sRow?.value?.mode) globalMode = sRow.value.mode;
     } catch (e) { /* default */ }
 
-    if (globalMode === 'autopilot') {
-      for (const agent of agents) {
-        // Skip if paused, off, or no draft to send
-        if (agent.automation_override === 'paused' || agent.automation_override === 'off') continue;
-        const draft = (agent.suggested_reply || '').trim();
-        if (!draft) continue;
-        // Skip if the draft is a system status message (always starts with "[")
-        if (draft.startsWith('[')) continue;
-        if (!agent.wa_num) continue;
+    const protoFromHost = req.headers['x-forwarded-proto'] || 'https';
+    const selfHost = req.headers.host;
+    const selfOrigin = selfHost ? `${protoFromHost}://${selfHost}` : null;
 
-        const sendOk = await sendText(WA_PHONE_ID, WA_TOKEN, agent.wa_num, draft);
+    if (globalMode === 'autopilot' && selfOrigin) {
+      for (const agent of agents) {
+        if (agent.automation_override === 'paused' || agent.automation_override === 'off') continue;
+        const existingDraft = (agent.suggested_reply || '').trim();
+        if (!existingDraft) continue;
+        if (existingDraft.startsWith('[')) continue;   // system status messages
+        if (!agent.wa_num) continue;
+        // Spend gate — regeneration costs ~$0.02 in Claude
+        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+          results.push({ agent: agent.name || agent.id, action: 'draft_skipped', reason: 'spend_cap' });
+          continue;
+        }
+
+        // REGENERATE the reply fresh using the canonical Maya prompt path
+        let freshReply = null;
+        try {
+          const sgRes = await fetch(`${selfOrigin}/api/supabase`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: agent.id } })
+          });
+          if (sgRes.ok) {
+            const sgData = await sgRes.json();
+            freshReply = (sgData?.reply || '').trim();
+          }
+        } catch (e) { /* fall through to skip */ }
+
+        if (!freshReply || freshReply.startsWith('[')) {
+          // Regeneration failed — DO NOT fall back to the stale draft. Skip and
+          // surface so Ikiel can review manually. Better silent than wrong.
+          results.push({ agent: agent.name || agent.id, action: 'draft_skipped', reason: 'regeneration_failed' });
+          continue;
+        }
+        todaySpend += COST_PER_REPLY_USD;
+
+        const sendOk = await sendText(WA_PHONE_ID, WA_TOKEN, agent.wa_num, freshReply);
         if (!sendOk) {
           results.push({ agent: agent.name || agent.id, action: 'draft_send_failed' });
           continue;
         }
-        // Log outbound + clear the draft + reset unread (matches inbox-reply behavior)
         await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
           method: 'POST', headers: sbHeaders,
           body: JSON.stringify({
             agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
-            content: draft, timestamp: now.toISOString(), source: 'cron'
+            content: freshReply, timestamp: now.toISOString(), source: 'cron'
           })
         }).catch(() => {});
         await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agent.id}`, {
@@ -173,7 +206,7 @@ export default async function handler(req, res) {
         }).catch(() => {});
 
         draftsSent++;
-        results.push({ agent: agent.name || agent.id, action: 'draft_auto_sent', preview: draft.slice(0, 80) });
+        results.push({ agent: agent.name || agent.id, action: 'draft_auto_sent', preview: freshReply.slice(0, 80) });
       }
     }
 
