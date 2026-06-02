@@ -103,6 +103,7 @@ export default async function handler(req, res) {
     let skipped = 0;
     let sequenceSent = 0;
     let sequenceCompleted = 0;
+    let draftsSent = 0;
 
     // Initial spend check — abort if already over cap from inbox auto-replies today
     let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
@@ -128,6 +129,52 @@ export default async function handler(req, res) {
     const campaignsMap = await loadCampaignsMap(SUPABASE_URL, sbHeaders);
     // Load all approved WhatsApp templates so we can find the body text + language for sends
     const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
+
+    // ── PENDING DRAFTS FROM OFF-HOURS — auto-send at the start of business hours ─
+    // When an inbound arrives between 9pm-9am WITA, the webhook generates a draft
+    // but doesn't send it. Now that business hours have started (this cron runs at
+    // 9am WITA), send those drafts via WhatsApp so agents get prompt morning replies.
+    // Only acts when global automation mode is 'autopilot' — hybrid/draft/off all
+    // require user review and aren't auto-released.
+    let globalMode = 'draft';
+    try {
+      const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
+      const sRow = (await sRes.json())?.[0];
+      if (sRow?.value?.mode) globalMode = sRow.value.mode;
+    } catch (e) { /* default */ }
+
+    if (globalMode === 'autopilot') {
+      for (const agent of agents) {
+        // Skip if paused, off, or no draft to send
+        if (agent.automation_override === 'paused' || agent.automation_override === 'off') continue;
+        const draft = (agent.suggested_reply || '').trim();
+        if (!draft) continue;
+        // Skip if the draft is a system status message (always starts with "[")
+        if (draft.startsWith('[')) continue;
+        if (!agent.wa_num) continue;
+
+        const sendOk = await sendText(WA_PHONE_ID, WA_TOKEN, agent.wa_num, draft);
+        if (!sendOk) {
+          results.push({ agent: agent.name || agent.id, action: 'draft_send_failed' });
+          continue;
+        }
+        // Log outbound + clear the draft + reset unread (matches inbox-reply behavior)
+        await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+          method: 'POST', headers: sbHeaders,
+          body: JSON.stringify({
+            agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+            content: draft, timestamp: now.toISOString(), source: 'cron'
+          })
+        }).catch(() => {});
+        await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agent.id}`, {
+          method: 'PATCH', headers: sbHeaders,
+          body: JSON.stringify({ suggested_reply: '', unread_count: 0 })
+        }).catch(() => {});
+
+        draftsSent++;
+        results.push({ agent: agent.name || agent.id, action: 'draft_auto_sent', preview: draft.slice(0, 80) });
+      }
+    }
 
     for (const agent of agents) {
       // Skip agents that Ikiel is handling manually (automation_override = 'paused')
@@ -289,6 +336,7 @@ export default async function handler(req, res) {
     return res.status(200).json({
       ran_at: now.toISOString(),
       total_agents: agents.length,
+      drafts_sent: draftsSent,
       listing_sent: sent, listing_stalled: stalled, skipped,
       sequence_sent: sequenceSent, sequence_completed: sequenceCompleted,
       pruned_wa_messages: pruned,
