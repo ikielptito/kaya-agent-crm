@@ -56,9 +56,10 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 /* PIPELINE TOGGLE */
 .pipeline-toggle { display: flex; background: var(--sand); border-radius: 8px; padding: 3px; gap: 2px; flex-shrink: 0; }
 .pipeline-btn { padding: 5px 14px; border-radius: 6px; border: none; font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--ink3); background: transparent; }
+.pipeline-btn.active-all { background: var(--ink); color: white; }
 .pipeline-btn.active-kaya { background: var(--kaya); color: white; }
 .pipeline-btn.active-samba { background: var(--samba); color: white; }
-.pipeline-btn:not(.active-kaya):not(.active-samba):hover { color: var(--ink); background: var(--sand2); }
+.pipeline-btn:not(.active-all):not(.active-kaya):not(.active-samba):hover { color: var(--ink); background: var(--sand2); }
 
 .header-controls { display: flex; align-items: center; gap: 8px; flex: 1; }
 .search-wrap { flex: 1; max-width: 260px; position: relative; }
@@ -630,11 +631,13 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   <div class="brand">
     <span class="brand-name" id="brandName">KAYA</span>
     <span class="brand-sep"></span>
-    <span class="brand-sub" id="brandSub">Sales CRM</span>
+    <span class="brand-sub" id="brandSub">CRM</span>
   </div>
-  <div class="pipeline-toggle">
-    <button class="pipeline-btn active-kaya" id="btnKaya" onclick="setPipeline('kaya')">KAYA Sales</button>
-    <button class="pipeline-btn" id="btnSamba" onclick="setPipeline('samba')">Samba Rentals</button>
+  <div class="pipeline-toggle" title="Filter the agent list. This is a view filter only — it does not affect the Inbox or campaigns.">
+    <span style="font-size:10px;color:var(--ink4);letter-spacing:0.04em;text-transform:uppercase;padding:0 8px 0 4px;align-self:center">View</span>
+    <button class="pipeline-btn active-all" id="btnAll" onclick="setPipeline('all')">All</button>
+    <button class="pipeline-btn" id="btnKaya" onclick="setPipeline('kaya')">Sales</button>
+    <button class="pipeline-btn" id="btnSamba" onclick="setPipeline('samba')">Rentals</button>
   </div>
   <div class="header-controls">
     <div class="search-wrap">
@@ -1238,7 +1241,7 @@ const AREA_QUERIES = {
   ]
 };
 
-let pipeline = 'kaya';
+let pipeline = 'all';  // view lens: 'all' | 'kaya' | 'samba'
 let activeStatusFilter = '';
 let activeTagFilter = '';
 let activeProjFilter = 'All';
@@ -1367,7 +1370,7 @@ function initials(name, agency) {
   return '?';
 }
 
-function getStatuses() { return pipeline === 'kaya' ? KAYA_STATUSES : SAMBA_STATUSES; }
+function getStatuses() { return pipeline === 'samba' ? SAMBA_STATUSES : KAYA_STATUSES; }
 
 function bestKayaStatus(a) {
   const proj = activeProjFilter !== 'All' ? activeProjFilter : null;
@@ -1383,7 +1386,7 @@ function bestKayaStatus(a) {
 function getSambaStatus(a) { return a.samba?.status || 'Not contacted'; }
 
 function getCurrentStatus(a) {
-  return pipeline === 'kaya' ? bestKayaStatus(a) : getSambaStatus(a);
+  return pipeline === 'samba' ? getSambaStatus(a) : bestKayaStatus(a);
 }
 
 function listedCount(a) {
@@ -1397,27 +1400,23 @@ function pillHtml(status) {
   </span>`;
 }
 
-// PIPELINE SWITCH
+// VIEW LENS — filters the agent grid only. NOT a mode: it does not affect the
+// Inbox or campaigns (those are pipeline-agnostic / use their own selector).
+// Values: 'all' (default, shows both tracks) | 'kaya' (focus sales) | 'samba' (focus rentals)
 function setPipeline(p) {
   pipeline = p;
   activeStatusFilter = '';
   activeProjFilter = 'All';
 
-  const isKaya = p === 'kaya';
-  document.getElementById('brandName').textContent = isKaya ? 'KAYA' : 'Samba';
-  document.getElementById('brandSub').textContent = isKaya ? 'Sales CRM' : 'Rentals CRM';
-  document.getElementById('btnKaya').className = 'pipeline-btn' + (isKaya ? ' active-kaya' : '');
-  document.getElementById('btnSamba').className = 'pipeline-btn' + (!isKaya ? ' active-samba' : '');
+  // Highlight the active lens button
+  document.getElementById('btnAll').className = 'pipeline-btn' + (p === 'all' ? ' active-all' : '');
+  document.getElementById('btnKaya').className = 'pipeline-btn' + (p === 'kaya' ? ' active-kaya' : '');
+  document.getElementById('btnSamba').className = 'pipeline-btn' + (p === 'samba' ? ' active-samba' : '');
 
-  const accentVar = isKaya ? 'var(--kaya)' : 'var(--samba)';
-  document.documentElement.style.setProperty('--accent', isKaya ? '#2d5a3d' : '#8b4513');
-  document.documentElement.style.setProperty('--accent-light', isKaya ? '#e8f0eb' : '#f5ede6');
-  document.documentElement.style.setProperty('--accent-mid', isKaya ? '#4a8a5e' : '#c4722a');
-
-  // discoverBtn is now in More menu — no class toggle needed
-  document.getElementById('campaignBtn').className = 'btn-campaign' + (!isKaya ? ' samba-mode' : '');
-  document.getElementById('addBtn').className = 'btn-add' + (!isKaya ? ' samba-mode' : '');
-  document.getElementById('drawerSaveBtn').className = 'btn-primary' + (!isKaya ? ' samba' : '');
+  // Brand wordmark stays constant — this is one unified CRM, not two apps.
+  // (We deliberately no longer swap the brand name or recolor the whole app on
+  //  toggle; that was what made the filter feel like a separate "mode".)
+  document.getElementById('brandSub').textContent = 'CRM';
 
   render();
 }
@@ -1537,7 +1536,7 @@ function renderCards() {
 
   grid.innerHTML = filtered.map(a => {
     const waNum = getWaNum(a);
-    const msg = pipeline === 'kaya' ? KAYA_MSG(a.name) : SAMBA_MSG(a.name);
+    const msg = pipeline === 'samba' ? SAMBA_MSG(a.name) : KAYA_MSG(a.name);
     const waUrl = waNum ? buildWaUrl(waNum) + '?text=' + encodeURIComponent(msg) : '';
     const ini = initials(a.name, a.agency);
     const lc = listedCount(a);
@@ -1572,7 +1571,7 @@ function renderCards() {
         <div class="coverage-label">Project coverage</div>
         <div class="proj-dots">${projRows}</div>
       </div>`;
-    } else {
+    } else if (pipeline === 'samba') {
       const ss = getSambaStatus(a);
       const kayaBest = bestKayaStatus(a);
       coverageHtml = `<div class="samba-coverage">
@@ -1580,6 +1579,21 @@ function renderCards() {
         <div class="samba-status-row">
           ${pillHtml(ss)}
           ${kayaBest !== 'Not contacted' ? `<span style="font-size:10px;color:var(--ink4)">Also: KAYA ${kayaBest}</span>` : ''}
+        </div>
+      </div>`;
+    } else {
+      // ALL view — compact dual-track summary so you see both relationships at a glance
+      const kayaBest = bestKayaStatus(a);
+      const ss = getSambaStatus(a);
+      coverageHtml = `<div class="coverage-section">
+        <div class="dual-track-row" style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:var(--kaya);width:48px;flex-shrink:0">SALES</span>
+          ${pillHtml(kayaBest)}
+          ${lc > 0 ? `<span style="font-size:9px;color:var(--ink4)">${lc} listed</span>` : ''}
+        </div>
+        <div class="dual-track-row" style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:9px;font-weight:600;letter-spacing:0.04em;color:var(--samba);width:48px;flex-shrink:0">RENTALS</span>
+          ${pillHtml(ss)}
         </div>
       </div>`;
     }
@@ -3575,7 +3589,16 @@ function updateCampaignPreview() {
   const attachCount = campaignAttachments.length;
   const el = document.getElementById('cbPreviewCount');
   const attachLabel = attachCount > 0 ? ` · ${attachCount} attachment${attachCount !== 1 ? 's' : ''}` : '';
-  if (el) el.innerHTML = `<strong style="color:var(--ink)">${count} agent${count !== 1 ? 's' : ''}</strong> match${attachLabel}`;
+  // Show the campaign's pipeline as an unambiguous chip so there's never confusion
+  // about whether this blast is sales or rentals (independent of the grid lens).
+  const pipe = getCampaignPipeline();
+  const pipeMeta = pipe === 'samba'
+    ? { label: 'SAMBA RENTALS', color: 'var(--samba)', bg: 'var(--samba-light)' }
+    : pipe === 'both'
+      ? { label: 'KAYA + SAMBA', color: 'var(--ink2)', bg: 'var(--sand2)' }
+      : { label: 'KAYA SALES', color: 'var(--kaya)', bg: 'var(--kaya-light)' };
+  const pipeChip = `<span style="display:inline-block;font-size:10px;font-weight:600;letter-spacing:0.04em;padding:2px 8px;border-radius:5px;color:${pipeMeta.color};background:${pipeMeta.bg};margin-right:8px">${pipeMeta.label}</span>`;
+  if (el) el.innerHTML = `${pipeChip}<strong style="color:var(--ink)">${count} agent${count !== 1 ? 's' : ''}</strong> match${attachLabel}`;
 }
 
 function updateAttachments() {
@@ -3784,7 +3807,9 @@ async function renderCampaignAgent() {
     updateCampaignProgress();
     return;
   }
-  const isSamba = pipeline === 'samba';
+  // Use the CAMPAIGN's pipeline, not the global view lens — a campaign is
+  // explicitly sales or rentals regardless of which lens the grid is on.
+  const isSamba = getCampaignPipeline() === 'samba';
   const waNum = getWaNum(a);
   const ini = initials(a.name, a.agency);
 
@@ -3887,7 +3912,7 @@ async function generateCampaignMsg(agentId) {
   if (btn) btn.disabled = true;
   if (generating) generating.classList.add('show');
 
-  const isSamba = pipeline === 'samba';
+  const isSamba = getCampaignPipeline() === 'samba';  // campaign's pipeline, not global lens
   const agentContext = buildAgentContext(a);
   const firstName = a.name ? a.name.split(' ')[0] : (a.agency || 'there');
 
@@ -4848,10 +4873,16 @@ async function renderInbox(silent) {
     const time = lastTs ? timeAgo(new Date(lastTs)) : '';
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
     const snippet = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
+    // Tiny track indicator: which relationship(s) this agent has activity in.
+    const hasKaya = bestKayaStatus(a) !== 'Not contacted';
+    const hasSamba = getSambaStatus(a) !== 'Not contacted';
+    let trackDots = '';
+    if (hasKaya) trackDots += `<span title="Sales-active" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--kaya);margin-left:3px"></span>`;
+    if (hasSamba) trackDots += `<span title="Rentals-active" style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--samba);margin-left:3px"></span>`;
     return `<div class="inbox-conv ${a.id === activeConvId ? 'active' : ''}" onclick="openConversation(${a.id})">
       <div class="inbox-conv-avatar">${ini}</div>
       <div class="inbox-conv-info">
-        <div class="inbox-conv-name">${a.name || a.agency || '+' + a.wa_num}</div>
+        <div class="inbox-conv-name">${a.name || a.agency || '+' + a.wa_num}${trackDots}</div>
         <div class="inbox-conv-snippet">${snippet.replace(/</g,'&lt;')}</div>
       </div>
       <div class="inbox-conv-meta">
