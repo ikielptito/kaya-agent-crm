@@ -4931,15 +4931,23 @@ async function suggestReply(agentId) {
   const a = agents.find(x => x.id === agentId);
   if (!a) return;
   const box = document.getElementById('replyBox');
-  if (box) { box.value = 'Claude is thinking...'; box.disabled = true; }
+  if (box) { box.value = 'Maya is thinking...'; box.disabled = true; }
   try {
-    const system = `You are replying to a real estate agent on WhatsApp on behalf of Ikiel from KAYA Developments in Bali.\n\n${PORTFOLIO_CONTEXT}\n\nTone: warm, conversational, concise, no emojis, no em dashes, sound like a real person, never mention AI. Write only the reply text.`;
-    const userPrompt = `${buildAgentContext(a)}\n\nWrite a helpful WhatsApp reply to this agent based on the conversation history above. If they asked a question, answer it accurately from the portfolio info.`;
-    const reply = await callClaude(system, userPrompt);
-    if (box) { box.value = reply.trim(); box.disabled = false; }
+    // Routes through the server-side suggest_reply action which mirrors the
+    // webhook's Maya: MAYA_PERSONA + live projects/rentals DB + anti-hallucination
+    // rules + recent wa_messages thread. Same source of truth as autopilot replies.
+    const r = await fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'suggest_reply', payload: { agentId } })
+    });
+    const data = await r.json();
+    if (!r.ok || data.error) {
+      throw new Error(data.error || ('HTTP ' + r.status));
+    }
+    if (box) { box.value = (data.reply || '').trim(); box.disabled = false; }
   } catch(e) {
     if (box) { box.value = ''; box.disabled = false; }
-    alert('Could not generate a suggestion. Try again.');
+    alert('Could not generate a suggestion: ' + e.message);
   }
 }
 

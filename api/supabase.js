@@ -1,3 +1,5 @@
+import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -294,6 +296,84 @@ export default async function handler(req, res) {
         })
       });
       return res.status(200).json({ success: true, count: testAgents.length, agents: testAgents });
+
+    } else if (action === 'suggest_reply') {
+      // Server-side reply generation that mirrors the webhook's Maya — uses live
+      // projects + rentals DB, MAYA_PERSONA, anti-hallucination rules, recent
+      // wa_messages thread. Replaces the old client-side suggestReply which
+      // hallucinated badly (pretended to be Ikiel, used hardcoded fallback data).
+      const { agentId } = payload || {};
+      if (!agentId) return res.status(400).json({ error: 'agentId required' });
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+
+      // Load agent
+      const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=*`, { headers });
+      const agent = (await aRes.json())?.[0];
+      if (!agent) return res.status(404).json({ error: 'Agent not found' });
+
+      // Load projects + rentals
+      const [pRes, rRes] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/projects?select=*&active=eq.true&order=display_order.asc`, { headers }),
+        fetch(`${SUPABASE_URL}/rest/v1/rentals?select=*&active=eq.true&order=display_order.asc`, { headers })
+      ]);
+      const projects = await pRes.json();
+      const rentals = await rRes.json();
+
+      // Load recent thread (both directions, oldest→newest)
+      const tRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${agentId}&order=timestamp.desc&limit=30`, { headers });
+      const rows = await tRes.json();
+      const thread = Array.isArray(rows) ? rows.slice().reverse().map(m => {
+        const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
+        const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
+        return `[${t}] ${sender}: ${(m.content || '').slice(0, 200)}`;
+      }).join('\n') : '';
+
+      // Build portfolio + rentals context (simplified versions, just what's needed)
+      const portfolioCtx = projects?.length > 0
+        ? `KAYA SALES PORTFOLIO (live):\n${projects.map((p,i) => `${i+1}. ${p.name} -- ${p.area || ''} -- ${p.tagline || ''} -- units: ${(p.units||[]).filter(u => !u.availability || u.availability === 'Available').length} available -- commission ${p.commission_pct || 5}%`).join('\n')}`
+        : FALLBACK_PORTFOLIO;
+      const rentalsCtx = rentals?.length > 0
+        ? `SAMBA RENTAL PORTFOLIO (live, monthly IDR only):\n${rentals.map((r,i) => {
+            const rate = r.monthly_rate_idr ? `IDR ${(r.monthly_rate_idr/1e6).toFixed(0)}M/month` : 'rate TBC';
+            const cap = [r.beds && `${r.beds}BR`, r.max_guests && `sleeps ${r.max_guests}`].filter(Boolean).join(', ');
+            const links = [r.photos_url && `photos: ${r.photos_url}`, r.maps_url && `map: ${r.maps_url}`].filter(Boolean).join(' · ');
+            return `${i+1}. ${r.name} (${r.area || '?'}) -- ${r.property_type || 'Property'}${cap ? ', ' + cap : ''} -- ${rate}${links ? ' -- ' + links : ''}`;
+          }).join('\n')}\n\nSAMBA HARD RULES: Quote MONTHLY IDR only. Never nightly USD. Never invent prices, beds, locations, types. Missing field → "let me check with Ikiel". Photos → share photos_url. Location → share maps_url.`
+        : '';
+
+      const system = `${MAYA_PERSONA}
+
+${portfolioCtx}
+
+${rentalsCtx}
+
+This agent's context:
+Name: ${agent.name || 'unknown'}
+Agency: ${agent.agency || 'independent'}
+
+Recent message thread (oldest → newest):
+${thread || '(no prior history)'}
+
+Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent's most recent message. Output ONLY the reply text — no JSON, no preamble, no quotes. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.`;
+
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 500,
+            system,
+            messages: [{ role: 'user', content: 'Generate the reply now.' }]
+          })
+        });
+        const data = await r.json();
+        const reply = (data.content?.[0]?.text || '').trim();
+        return res.status(200).json({ reply });
+      } catch (e) {
+        return res.status(500).json({ error: 'Claude call failed: ' + e.message });
+      }
 
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });
