@@ -1,5 +1,6 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
+import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -245,15 +246,12 @@ export default async function handler(req, res) {
       unread_count: (agent.unread_count || 0) + 1
     };
 
-    // STOP CAMPAIGN SEQUENCE — any inbound message stops the active campaign
-    // template sequence for this agent. Their conversation is now live.
-    if (agent.campaign_engagement && agent.campaign_engagement.status === 'pending') {
-      patch.campaign_engagement = {
-        ...agent.campaign_engagement,
-        status: 'responded',
-        responded_at: timestamp,
-        next_template_at: null
-      };
+    // STOP CAMPAIGN SEQUENCES — any inbound message stops ALL active sequences
+    // for this agent (across both KAYA and Samba pipelines). The conversation
+    // is now live; proactive follow-ups should pause regardless of pipeline.
+    const stopResult = stopAllPending(agent.campaign_engagement, timestamp);
+    if (stopResult.changed) {
+      patch.campaign_engagement = stopResult.value;
     }
 
     // PAUSED — Ikiel is handling this thread, Maya stays silent. Just log + mark unread.
@@ -301,11 +299,13 @@ export default async function handler(req, res) {
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
     const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
     // If this agent is engaged in an active campaign, fetch the campaign's context
-    // so Maya knows the specific focus / promo / framing for this batch.
+    // so Maya knows the specific focus / promo / framing for this batch. With two
+    // possible engagements (KAYA + Samba), use the most-recently-active one.
     let campaignContext = null;
-    if (agent.campaign_engagement?.campaign_id) {
+    const recentEng = mostRecentEngagement(agent.campaign_engagement);
+    if (recentEng?.eng?.campaign_id) {
       try {
-        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${agent.campaign_engagement.campaign_id}&select=name,context,purpose`, { headers: sbHeaders });
+        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${recentEng.eng.campaign_id}&select=name,context,purpose`, { headers: sbHeaders });
         const cRow = (await cRes.json())?.[0];
         if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
       } catch (e) { /* non-fatal */ }

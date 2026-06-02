@@ -1862,15 +1862,47 @@ function renderStageInfo(projectName, proj) {
 
 function escAttr(s) { return String(s).replace(/'/g, "\\'"); }
 
-// ── CAMPAIGN ENGAGEMENT (sequence state per agent) ───────────────────────
-function renderCampaignEngagement(a) {
-  const eng = a.campaign_engagement;
-  if (!eng || !eng.campaign_id) return '';
+// ── ENGAGEMENT HELPERS (per-pipeline) — mirror of lib/engagement.js ──────
+// campaign_engagement is keyed { kaya:{...}, samba:{...} }. Older flat records
+// ({campaign_id,...}) are normalised into a single pipeline bucket.
+function normEng(ce) {
+  if (!ce || typeof ce !== 'object') return {};
+  if ('kaya' in ce || 'samba' in ce) {
+    const out = {};
+    if (ce.kaya) out.kaya = ce.kaya;
+    if (ce.samba) out.samba = ce.samba;
+    return out;
+  }
+  if (ce.campaign_id) { const pl = ce.pipeline === 'samba' ? 'samba' : 'kaya'; return { [pl]: { ...ce, pipeline: pl } }; }
+  return {};
+}
+function setEng(ce, pipeline, newEng) {
+  const norm = normEng(ce);
+  if (newEng) norm[pipeline] = { ...newEng, pipeline };
+  else delete norm[pipeline];
+  return norm;
+}
 
+// ── CAMPAIGN ENGAGEMENT (sequence state per agent, per pipeline) ─────────
+function renderCampaignEngagement(a) {
+  const norm = normEng(a.campaign_engagement);
+  const strips = [];
+  for (const pl of ['kaya', 'samba']) {
+    const eng = norm[pl];
+    if (!eng || !eng.campaign_id) continue;
+    strips.push(renderEngagementStrip(a, pl, eng));
+  }
+  return strips.join('');
+}
+
+function renderEngagementStrip(a, pl, eng) {
   const camp = (campaignsList || []).find(c => c.id === eng.campaign_id);
   const seq = camp?.template_sequence || [];
   const stepNum = (eng.sequence_index || 0) + 1;
   const totalSteps = seq.length || 1;
+  const plMeta = pl === 'samba'
+    ? { label: 'RENTALS', color: 'var(--samba)' }
+    : { label: 'SALES', color: 'var(--kaya)' };
   const statusMeta = {
     pending: { label: 'Active', color: '#1e40af', bg: '#dbeafe' },
     responded: { label: 'Replied', color: '#166534', bg: '#dcfce7' },
@@ -1881,7 +1913,7 @@ function renderCampaignEngagement(a) {
   const detailParts = [];
   if (eng.last_template_sent) detailParts.push(`<code style="background:white;padding:1px 5px;border-radius:3px">${eng.last_template_sent}</code> sent ${formatRelativeDate(eng.last_template_sent_at)}`);
   if (eng.status === 'pending' && eng.next_template_at) {
-    const nextStep = seq[stepNum]; // next step (0-indexed)
+    const nextStep = seq[stepNum];
     detailParts.push(`next: <code style="background:white;padding:1px 5px;border-radius:3px">${nextStep?.template_name || '?'}</code> ${formatRelativeDate(eng.next_template_at)}`);
   }
   if (eng.status === 'responded' && eng.responded_at) {
@@ -1890,9 +1922,9 @@ function renderCampaignEngagement(a) {
 
   const actions = [];
   if (eng.status === 'pending') {
-    actions.push(`<button onclick="sendNextSequenceNow(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif" title="Fires the next template immediately, bypassing the wait_days schedule">▶ Send next now</button>`);
-    actions.push(`<button onclick="skipNextSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">⏭ Skip next</button>`);
-    actions.push(`<button onclick="stopSequence(${a.id})" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Stop sequence</button>`);
+    actions.push(`<button onclick="sendNextSequenceNow(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif" title="Fires the next template immediately, bypassing the wait schedule">▶ Send next now</button>`);
+    actions.push(`<button onclick="skipNextSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">⏭ Skip next</button>`);
+    actions.push(`<button onclick="stopSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Stop</button>`);
   }
 
   return `
@@ -1900,6 +1932,7 @@ function renderCampaignEngagement(a) {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:8px">
           <span style="font-size:13px">🎯</span>
+          <span style="font-size:9px;font-weight:700;letter-spacing:0.04em;color:${plMeta.color}">${plMeta.label}</span>
           <strong style="color:var(--ink2)">${camp ? camp.name : 'Campaign'}</strong>
           <span style="display:inline-block;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;color:${statusMeta.color};background:${statusMeta.bg}">${statusMeta.label.toUpperCase()}</span>
           <span style="color:var(--ink4)">step ${stepNum}/${totalSteps}</span>
@@ -1911,62 +1944,51 @@ function renderCampaignEngagement(a) {
   `;
 }
 
-async function skipNextSequence(agentId) {
+async function skipNextSequence(agentId, pl) {
   const a = agents.find(x => x.id === agentId);
-  if (!a || !a.campaign_engagement) return;
+  if (!a) return;
+  const eng = normEng(a.campaign_engagement)[pl];
+  if (!eng) return;
   const pushed = new Date(Date.now() + 7 * 86400000).toISOString();
-  const updated = { ...a.campaign_engagement, next_template_at: pushed };
-  a.campaign_engagement = updated;
-  await saveAgent(a.id, { campaign_engagement: updated });
+  const merged = setEng(a.campaign_engagement, pl, { ...eng, next_template_at: pushed });
+  a.campaign_engagement = merged;
+  await saveAgent(a.id, { campaign_engagement: merged });
   openDrawer(agentId);
 }
 
-async function stopSequence(agentId) {
+async function stopSequence(agentId, pl) {
   const a = agents.find(x => x.id === agentId);
-  if (!a || !a.campaign_engagement) return;
-  if (!confirm('Stop the template sequence for this agent? No further follow-ups will be sent.')) return;
-  const updated = { ...a.campaign_engagement, status: 'stopped', next_template_at: null };
-  a.campaign_engagement = updated;
-  await saveAgent(a.id, { campaign_engagement: updated });
+  if (!a) return;
+  const eng = normEng(a.campaign_engagement)[pl];
+  if (!eng) return;
+  if (!confirm('Stop this template sequence? No further follow-ups will be sent on this track.')) return;
+  const merged = setEng(a.campaign_engagement, pl, { ...eng, status: 'stopped', next_template_at: null });
+  a.campaign_engagement = merged;
+  await saveAgent(a.id, { campaign_engagement: merged });
   openDrawer(agentId);
 }
 
-// Force the next sequence step to fire NOW, bypassing the wait_days schedule.
-// Sends the next template directly via /api/whatsapp-send (avoids the cron
-// endpoint's auth gate). Updates campaign_engagement to reflect the send.
-async function sendNextSequenceNow(agentId) {
+// Force the next sequence step to fire NOW for a specific pipeline.
+async function sendNextSequenceNow(agentId, pl) {
   const a = agents.find(x => x.id === agentId);
-  if (!a || !a.campaign_engagement) return;
+  if (!a) return;
+  const eng = normEng(a.campaign_engagement)[pl];
+  if (!eng) return;
 
-  // Resolve the campaign + next step
-  const eng = a.campaign_engagement;
   const camp = (campaignsList || []).find(c => c.id === eng.campaign_id);
-  if (!camp) {
-    alert('Could not find the campaign for this agent. Make sure it still exists.');
-    return;
-  }
+  if (!camp) { alert('Could not find the campaign for this agent. Make sure it still exists.'); return; }
   const seq = camp.template_sequence || [];
   const nextIdx = (eng.sequence_index || 0) + 1;
   const nextStep = seq[nextIdx];
-  if (!nextStep) {
-    alert('No more steps in the sequence. Already on the last one.');
-    return;
-  }
+  if (!nextStep) { alert('No more steps in the sequence. Already on the last one.'); return; }
 
-  // Find the template in the loaded Meta templates list
   const tmpl = waTemplates.find(t => t.name === nextStep.template_name);
-  if (!tmpl) {
-    alert(`Template "${nextStep.template_name}" not found in your Meta approved list. Refresh templates and try again.`);
-    return;
-  }
+  if (!tmpl) { alert(`Template "${nextStep.template_name}" not found in your Meta approved list. Refresh templates and try again.`); return; }
 
   if (!confirm(`Send "${nextStep.template_name}" to ${a.name || 'this agent'} right now?\n\nThis bypasses the normal ${nextStep.wait_days || 1}-day wait between steps.`)) return;
 
   const waNum = getWaNum(a);
-  if (!waNum) {
-    alert('No WhatsApp number on this agent.');
-    return;
-  }
+  if (!waNum) { alert('No WhatsApp number on this agent.'); return; }
 
   try {
     const resp = await fetch('/api/whatsapp-send', {
@@ -1981,23 +2003,19 @@ async function sendNextSequenceNow(agentId) {
       })
     });
     const data = await resp.json();
-    if (!resp.ok || !data.success) {
-      alert(`Send failed: ${data.error || resp.status}`);
-      return;
-    }
+    if (!resp.ok || !data.success) { alert(`Send failed: ${data.error || resp.status}`); return; }
 
-    // Advance the engagement state to match what the cron would do
     const afterNext = seq[nextIdx + 1];
     const newNextAt = afterNext ? new Date(Date.now() + (afterNext.wait_days || 1) * 86400000).toISOString() : null;
-    const updated = {
+    const merged = setEng(a.campaign_engagement, pl, {
       ...eng,
       sequence_index: nextIdx,
       last_template_sent: nextStep.template_name,
       last_template_sent_at: new Date().toISOString(),
       next_template_at: newNextAt
-    };
-    a.campaign_engagement = updated;
-    await saveAgent(a.id, { campaign_engagement: updated });
+    });
+    a.campaign_engagement = merged;
+    await saveAgent(a.id, { campaign_engagement: merged });
 
     alert(`✓ Sent "${nextStep.template_name}". Check the agent's WhatsApp.\n\n${afterNext ? `Next step (${afterNext.template_name}) scheduled for ${new Date(newNextAt).toLocaleString()}.` : 'This was the last step — sequence will complete after the next cron run.'}`);
     openDrawer(agentId);
@@ -4291,7 +4309,7 @@ async function runAutopilotCampaign() {
         // Resolve the sequence from the SAVED campaign (campaignsList) rather than
         // the in-memory campaignSequence — the former is the source of truth and
         // can't get truncated by UI race conditions.
-        let engagementPatch = null;
+        let engagementMerged = null;
         const savedCampaign = (campaignsList || []).find(cc => cc.id === currentCampaignId);
         const effectiveSequence = (savedCampaign?.template_sequence && savedCampaign.template_sequence.length > 0)
           ? savedCampaign.template_sequence
@@ -4299,20 +4317,23 @@ async function runAutopilotCampaign() {
         if (useTemplate && effectiveSequence.length > 1) {
           const nextWait = effectiveSequence[1]?.wait_days || 1;
           const nextAt = new Date(Date.now() + nextWait * 86400000).toISOString();
-          engagementPatch = {
+          // Write into the bucket for THIS campaign's pipeline, preserving the
+          // other pipeline's engagement (an agent can be in both at once).
+          const engPipeline = (savedCampaign?.pipeline === 'samba' || getCampaignPipeline() === 'samba') ? 'samba' : 'kaya';
+          engagementMerged = setEng(a.campaign_engagement, engPipeline, {
             campaign_id: currentCampaignId,
             sequence_index: 0,
             last_template_sent: effectiveSequence[0].template_name,
             last_template_sent_at: new Date().toISOString(),
             next_template_at: nextAt,
             status: 'pending'
-          };
-          a.campaign_engagement = engagementPatch;
+          });
+          a.campaign_engagement = engagementMerged;
         }
 
         saveAgent(a.id, {
           last_campaign_sent: today, notes: a.notes, projects: a.projects, samba: a.samba,
-          ...(engagementPatch ? { campaign_engagement: engagementPatch } : {})
+          ...(engagementMerged ? { campaign_engagement: engagementMerged } : {})
         });
 
         log[0] = { icon: useTemplate ? '📋✅' : '✅', name: agentName, detail: sentDetail.slice(0, 80) + (sentDetail.length > 80 ? '...' : '') };

@@ -15,6 +15,7 @@
 // Each follow-up gets progressively softer in tone.
 
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -184,73 +185,71 @@ export default async function handler(req, res) {
         continue;
       }
 
-      // ── CAMPAIGN SEQUENCE FOLLOW-UP ─────────────────────────────────
-      // If this agent is in a pending campaign sequence and their next template
-      // is due, send the next step.
-      const eng = agent.campaign_engagement;
-      if (eng && eng.status === 'pending' && eng.next_template_at) {
+      // ── CAMPAIGN SEQUENCE FOLLOW-UPS (per pipeline) ─────────────────
+      // An agent can have one pending sequence per pipeline (KAYA + Samba).
+      // Process each independently so one doesn't clobber the other.
+      for (const { pipeline: engPl, eng } of pendingEngagements(agent.campaign_engagement)) {
+        if (!eng.next_template_at) continue;
         const dueAt = new Date(eng.next_template_at);
-        if (dueAt <= now) {
-          const campaign = campaignsMap[eng.campaign_id];
-          const sequence = campaign?.template_sequence || [];
-          const nextIdx = (eng.sequence_index || 0) + 1;
-          const nextStep = sequence[nextIdx];
+        if (dueAt > now) continue;
 
-          if (!nextStep) {
-            // End of sequence — mark completed
-            await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent.id, {
-              ...eng,
-              status: 'completed_sequence',
-              next_template_at: null,
-              completed_at: now.toISOString()
-            });
-            sequenceCompleted++;
-            results.push({ agent: agent.name || agent.id, type: 'sequence_completed', campaign: campaign?.name });
-          } else {
-            // Spend gate
-            if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
-              results.push({ agent: agent.name || agent.id, type: 'sequence_skipped', reason: 'spend_cap' });
-              continue;
-            }
-            // Send the next template
-            const tmpl = templatesMap[nextStep.template_name];
-            if (!tmpl) {
-              results.push({ agent: agent.name || agent.id, type: 'sequence_skipped', reason: 'template_not_found:' + nextStep.template_name });
-              continue;
-            }
-            const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
-            const renderedBody = (tmpl.body || '').replace(/\{\{1\}\}/g, firstName);
-            const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
-            if (!ok) {
-              results.push({ agent: agent.name || agent.id, type: 'sequence_send_failed', template: nextStep.template_name });
-              continue;
-            }
-            // Log outbound
-            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-              method: 'POST', headers: sbHeaders,
-              body: JSON.stringify({
-                agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
-                content: renderedBody, timestamp: now.toISOString(),
-                source: 'cron', campaign_id: eng.campaign_id
-              })
-            }).catch(() => {});
-            // Advance engagement state
-            const waitDays = (sequence[nextIdx + 1]?.wait_days) || 1;
-            const nextTemplateAt = sequence[nextIdx + 1]
-              ? new Date(now.getTime() + waitDays * 86400000).toISOString()
-              : null;
-            await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent.id, {
-              ...eng,
-              sequence_index: nextIdx,
-              last_template_sent: nextStep.template_name,
-              last_template_sent_at: now.toISOString(),
-              next_template_at: nextTemplateAt
-            });
-            sequenceSent++;
-            todaySpend += COST_PER_REPLY_USD;
-            results.push({ agent: agent.name || agent.id, type: 'sequence_sent', template: nextStep.template_name, step: nextIdx + 1, of: sequence.length });
-          }
+        const campaign = campaignsMap[eng.campaign_id];
+        const sequence = campaign?.template_sequence || [];
+        const nextIdx = (eng.sequence_index || 0) + 1;
+        const nextStep = sequence[nextIdx];
+
+        if (!nextStep) {
+          // End of sequence — mark completed (only this pipeline's bucket)
+          await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent, engPl, {
+            ...eng,
+            status: 'completed_sequence',
+            next_template_at: null,
+            completed_at: now.toISOString()
+          });
+          sequenceCompleted++;
+          results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_completed', campaign: campaign?.name });
+          continue;
         }
+
+        // Spend gate
+        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+          results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_skipped', reason: 'spend_cap' });
+          continue;
+        }
+        const tmpl = templatesMap[nextStep.template_name];
+        if (!tmpl) {
+          results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_skipped', reason: 'template_not_found:' + nextStep.template_name });
+          continue;
+        }
+        const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+        const renderedBody = (tmpl.body || '').replace(/\{\{1\}\}/g, firstName);
+        const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
+        if (!ok) {
+          results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_send_failed', template: nextStep.template_name });
+          continue;
+        }
+        await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+          method: 'POST', headers: sbHeaders,
+          body: JSON.stringify({
+            agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+            content: renderedBody, timestamp: now.toISOString(),
+            source: 'cron', campaign_id: eng.campaign_id
+          })
+        }).catch(() => {});
+        const waitDays = (sequence[nextIdx + 1]?.wait_days) || 1;
+        const nextTemplateAt = sequence[nextIdx + 1]
+          ? new Date(now.getTime() + waitDays * 86400000).toISOString()
+          : null;
+        await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent, engPl, {
+          ...eng,
+          sequence_index: nextIdx,
+          last_template_sent: nextStep.template_name,
+          last_template_sent_at: now.toISOString(),
+          next_template_at: nextTemplateAt
+        });
+        sequenceSent++;
+        todaySpend += COST_PER_REPLY_USD;
+        results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_sent', template: nextStep.template_name, step: nextIdx + 1, of: sequence.length });
       }
 
       // ── LISTING LIFECYCLE FOLLOW-UPS (existing logic below) ─────────
@@ -452,11 +451,16 @@ async function sendTemplate(phoneId, token, to, tmpl, params) {
   } catch (e) { return false; }
 }
 
-async function patchAgentEngagement(url, headers, agentId, engagement) {
+// Merge an engagement into ONE pipeline bucket, preserving the other pipeline's
+// engagement. Mutates the in-memory agent too so a later iteration in the same
+// cron run builds on the updated state rather than clobbering it.
+async function patchAgentEngagement(url, headers, agent, pipeline, engagement) {
+  const merged = setEngagement(agent.campaign_engagement, pipeline, engagement);
+  agent.campaign_engagement = merged; // keep in-memory copy current
   try {
-    await fetch(`${url}/rest/v1/agents?id=eq.${agentId}`, {
+    await fetch(`${url}/rest/v1/agents?id=eq.${agent.id}`, {
       method: 'PATCH', headers,
-      body: JSON.stringify({ campaign_engagement: engagement })
+      body: JSON.stringify({ campaign_engagement: merged })
     });
   } catch (e) { /* non-fatal */ }
 }
