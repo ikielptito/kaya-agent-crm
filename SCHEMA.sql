@@ -87,6 +87,8 @@ alter table projects add column if not exists extended_info text;
 
 alter table rentals add column if not exists monthly_rate_idr numeric;
 alter table rentals add column if not exists yearly_rate_idr numeric;
+alter table rentals add column if not exists photos_url text;       -- Google Drive folder for listing photos
+alter table rentals add column if not exists maps_url text;         -- Google Maps location link
 
 -- ── CAMPAIGNS COLUMN (added incrementally) ──────────────────────────
 

@@ -36,23 +36,25 @@ function buildRentalsContext(rentals) {
 Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, and Seminyak. Commission is 10% per booking. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
   }
   const blocks = rentals.map((p, i) => {
-    // Build rate string covering both long-term (monthly/yearly) and short-term (nightly)
-    const rateParts = [];
-    if (p.monthly_rate_idr) rateParts.push(`IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/mo`);
-    if (p.yearly_rate_idr) rateParts.push(`IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/yr`);
-    if (p.nightly_rate_usd) rateParts.push(`$${p.nightly_rate_usd}/night`);
-    else if (p.nightly_rate_idr) rateParts.push(`IDR ${(p.nightly_rate_idr / 1e3).toFixed(0)}K/night`);
-    const rate = rateParts.length ? rateParts.join(' / ') : 'rate TBC';
+    // Samba rentals are long-term — quote monthly IDR only. Nightly fields exist
+    // in the schema for short-term Airbnb scenarios but are NOT surfaced to Maya
+    // by default to prevent her quoting them when agents expect monthly.
+    const rate = p.monthly_rate_idr
+      ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` + (p.yearly_rate_idr ? ` (or IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year)` : '')
+      : 'rate TBC — say "let me check with Ikiel"';
 
     const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
     const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
-    const monthly = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo actual revenue` : null;
-    const links = [p.portal_url && `portal: ${p.portal_url}`, p.airbnb_url && `airbnb: ${p.airbnb_url}`, p.booking_url && `booking: ${p.booking_url}`].filter(Boolean).join(' · ');
+    const actualRev = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo actual revenue` : null;
+    const photoLink = p.photos_url ? `photos: ${p.photos_url}` : null;
+    const mapsLink = p.maps_url ? `map: ${p.maps_url}` : null;
+    const portalLink = p.portal_url ? `portal: ${p.portal_url}` : null;
+    const links = [photoLink, mapsLink, portalLink].filter(Boolean).join(' · ');
     const lines = [
       `${i + 1}. ${p.name.toUpperCase()}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
       p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
       `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
-      occ || monthly ? `   Performance: ${[occ, monthly].filter(Boolean).join(', ')}` : null,
+      occ || actualRev ? `   Performance: ${[occ, actualRev].filter(Boolean).join(', ')}` : null,
       p.amenities ? `   Amenities: ${p.amenities}` : null,
       p.features ? `   Features: ${p.features}` : null,
       p.extended_info ? `   Details:\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null,
@@ -62,7 +64,13 @@ Samba Realty manages a portfolio of rental properties across Canggu, Pererenan, 
     ].filter(Boolean);
     return lines.join('\n');
   });
-  return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB):\n\n${blocks.join('\n\n')}\n\nFor live nightly availability, direct agents to the portal: sambarentals.vercel.app`;
+  return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB):\n\n${blocks.join('\n\n')}\n\nSAMBA RENTAL HARD RULES (zero exceptions):
+1. ALWAYS quote MONTHLY IDR rates. Never quote nightly USD or nightly IDR rates unless the agent explicitly asks for short-term/Airbnb pricing.
+2. NEVER invent prices, bedroom counts, locations, property types, or amenities. Every fact you state must be present in the data block above.
+3. If an agent asks about a property and a field isn't in the DB, say "Let me check with Ikiel and come back to you" rather than guessing.
+4. If asked for PHOTOS → share the property's photos_url (Google Drive). If asked for LOCATION → share the property's maps_url (Google Maps). If neither is in the data, say you'll get it from Ikiel.
+5. Property types are exactly what's listed (Apartment / Townhouse / Villa). HAUS Canggu units are 1BR APARTMENTS, not villas. Tropicana Valley units are 1BR APARTMENTS with private pools, not houses.
+6. For live booking calendar availability, direct agents to the portal: sambarentals.vercel.app`;
 }
 
 async function loadProjects(supabaseUrl, sbHeaders) {

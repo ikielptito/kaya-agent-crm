@@ -5613,6 +5613,12 @@ function renderRentalEditor() {
     `)}
 
     ${section('Links', `
+      <div style="font-size:10px;color:var(--ink3);margin-bottom:8px;line-height:1.4">Maya shares these when agents ask for photos or location:</div>
+      ${twoCol(
+        field('📷 Photos (Google Drive folder URL)', `<input value="${esc(r.photos_url)}" oninput="editingRental.photos_url=this.value" placeholder="https://drive.google.com/drive/folders/..." style="${inputStyle}">`),
+        field('📍 Maps (Google Maps URL)', `<input value="${esc(r.maps_url)}" oninput="editingRental.maps_url=this.value" placeholder="https://maps.app.goo.gl/..." style="${inputStyle}">`)
+      )}
+      <div style="font-size:10px;color:var(--ink3);margin:12px 0 8px;line-height:1.4">Booking platforms:</div>
       ${twoCol(
         field('Portal URL (sambarentals.vercel.app)', `<input value="${esc(r.portal_url)}" oninput="editingRental.portal_url=this.value" placeholder="https://sambarentals.vercel.app/..." style="${inputStyle}">`),
         field('Airbnb URL', `<input value="${esc(r.airbnb_url)}" oninput="editingRental.airbnb_url=this.value" placeholder="https://airbnb.com/..." style="${inputStyle}">`)

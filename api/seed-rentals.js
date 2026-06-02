@@ -177,6 +177,8 @@ function mapListingToRental(l, idx) {
     yearly_rate_idr: yearly,           // asking yearly rate from portal
     airbnb_url: null,
     booking_url: null,
+    maps_url: l.location || null,                             // Google Maps link from portal
+    photos_url: l.folder ? `https://drive.google.com/drive/folders/${l.folder}` : null,  // Google Drive photos folder
     portal_url: `https://sambarentals.vercel.app/?property=${l.slug}`,
     hero_image_url: null,
     commission_pct: 10,
