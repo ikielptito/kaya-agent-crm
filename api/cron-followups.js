@@ -695,9 +695,36 @@ export async function runAvailabilityNotifications(ctx) {
     const body = isMonday ? digestBody : alertBody;
     const params = [firstName, body, trackedUrl];
 
-    const ok = await sendTemplate(waPhoneId, waToken, agent.wa_num, tmpl, params);
-    if (!ok) {
-      summary.errors.push(`send failed for agent ${agent.id}`);
+    // Inline the send so we can capture the Meta error body — sendTemplate
+    // returns boolean only and the cause is invaluable for diagnosing template
+    // rejections (parameter format, language mismatch, unapproved name, etc.)
+    let metaErr = null;
+    let waMessageId = null;
+    try {
+      const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
+          template: {
+            name: tmpl.name, language: { code: tmpl.language || 'en' },
+            components: [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }],
+          },
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        waMessageId = d.messages?.[0]?.id;
+      } else {
+        const d = await r.json().catch(() => ({}));
+        metaErr = d?.error?.message || `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      metaErr = e.message;
+    }
+
+    if (metaErr) {
+      summary.errors.push(`agent ${agent.id}: ${metaErr}`);
       continue;
     }
 
@@ -792,12 +819,16 @@ function diffImprovements(prev, properties) {
   return { isFirstRun: false, items };
 }
 
+// Meta's WhatsApp Cloud API rejects newlines and tabs inside template
+// variables (only the surrounding static text in the template may contain
+// them). We therefore use ' · ' separators inline; the surrounding template
+// body provides the actual line structure around {{2}}.
 function composeAlertBody(improvements, properties) {
   const trimmed = improvements.slice(0, MAX_ALERT_BULLETS);
   const more = improvements.length - trimmed.length;
-  const lines = trimmed.map(i => `• ${i.summary}`);
-  if (more > 0) lines.push(`+ ${more} more on the portal`);
-  return clipToBudget(lines.join('\n'), TEMPLATE_BODY_BUDGET);
+  const items = trimmed.map(i => i.summary);
+  if (more > 0) items.push(`+ ${more} more on the portal`);
+  return clipToBudget(items.join(' · '), TEMPLATE_BODY_BUDGET);
 }
 
 function composeDigestBody(properties) {
@@ -810,19 +841,19 @@ function composeDigestBody(properties) {
 
   const sections = [];
   if (availableNow.length) {
-    const lines = availableNow.slice(0, MAX_DIGEST_BULLETS).map(p =>
-      `• ${p.name} — ${p.monthly || 'ask'}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}`);
-    if (availableNow.length > MAX_DIGEST_BULLETS) lines.push(`+ ${availableNow.length - MAX_DIGEST_BULLETS} more`);
-    sections.push('AVAILABLE NOW:\n' + lines.join('\n'));
+    const items = availableNow.slice(0, MAX_DIGEST_BULLETS).map(p =>
+      `${p.name} ${p.monthly || 'ask'}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}`);
+    if (availableNow.length > MAX_DIGEST_BULLETS) items.push(`+ ${availableNow.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('AVAILABLE NOW — ' + items.join(' · '));
   }
   if (openingSoon.length) {
-    const lines = openingSoon.slice(0, MAX_DIGEST_BULLETS).map(p =>
-      `• ${p.name} — opens ${formatShortDate(p.availability.nextLongWindowFrom)}, ${p.monthly || 'ask'}/mo`);
-    if (openingSoon.length > MAX_DIGEST_BULLETS) lines.push(`+ ${openingSoon.length - MAX_DIGEST_BULLETS} more`);
-    sections.push('OPENING SOON:\n' + lines.join('\n'));
+    const items = openingSoon.slice(0, MAX_DIGEST_BULLETS).map(p =>
+      `${p.name} opens ${formatShortDate(p.availability.nextLongWindowFrom)} (${p.monthly || 'ask'}/mo)`);
+    if (openingSoon.length > MAX_DIGEST_BULLETS) items.push(`+ ${openingSoon.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('OPENING SOON — ' + items.join(' · '));
   }
   if (!sections.length) sections.push('No properties currently available. Check back next week.');
-  return clipToBudget(sections.join('\n\n'), TEMPLATE_BODY_BUDGET);
+  return clipToBudget(sections.join(' || '), TEMPLATE_BODY_BUDGET);
 }
 
 // Settings helpers — wrap the jsonb settings table the rest of the cron uses
