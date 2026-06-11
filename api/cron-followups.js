@@ -732,17 +732,22 @@ export async function runAvailabilityNotifications(ctx) {
   return summary;
 }
 
-// Per-agent eligibility. Samba pipeline status check is conservative — opt-in
-// agents only; declined/stalled are excluded. If `test_agents_only` is on, we
-// restrict to the existing `is_test` column for a controlled rollout.
+// Per-agent eligibility. The CRM's campaign_engagement.samba.status is
+// free-form ('Not contacted', 'opted in', 'completed_sequence', and others),
+// so we treat the *presence* of a Samba engagement record as "enrolled in
+// the Samba pipeline." Explicit mutes (samba_alerts_opt_out, automation
+// override = paused/off, or status containing 'declined' / 'stalled') still
+// exclude. test_agents_only restricts to is_test=true for staged rollout.
 function isAvailabilityEligible(agent, config) {
   if (!agent.wa_num) return false;
   if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
   if (config.test_agents_only && !agent.is_test) return false;
   const samba = agent.campaign_engagement?.samba;
   if (!samba) return false;
-  const okStatuses = new Set(['opted_in', 'active', 'completed_sequence', 'in_sequence']);
-  return okStatuses.has(samba.status);
+  // Treat any non-empty status as enrolled, except explicit terminal states
+  const status = String(samba.status || '').toLowerCase().trim();
+  if (/declined|stalled|unsubscribed/.test(status)) return false;
+  return true;
 }
 
 function buildSnapshot(properties) {
