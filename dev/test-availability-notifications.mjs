@@ -42,10 +42,19 @@ function makeDigest(overrides = []) {
   return { asOf: new Date().toISOString(), portalBase: 'https://sambarentals.vercel.app', horizonDays: 180, longWindowDays: 30, properties: props };
 }
 
-const TEMPLATES = {
-  samba_availability_alert:  { name: 'samba_availability_alert',  language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
-  samba_availability_digest: { name: 'samba_availability_digest', language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
+// Default = both v1 and v2 templates approved. Individual tests override
+// by passing a subset.
+const TEMPLATES_BOTH = {
+  samba_availability_alert:     { name: 'samba_availability_alert',     language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
+  samba_availability_digest:    { name: 'samba_availability_digest',    language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
+  samba_availability_alert_v2:  { name: 'samba_availability_alert_v2',  language: 'en', body: 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n{{5}}\n{{6}}' },
+  samba_availability_digest_v2: { name: 'samba_availability_digest_v2', language: 'en', body: 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n• {{5}}\n• {{6}}\n• {{7}}\n• {{8}}\n{{9}}' },
 };
+const TEMPLATES_V1_ONLY = {
+  samba_availability_alert:  TEMPLATES_BOTH.samba_availability_alert,
+  samba_availability_digest: TEMPLATES_BOTH.samba_availability_digest,
+};
+const TEMPLATES = TEMPLATES_BOTH;
 
 function makeAgent(over = {}) {
   return {
@@ -58,7 +67,7 @@ function makeAgent(over = {}) {
 }
 
 // ── Mock environment harness ───────────────────────────────────────
-function makeMockEnv({ digest, settings = {}, agentPatches = [], waMessages = [], waSendOk = true }) {
+function makeMockEnv({ digest, settings = {}, agentPatches = [], waMessages = [], metaSends = [], waSendOk = true }) {
   const settingsState = { ...settings };
   globalThis.fetch = async (url, opts = {}) => {
     const u = String(url);
@@ -85,11 +94,16 @@ function makeMockEnv({ digest, settings = {}, agentPatches = [], waMessages = []
       return { ok: true, json: async () => ([]) };
     }
     if (u.includes('graph.facebook.com')) {
+      const body = JSON.parse(opts.body || '{}');
+      metaSends.push({
+        templateName: body.template?.name,
+        params: (body.template?.components?.[0]?.parameters || []).map(p => p.text),
+      });
       return { ok: waSendOk, status: waSendOk ? 200 : 400, json: async () => ({ messages: [{ id: 'wamid.fake' }] }) };
     }
     throw new Error('unexpected fetch: ' + u);
   };
-  return { settingsState, agentPatches, waMessages };
+  return { settingsState, agentPatches, waMessages, metaSends };
 }
 
 const SB_HEADERS = { 'Authorization': 'Bearer sb', 'apikey': 'sb', 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
@@ -170,7 +184,7 @@ env = makeMockEnv({
   settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
 });
 summary = await runAvailabilityNotifications(ctx({ templatesMap: {} }));
-check('missing template logs error', summary.errors.some(e => e.includes('template missing')));
+check('missing template logs error', summary.errors.some(e => e.includes('templates missing')), summary.errors.join(' | '));
 check('missing template sends nothing', summary.event_alerts_sent === 0);
 
 // ── 8. Not eligible: agent not on Samba pipeline
@@ -244,6 +258,74 @@ globalThis.fetch = async (url, opts) => {
 };
 summary = await runAvailabilityNotifications(ctx());
 check('digest fetch failure surfaces error, no send', summary.errors.some(e => e.includes('digest fetch')) && summary.event_alerts_sent === 0, JSON.stringify(summary));
+
+// Restore baseFetch for the v2 tests
+globalThis.fetch = baseFetch;
+
+// ── 14. v2 template preferred when both available ──────────────────
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx());
+check('v2 template selected when both v1 and v2 approved', summary.template_version === 'v2', summary.template_version);
+check('v2 alert: 6 params per send', env.metaSends.every(s => s.params.length === 6), env.metaSends.map(s => s.params.length).join(','));
+check('v2 alert: param 1 = first name', env.metaSends[0]?.params[0] === 'Era');
+check('v2 alert: 3 bullet slots filled', env.metaSends[0]?.params.slice(1, 4).every(p => p && p.length > 0));
+check('v2 alert: contains bold property name', env.metaSends[0]?.params.slice(1, 4).some(p => p.includes('*')));
+check('v2 alert: URL passed as last param', env.metaSends[0]?.params[5]?.startsWith('https://sambarentals'));
+
+// ── 15. v1 fallback when only v1 templates approved ────────────────
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx({ templatesMap: TEMPLATES_V1_ONLY }));
+check('v1 fallback when v2 missing', summary.template_version === 'v1', summary.template_version);
+check('v1 alert: 3 params per send', env.metaSends.every(s => s.params.length === 3));
+check('v1 alert: 2nd param is bullet paragraph (no newlines)', env.metaSends[0]?.params[1] && !env.metaSends[0].params[1].includes('\n'));
+
+// ── 16. Sparse improvements: empty slots padded with — ─────────────
+// Snapshot includes entries for every property (all "available yesterday") so
+// the only improvement is 11621510 going from unavailable → available.
+const oneImprovementSnap = {
+  '11621510': { availableToday: false, nextLongWindowFrom: null, monthly: '27jt' },
+  '11621511': { availableToday: false, nextLongWindowFrom: addDays(T0, 14), monthly: '27jt' },
+  'c_villa-sunrise': { availableToday: true, nextLongWindowFrom: T0, monthly: '35jt' },
+};
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: oneImprovementSnap },
+});
+summary = await runAvailabilityNotifications(ctx());
+check('sparse improvement still sends (v2)', summary.event_alerts_sent === 1, JSON.stringify(summary));
+const sparseParams = env.metaSends[0]?.params || [];
+const slot2Empty = sparseParams[2] === '—';
+const slot3Empty = sparseParams[3] === '—';
+check('v2 alert: empty bullet slots filled with —', slot2Empty && slot3Empty, sparseParams.slice(1, 4).join(' | '));
+
+// ── 17. v2 digest on Monday: 9 params, 4 avail + 3 soon slots ──────
+const mondayCtx = { now: new Date('2026-06-15T01:00:00Z') };
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx(mondayCtx));
+check('v2 digest selected on Monday', summary.template_version === 'v2');
+check('v2 digest sent 1', summary.weekly_digest_sent === 1, JSON.stringify(summary));
+check('v2 digest: 9 params', env.metaSends[0]?.params.length === 9, env.metaSends[0]?.params.length);
+check('v2 digest: param 1 = name', env.metaSends[0]?.params[0] === 'Era');
+check('v2 digest: avail slots present', env.metaSends[0]?.params.slice(1, 5).every(p => p));
+check('v2 digest: URL passed as last', env.metaSends[0]?.params[8]?.startsWith('https://'));
+
+// ── 18. Bold marker survives compose pipeline ──────────────────────
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx());
+const allBulletParams = env.metaSends[0]?.params.slice(1, 4) || [];
+check('every populated bullet has *bold* property name', allBulletParams.filter(p => p !== '—').every(p => /\*[^*]+\*/.test(p)), allBulletParams.join(' | '));
 
 console.log(failures ? `\n${failures} FAILURES` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

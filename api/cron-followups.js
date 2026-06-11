@@ -589,13 +589,22 @@ function buildPortfolioContextFromDb(projects) {
 //
 // Default-off so it ships dark. Flip enabled=true in Supabase when ready.
 
-const ALERT_TEMPLATE  = 'samba_availability_alert';
-const DIGEST_TEMPLATE = 'samba_availability_digest';
+// v2 templates use one variable per bullet line, rendering as a real
+// list because the static template body provides the surrounding bullets.
+// v1 is a single-paragraph fallback that works without re-approval.
+const ALERT_TEMPLATE_V2  = 'samba_availability_alert_v2';
+const DIGEST_TEMPLATE_V2 = 'samba_availability_digest_v2';
+const ALERT_TEMPLATE_V1  = 'samba_availability_alert';
+const DIGEST_TEMPLATE_V1 = 'samba_availability_digest';
+const ALERT_V2_SLOTS = 3;
+const DIGEST_AVAIL_SLOTS = 4;
+const DIGEST_SOON_SLOTS = 3;
 const ALERT_FREQUENCY_HOURS = 20;
 const LONG_WINDOW_MOVE_THRESHOLD_DAYS = 7;
 const MAX_ALERT_BULLETS = 5;
 const MAX_DIGEST_BULLETS = 8;
 const TEMPLATE_BODY_BUDGET = 700;     // safety margin under Meta's 1024
+const EMPTY_SLOT = '—';               // pad for unused bullet slots (Meta rejects "")
 const PORTAL_BASE = 'https://sambarentals.vercel.app';
 
 export async function runAvailabilityNotifications(ctx) {
@@ -636,15 +645,18 @@ export async function runAvailabilityNotifications(ctx) {
     return summary;
   }
 
-  // ── Template lookup (fail loud, don't silently miss-send) ───────
+  // ── Template lookup (v2 preferred, v1 fallback, fail loud if none) ──
   const isMonday = now.getUTCDay() === 1; // 1am UTC Monday ≈ 9am WITA Monday
-  const templateName = isMonday ? DIGEST_TEMPLATE : ALERT_TEMPLATE;
-  const tmpl = templatesMap[templateName];
+  const v2Name = isMonday ? DIGEST_TEMPLATE_V2 : ALERT_TEMPLATE_V2;
+  const v1Name = isMonday ? DIGEST_TEMPLATE_V1 : ALERT_TEMPLATE_V1;
+  const tmpl = templatesMap[v2Name] || templatesMap[v1Name];
+  const tmplVersion = templatesMap[v2Name] ? 'v2' : 'v1';
   if (!tmpl) {
-    summary.errors.push(`template missing: ${templateName}`);
-    results.push({ availability: true, action: 'template_missing', template: templateName });
+    summary.errors.push(`templates missing: ${v2Name} / ${v1Name}`);
+    results.push({ availability: true, action: 'template_missing', template: `${v2Name} / ${v1Name}` });
     return summary;
   }
+  summary.template_version = tmplVersion;
 
   // ── Snapshot diff (event alerts only) ───────────────────────────
   const prevSnapshot = (await loadSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot')) || null;
@@ -674,7 +686,8 @@ export async function runAvailabilityNotifications(ctx) {
   summary.recipients = eligible.length;
 
   // ── Compose payload ─────────────────────────────────────────────
-  const alertBody = composeAlertBody(improvements.items, digest.properties);
+  // v1 = single body var (paragraph), v2 = one var per bullet slot (real list)
+  const alertBody = composeAlertBody(improvements.items);
   const digestBody = composeDigestBody(digest.properties);
 
   // ── Send loop ───────────────────────────────────────────────────
@@ -692,8 +705,14 @@ export async function runAvailabilityNotifications(ctx) {
 
     const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
     const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${agent.id}`;
-    const body = isMonday ? digestBody : alertBody;
-    const params = [firstName, body, trackedUrl];
+    let params;
+    if (tmplVersion === 'v2') {
+      params = isMonday
+        ? composeDigestParamsV2(firstName, digest.properties, trackedUrl)
+        : composeAlertParamsV2(firstName, improvements.items, trackedUrl);
+    } else {
+      params = [firstName, isMonday ? digestBody : alertBody, trackedUrl];
+    }
 
     // Inline the send so we can capture the Meta error body — sendTemplate
     // returns boolean only and the cause is invaluable for diagnosing template
@@ -728,12 +747,12 @@ export async function runAvailabilityNotifications(ctx) {
       continue;
     }
 
-    // Log + bookkeeping
-    const renderedPreview = (tmpl.body || '')
-      .replace(/\{\{1\}\}/g, firstName)
-      .replace(/\{\{2\}\}/g, body)
-      .replace(/\{\{3\}\}/g, trackedUrl)
-      .slice(0, 200);
+    // Log + bookkeeping (handle variable count — v1=3 vars, v2=6 or 9 vars)
+    let renderedPreview = tmpl.body || '';
+    params.forEach((p, i) => {
+      renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
+    });
+    renderedPreview = renderedPreview.slice(0, 200);
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
@@ -821,39 +840,100 @@ function diffImprovements(prev, properties) {
 
 // Meta's WhatsApp Cloud API rejects newlines and tabs inside template
 // variables (only the surrounding static text in the template may contain
-// them). We therefore use ' · ' separators inline; the surrounding template
-// body provides the actual line structure around {{2}}.
-function composeAlertBody(improvements, properties) {
+// them). v1 templates have a single body var so we collapse to a paragraph
+// with ' · ' separators. v2 templates have one var per bullet slot so the
+// surrounding template body renders the bullets as a true list.
+
+// ── v1 (paragraph fallback) ─────────────────────────────────────────
+function composeAlertBody(improvements) {
   const trimmed = improvements.slice(0, MAX_ALERT_BULLETS);
   const more = improvements.length - trimmed.length;
-  const items = trimmed.map(i => i.summary);
+  const items = trimmed.map(i => boldName(i.summary, i.name));
   if (more > 0) items.push(`+ ${more} more on the portal`);
   return clipToBudget(items.join(' · '), TEMPLATE_BODY_BUDGET);
 }
 
 function composeDigestBody(properties) {
+  const { availableNow, openingSoon } = bucketDigestProperties(properties);
+  const sections = [];
+  if (availableNow.length) {
+    const items = availableNow.slice(0, MAX_DIGEST_BULLETS).map(formatAvailableLine);
+    if (availableNow.length > MAX_DIGEST_BULLETS) items.push(`+ ${availableNow.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('AVAILABLE NOW — ' + items.join(' · '));
+  }
+  if (openingSoon.length) {
+    const items = openingSoon.slice(0, MAX_DIGEST_BULLETS).map(formatOpeningLine);
+    if (openingSoon.length > MAX_DIGEST_BULLETS) items.push(`+ ${openingSoon.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('OPENING SOON — ' + items.join(' · '));
+  }
+  if (!sections.length) sections.push('No properties currently available. Check back next week.');
+  return clipToBudget(sections.join(' || '), TEMPLATE_BODY_BUDGET);
+}
+
+// ── v2 (slot-based: one variable per bullet line) ───────────────────
+// Returns [firstName, slot1, slot2, slot3, overflow, url] — 6 params total
+function composeAlertParamsV2(firstName, improvements, url) {
+  const params = [firstName];
+  for (let i = 0; i < ALERT_V2_SLOTS; i++) {
+    if (i < improvements.length) {
+      const imp = improvements[i];
+      params.push(clipToBudget(boldName(imp.summary, imp.name), 240));
+    } else {
+      params.push(EMPTY_SLOT);
+    }
+  }
+  const more = improvements.length - ALERT_V2_SLOTS;
+  params.push(more > 0 ? `+ ${more} more on the portal` : EMPTY_SLOT);
+  params.push(url);
+  return params;
+}
+
+// Returns [firstName, avail1..4, soon1..3, url] — 9 params total
+function composeDigestParamsV2(firstName, properties, url) {
+  const { availableNow, openingSoon } = bucketDigestProperties(properties);
+  const params = [firstName];
+  for (let i = 0; i < DIGEST_AVAIL_SLOTS; i++) {
+    params.push(i < availableNow.length
+      ? clipToBudget(formatAvailableLine(availableNow[i]), 240)
+      : EMPTY_SLOT);
+  }
+  for (let i = 0; i < DIGEST_SOON_SLOTS; i++) {
+    params.push(i < openingSoon.length
+      ? clipToBudget(formatOpeningLine(openingSoon[i]), 240)
+      : EMPTY_SLOT);
+  }
+  params.push(url);
+  return params;
+}
+
+// ── shared formatting helpers ───────────────────────────────────────
+function bucketDigestProperties(properties) {
   const todayStr = new Date().toISOString().split('T')[0];
   const availableNow = properties.filter(p => p.availability?.availableToday && !p.isHidden);
   const openingSoon = properties.filter(p => !p.availability?.availableToday
     && p.availability?.nextLongWindowFrom
     && daysBetween(todayStr, p.availability.nextLongWindowFrom) <= 30
     && !p.isHidden);
+  return { availableNow, openingSoon };
+}
 
-  const sections = [];
-  if (availableNow.length) {
-    const items = availableNow.slice(0, MAX_DIGEST_BULLETS).map(p =>
-      `${p.name} ${p.monthly || 'ask'}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}`);
-    if (availableNow.length > MAX_DIGEST_BULLETS) items.push(`+ ${availableNow.length - MAX_DIGEST_BULLETS} more`);
-    sections.push('AVAILABLE NOW — ' + items.join(' · '));
-  }
-  if (openingSoon.length) {
-    const items = openingSoon.slice(0, MAX_DIGEST_BULLETS).map(p =>
-      `${p.name} opens ${formatShortDate(p.availability.nextLongWindowFrom)} (${p.monthly || 'ask'}/mo)`);
-    if (openingSoon.length > MAX_DIGEST_BULLETS) items.push(`+ ${openingSoon.length - MAX_DIGEST_BULLETS} more`);
-    sections.push('OPENING SOON — ' + items.join(' · '));
-  }
-  if (!sections.length) sections.push('No properties currently available. Check back next week.');
-  return clipToBudget(sections.join(' || '), TEMPLATE_BODY_BUDGET);
+function formatAvailableLine(p) {
+  const price = p.monthly ? `${p.monthly}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}` : 'ask Era';
+  return `*${p.name}* — ${price}`;
+}
+
+function formatOpeningLine(p) {
+  const when = formatShortDate(p.availability.nextLongWindowFrom);
+  const price = p.monthly ? `${p.monthly}/mo` : 'price TBC';
+  return `*${p.name}* — opens ${when} (${price})`;
+}
+
+// Wraps the first occurrence of `name` in *bold* markers. Safe against
+// re-bolding (skips if already wrapped) so the function is idempotent.
+function boldName(summary, name) {
+  if (!summary || !name) return summary;
+  if (summary.includes(`*${name}*`)) return summary;
+  return summary.replace(name, `*${name}*`);
 }
 
 // Settings helpers — wrap the jsonb settings table the rest of the cron uses
