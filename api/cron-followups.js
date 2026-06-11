@@ -360,6 +360,18 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── SAMBA AVAILABILITY NOTIFICATIONS ─────────────────────────────
+    // Sends daily event alerts and Monday weekly digests via templates
+    // already approved on the WhatsApp Business account. Owns its own
+    // settings flags so it can ship dark and be flipped on per-cohort
+    // without touching the existing follow-up logic.
+    const availabilityResult = await runAvailabilityNotifications({
+      now, sbHeaders, supabaseUrl: SUPABASE_URL,
+      agents, templatesMap,
+      waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+      results,
+    });
+
     // Write back the accumulated daily spend
     if (sent > 0) {
       await persistTodaySpend(SUPABASE_URL, sbHeaders, todaySpend);
@@ -373,6 +385,7 @@ export default async function handler(req, res) {
       sequence_sent: sequenceSent, sequence_completed: sequenceCompleted,
       pruned_wa_messages: pruned,
       day_spend_after: todaySpend.toFixed(2),
+      availability: availabilityResult,
       results
     });
 
@@ -562,4 +575,292 @@ function buildPortfolioContextFromDb(projects) {
     ].filter(Boolean);
     return lines.join('\n');
   }).join('\n\n');
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SAMBA AVAILABILITY NOTIFICATIONS
+// ─────────────────────────────────────────────────────────────────────
+//
+// Settings flags (all read from the existing `settings` jsonb table):
+//   key 'samba_availability'  value:
+//     { enabled: bool, test_agents_only: bool }
+//   key 'samba_availability_snapshot'  value:
+//     { [propId]: { availableToday, nextLongWindowFrom, monthly } }
+//
+// Default-off so it ships dark. Flip enabled=true in Supabase when ready.
+
+const ALERT_TEMPLATE  = 'samba_availability_alert';
+const DIGEST_TEMPLATE = 'samba_availability_digest';
+const ALERT_FREQUENCY_HOURS = 20;
+const LONG_WINDOW_MOVE_THRESHOLD_DAYS = 7;
+const MAX_ALERT_BULLETS = 5;
+const MAX_DIGEST_BULLETS = 8;
+const TEMPLATE_BODY_BUDGET = 700;     // safety margin under Meta's 1024
+const PORTAL_BASE = 'https://sambarentals.vercel.app';
+
+export async function runAvailabilityNotifications(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+
+  const summary = {
+    enabled: false, ran: false, recipients: 0,
+    event_alerts_sent: 0, weekly_digest_sent: 0,
+    skipped_no_changes: 0, skipped_freq_cap: 0, skipped_opt_out: 0,
+    skipped_not_eligible: 0, errors: [],
+  };
+
+  // ── Kill switch + cohort filter ─────────────────────────────────
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  if (!config.enabled) {
+    summary.skipped_reason = 'samba_availability.enabled = false';
+    return summary;
+  }
+  summary.enabled = true;
+
+  // ── Digest fetch ────────────────────────────────────────────────
+  const digestUrl = process.env.AVAILABILITY_DIGEST_URL;
+  const digestSecret = process.env.DIGEST_SHARED_SECRET;
+  if (!digestUrl || !digestSecret) {
+    summary.errors.push('AVAILABILITY_DIGEST_URL / DIGEST_SHARED_SECRET not set');
+    return summary;
+  }
+  let digest;
+  try {
+    const r = await fetch(digestUrl, { headers: { Authorization: `Bearer ${digestSecret}` } });
+    if (!r.ok) {
+      summary.errors.push(`digest fetch ${r.status}`);
+      return summary;
+    }
+    digest = await r.json();
+  } catch (e) {
+    summary.errors.push('digest fetch failed: ' + e.message);
+    return summary;
+  }
+
+  // ── Template lookup (fail loud, don't silently miss-send) ───────
+  const isMonday = now.getUTCDay() === 1; // 1am UTC Monday ≈ 9am WITA Monday
+  const templateName = isMonday ? DIGEST_TEMPLATE : ALERT_TEMPLATE;
+  const tmpl = templatesMap[templateName];
+  if (!tmpl) {
+    summary.errors.push(`template missing: ${templateName}`);
+    results.push({ availability: true, action: 'template_missing', template: templateName });
+    return summary;
+  }
+
+  // ── Snapshot diff (event alerts only) ───────────────────────────
+  const prevSnapshot = (await loadSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot')) || null;
+  const newSnapshot = buildSnapshot(digest.properties);
+  const improvements = prevSnapshot
+    ? diffImprovements(prevSnapshot, digest.properties)
+    : { isFirstRun: true, items: [] };
+
+  // First-ever run on this CRM: persist snapshot, send nothing (no baseline to diff against).
+  if (improvements.isFirstRun && !isMonday) {
+    await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+    summary.ran = true;
+    summary.skipped_reason = 'first-run; snapshot saved';
+    return summary;
+  }
+
+  // Event-alert day with no changes → save snapshot, send nothing.
+  if (!isMonday && improvements.items.length === 0) {
+    await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+    summary.ran = true;
+    summary.skipped_no_changes = 1;
+    return summary;
+  }
+
+  // ── Recipient filter ────────────────────────────────────────────
+  const eligible = agents.filter(a => isAvailabilityEligible(a, config));
+  summary.recipients = eligible.length;
+
+  // ── Compose payload ─────────────────────────────────────────────
+  const alertBody = composeAlertBody(improvements.items, digest.properties);
+  const digestBody = composeDigestBody(digest.properties);
+
+  // ── Send loop ───────────────────────────────────────────────────
+  for (const agent of eligible) {
+    if (agent.samba_alerts_opt_out) { summary.skipped_opt_out++; continue; }
+
+    // Frequency cap (event alerts only — digest is once weekly so cap is moot)
+    if (!isMonday && agent.last_availability_alert_at) {
+      const hoursSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 3.6e6;
+      if (hoursSince < ALERT_FREQUENCY_HOURS) {
+        summary.skipped_freq_cap++;
+        continue;
+      }
+    }
+
+    const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+    const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${agent.id}`;
+    const body = isMonday ? digestBody : alertBody;
+    const params = [firstName, body, trackedUrl];
+
+    const ok = await sendTemplate(waPhoneId, waToken, agent.wa_num, tmpl, params);
+    if (!ok) {
+      summary.errors.push(`send failed for agent ${agent.id}`);
+      continue;
+    }
+
+    // Log + bookkeeping
+    const renderedPreview = (tmpl.body || '')
+      .replace(/\{\{1\}\}/g, firstName)
+      .replace(/\{\{2\}\}/g, body)
+      .replace(/\{\{3\}\}/g, trackedUrl)
+      .slice(0, 200);
+    await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({
+        agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+        content: renderedPreview, timestamp: now.toISOString(),
+        source: 'cron', category: isMonday ? 'availability_digest' : 'availability_alert',
+      }),
+    }).catch(() => {});
+    await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify({ last_availability_alert_at: now.toISOString() }),
+    }).catch(() => {});
+
+    if (isMonday) summary.weekly_digest_sent++;
+    else summary.event_alerts_sent++;
+    results.push({ availability: true, agent: agent.name || agent.id, kind: isMonday ? 'weekly_digest' : 'event_alert' });
+  }
+
+  // Persist the new snapshot only after a successful send pass — if Supabase
+  // is down mid-loop, leaving the old snapshot means we'll retry next cron.
+  await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+  summary.ran = true;
+  return summary;
+}
+
+// Per-agent eligibility. Samba pipeline status check is conservative — opt-in
+// agents only; declined/stalled are excluded. If `test_agents_only` is on, we
+// restrict to the existing `is_test` column for a controlled rollout.
+function isAvailabilityEligible(agent, config) {
+  if (!agent.wa_num) return false;
+  if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
+  if (config.test_agents_only && !agent.is_test) return false;
+  const samba = agent.campaign_engagement?.samba;
+  if (!samba) return false;
+  const okStatuses = new Set(['opted_in', 'active', 'completed_sequence', 'in_sequence']);
+  return okStatuses.has(samba.status);
+}
+
+function buildSnapshot(properties) {
+  const out = {};
+  for (const p of properties) {
+    out[p.id] = {
+      availableToday: !!p.availability?.availableToday,
+      nextLongWindowFrom: p.availability?.nextLongWindowFrom || null,
+      monthly: p.monthly || null,
+    };
+  }
+  return out;
+}
+
+// Improvement = any of: became available today, long-window opens ≥7 days
+// earlier, brand-new property in catalog, monthly price dropped.
+function diffImprovements(prev, properties) {
+  const items = [];
+  for (const p of properties) {
+    const prior = prev[p.id];
+    if (!prior) {
+      items.push({ propId: p.id, name: p.name, reason: 'new', summary: `New: ${p.name} (${p.tag || 'Samba'})${p.monthly ? ', ' + p.monthly + '/mo' : ''}` });
+      continue;
+    }
+    if (!prior.availableToday && p.availability?.availableToday) {
+      items.push({ propId: p.id, name: p.name, reason: 'now_available', summary: `${p.name} just opened — ${p.monthly || 'ask Era'}/mo` });
+      continue;
+    }
+    if (p.availability?.nextLongWindowFrom && prior.nextLongWindowFrom) {
+      const delta = daysBetween(prior.nextLongWindowFrom, p.availability.nextLongWindowFrom);
+      if (delta >= LONG_WINDOW_MOVE_THRESHOLD_DAYS) {
+        items.push({ propId: p.id, name: p.name, reason: 'window_earlier',
+          summary: `${p.name} available from ${formatShortDate(p.availability.nextLongWindowFrom)} (was ${formatShortDate(prior.nextLongWindowFrom)})` });
+        continue;
+      }
+    }
+    if (prior.monthly && p.monthly && parseRate(p.monthly) < parseRate(prior.monthly)) {
+      items.push({ propId: p.id, name: p.name, reason: 'price_drop',
+        summary: `${p.name} price dropped to ${p.monthly}/mo (was ${prior.monthly})` });
+    }
+  }
+  return { isFirstRun: false, items };
+}
+
+function composeAlertBody(improvements, properties) {
+  const trimmed = improvements.slice(0, MAX_ALERT_BULLETS);
+  const more = improvements.length - trimmed.length;
+  const lines = trimmed.map(i => `• ${i.summary}`);
+  if (more > 0) lines.push(`+ ${more} more on the portal`);
+  return clipToBudget(lines.join('\n'), TEMPLATE_BODY_BUDGET);
+}
+
+function composeDigestBody(properties) {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const availableNow = properties.filter(p => p.availability?.availableToday && !p.isHidden);
+  const openingSoon = properties.filter(p => !p.availability?.availableToday
+    && p.availability?.nextLongWindowFrom
+    && daysBetween(todayStr, p.availability.nextLongWindowFrom) <= 30
+    && !p.isHidden);
+
+  const sections = [];
+  if (availableNow.length) {
+    const lines = availableNow.slice(0, MAX_DIGEST_BULLETS).map(p =>
+      `• ${p.name} — ${p.monthly || 'ask'}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}`);
+    if (availableNow.length > MAX_DIGEST_BULLETS) lines.push(`+ ${availableNow.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('AVAILABLE NOW:\n' + lines.join('\n'));
+  }
+  if (openingSoon.length) {
+    const lines = openingSoon.slice(0, MAX_DIGEST_BULLETS).map(p =>
+      `• ${p.name} — opens ${formatShortDate(p.availability.nextLongWindowFrom)}, ${p.monthly || 'ask'}/mo`);
+    if (openingSoon.length > MAX_DIGEST_BULLETS) lines.push(`+ ${openingSoon.length - MAX_DIGEST_BULLETS} more`);
+    sections.push('OPENING SOON:\n' + lines.join('\n'));
+  }
+  if (!sections.length) sections.push('No properties currently available. Check back next week.');
+  return clipToBudget(sections.join('\n\n'), TEMPLATE_BODY_BUDGET);
+}
+
+// Settings helpers — wrap the jsonb settings table the rest of the cron uses
+async function loadSetting(url, headers, key) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.${encodeURIComponent(key)}&select=value`, { headers });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return rows?.[0]?.value || null;
+  } catch (e) { return null; }
+}
+
+async function saveSetting(url, headers, key, value) {
+  try {
+    await fetch(`${url}/rest/v1/settings`, {
+      method: 'POST',
+      headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key, value }),
+    });
+  } catch (e) { /* non-fatal */ }
+}
+
+// "27jt" → 27000000. "ask" / undefined → Infinity (so "ask" never looks like
+// a price drop vs a numeric price).
+function parseRate(s) {
+  if (!s) return Infinity;
+  const m = String(s).match(/(\d+(?:\.\d+)?)\s*(jt|m)?/i);
+  if (!m) return Infinity;
+  const n = parseFloat(m[1]);
+  return /jt|m/i.test(m[2] || '') ? n * 1_000_000 : n;
+}
+
+function daysBetween(fromStr, toStr) {
+  return Math.round((new Date(toStr + 'T00:00:00Z') - new Date(fromStr + 'T00:00:00Z')) / 86400000);
+}
+
+function formatShortDate(s) {
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const d = new Date(s + 'T00:00:00Z');
+  return `${months[d.getUTCMonth()]} ${d.getUTCDate()}`;
+}
+
+function clipToBudget(s, budget) {
+  if (s.length <= budget) return s;
+  return s.slice(0, budget - 1).replace(/\s+\S*$/, '') + '…';
 }

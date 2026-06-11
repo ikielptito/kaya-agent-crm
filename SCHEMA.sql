@@ -99,6 +99,19 @@ alter table wa_messages add column if not exists deleted_at timestamptz;  -- set
 
 alter table campaigns add column if not exists template_sequence jsonb default '[]';
 
+-- ── SAMBA AVAILABILITY NOTIFICATIONS (added 2026-06-11) ─────────────
+-- These power the daily availability digest pushed to rental agents by
+-- the cron-followups runner. Stored on the existing agents row so the
+-- runner doesn't need an extra table lookup per agent.
+
+alter table agents add column if not exists samba_alerts_opt_out boolean default false;
+alter table agents add column if not exists last_availability_alert_at timestamptz;
+
+-- Distinguishes availability sends from listing-lifecycle follow-ups in the
+-- wa_messages timeline (and in any future reporting).
+alter table wa_messages add column if not exists category text;
+  -- null (legacy) | 'availability_alert' | 'availability_digest' | 'followup' | 'sequence'
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (
