@@ -814,27 +814,30 @@ function diffImprovements(prev, properties) {
   const items = [];
   for (const p of properties) {
     const prior = prev[p.id];
+    const meta = propMeta(p);
     if (!prior) {
-      items.push({ propId: p.id, name: p.name, reason: 'new', summary: `New: ${p.name} (${p.tag || 'Samba'})${p.monthly ? ', ' + p.monthly + '/mo' : ''}` });
+      items.push({ propId: p.id, name: p.name, reason: 'new', summary: `New: ${p.name}${meta ? ` (${meta})` : ''}${p.monthly ? ' — ' + p.monthly + '/mo' : ''}` });
       continue;
     }
     if (!prior.availableToday && p.availability?.availableToday) {
-      items.push({ propId: p.id, name: p.name, reason: 'now_available', summary: `${p.name} just opened — ${p.monthly || 'ask Era'}/mo` });
+      items.push({ propId: p.id, name: p.name, reason: 'now_available', summary: `${p.name}${meta ? ` (${meta})` : ''} just opened — ${p.monthly || 'ask Era'}/mo` });
       continue;
     }
     if (p.availability?.nextLongWindowFrom && prior.nextLongWindowFrom) {
       const delta = daysBetween(prior.nextLongWindowFrom, p.availability.nextLongWindowFrom);
       if (delta >= LONG_WINDOW_MOVE_THRESHOLD_DAYS) {
         items.push({ propId: p.id, name: p.name, reason: 'window_earlier',
-          summary: `${p.name} available from ${formatShortDate(p.availability.nextLongWindowFrom)} (was ${formatShortDate(prior.nextLongWindowFrom)})` });
+          summary: `${p.name}${meta ? ` (${meta})` : ''} available from ${formatShortDate(p.availability.nextLongWindowFrom)} (was ${formatShortDate(prior.nextLongWindowFrom)})` });
         continue;
       }
     }
     if (prior.monthly && p.monthly && parseRate(p.monthly) < parseRate(prior.monthly)) {
       items.push({ propId: p.id, name: p.name, reason: 'price_drop',
-        summary: `${p.name} price dropped to ${p.monthly}/mo (was ${prior.monthly})` });
+        summary: `${p.name}${meta ? ` (${meta})` : ''} price dropped to ${p.monthly}/mo (was ${prior.monthly})` });
     }
   }
+  // Digest order is already building-grouped (Hostex by catalog order, customs
+  // alphabetical), and we iterate in that order — so items stay grouped too.
   return { isFirstRun: false, items };
 }
 
@@ -917,15 +920,22 @@ function bucketDigestProperties(properties) {
   return { availableNow, openingSoon };
 }
 
+// "1BR Apartment · Tumbak Bayuh, Pererenan" — whichever parts exist
+function propMeta(p) {
+  return [p.unitType, p.tag].filter(Boolean).join(' · ');
+}
+
 function formatAvailableLine(p) {
+  const meta = propMeta(p);
   const price = p.monthly ? `${p.monthly}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}` : 'ask Era';
-  return `*${p.name}* — ${price}`;
+  return `*${p.name}*${meta ? ` (${meta})` : ''} — ${price}`;
 }
 
 function formatOpeningLine(p) {
+  const meta = propMeta(p);
   const when = formatShortDate(p.availability.nextLongWindowFrom);
   const price = p.monthly ? `${p.monthly}/mo` : 'price TBC';
-  return `*${p.name}* — opens ${when} (${price})`;
+  return `*${p.name}*${meta ? ` (${meta})` : ''} — opens ${when} (${price})`;
 }
 
 // Wraps the first occurrence of `name` in *bold* markers. Safe against
