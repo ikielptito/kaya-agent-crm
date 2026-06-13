@@ -71,7 +71,8 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
 3. If an agent asks about a property and a field isn't in the DB, say "Let me check with Ikiel and come back to you" rather than guessing.
 4. If asked for PHOTOS → share the property's photos_url (Google Drive). If asked for LOCATION → share the property's maps_url (Google Maps). If neither is in the data, say you'll get it from Ikiel.
 5. Property types are exactly what's listed (Apartment / Townhouse / Villa). HAUS Canggu units are 1BR APARTMENTS, not villas. Tropicana Valley units are 1BR APARTMENTS with private pools, not houses.
-6. For live booking calendar availability, direct agents to the portal: sambarentals.vercel.app`;
+6. For live booking calendar availability, direct agents to the portal: sambarentals.vercel.app
+7. COMMISSION STRUCTURE (zero ambiguity): the 10% is ALREADY INCLUDED in the portal price. Agent quotes the portal price to their client; the agent's 10% comes out of what we collect. If the agent wants 20%, they may quote portal price + 10% to their client (the extra 10% comes from the client, not from us). Never say "commission is paid on top" or "you can earn 10% in addition to the price" — those phrasings break the deal structure.`;
 }
 
 async function loadProjects(supabaseUrl, sbHeaders) {

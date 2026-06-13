@@ -254,7 +254,7 @@ export default async function handler(req, res) {
           results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_skipped', reason: 'template_not_found:' + nextStep.template_name });
           continue;
         }
-        const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+        const firstName = firstNameOf(agent.name);
         const renderedBody = (tmpl.body || '').replace(/\{\{1\}\}/g, firstName);
         const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
         if (!ok) {
@@ -406,7 +406,7 @@ async function markStalled(url, headers, agent, projectName) {
 }
 
 async function generateFollowupMessage(apiKey, agent, projectName, proj, portfolio, followupNumber) {
-  const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+  const firstName = firstNameOf(agent.name);
   const stageContext = proj.stage === 'agreement_requested'
     ? `You previously asked them to send over their listing agreement for ${projectName}. They haven't sent it yet. This is follow-up #${followupNumber} of ${MAX_FOLLOWUPS}. Ask in a way that's appropriate for the follow-up number (1=gentle reminder, 2=mention that other agents are signing too, 3=offer to send a sample agreement format, 4=last friendly nudge before you back off).`
     : `Ikiel has signed the listing agreement for ${projectName} and you're now waiting for them to publish the listing and send back the live URL. This is follow-up #${followupNumber} of ${MAX_FOLLOWUPS}. Ask softly when they think they'll have it live (1=easy reminder, 2=ask if anything is blocking them, 3=offer to share marketing copy or photos, 4=last nudge).`;
@@ -721,7 +721,7 @@ export async function runAvailabilityNotifications(ctx) {
       }
     }
 
-    const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
+    const firstName = firstNameOf(agent.name);
     const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${agent.id}`;
     // Per-agent template choice: digest on Mondays, intro on first-ever
     // availability send (non-Monday only), regular alert otherwise.
@@ -807,6 +807,17 @@ export async function runAvailabilityNotifications(ctx) {
   await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
   summary.ran = true;
   return summary;
+}
+
+// Extract the agent's first name for personalisation. Skips Balinese caste
+// prefixes (`I` / `Ni`) so "I Made Agus Iryawan" becomes "Made" rather than
+// "I". Falls back to "there" when name is missing.
+function firstNameOf(name) {
+  if (!name) return 'there';
+  const parts = String(name).trim().split(/\s+/);
+  if (!parts.length) return 'there';
+  if (parts.length > 1 && /^(I|Ni)$/i.test(parts[0])) return parts[1];
+  return parts[0];
 }
 
 function versionOfName(name) {
