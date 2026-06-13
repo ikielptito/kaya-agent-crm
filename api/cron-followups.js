@@ -774,12 +774,13 @@ export async function runAvailabilityNotifications(ctx) {
       continue;
     }
 
-    // Log + bookkeeping (handle variable count — v1=3 vars, v2=6 or 9 vars)
+    // Log the full rendered template body so the CRM inbox shows what the
+    // agent actually received on WhatsApp. The wa_messages.content column
+    // is plain text with no size limit, so no truncation needed.
     let renderedPreview = tmpl.body || '';
     params.forEach((p, i) => {
       renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
     });
-    renderedPreview = renderedPreview.slice(0, 200);
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
