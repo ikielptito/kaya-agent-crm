@@ -163,11 +163,18 @@ function buildBrochures(projects) {
 // Maya operational windows (WITA = UTC+8)
 const ACTIVE_HOUR_START = 9;  // 9am WITA
 const ACTIVE_HOUR_END = 21;   // 9pm WITA (inclusive of 9:xx, exclusive of 10pm)
-const DAILY_SPEND_CAP_USD = 2.00;
+// Tightened from 2.00 → 0.75 after a broadcast day burned through prepaid
+// Anthropic credits. With ~$0.08 actual per-reply on Sonnet 4 (see below),
+// the cap now pauses Maya at ~9 replies/day instead of ~67, leaving a wide
+// margin even on low-balance days.
+const DAILY_SPEND_CAP_USD = 0.75;
 
 // Rough estimate: Claude Sonnet 4 with system prompt ~5k input + ~500 output tokens per reply
 // $3/M input, $15/M output → ~$0.022 per reply. We'll round up for safety to $0.03.
-const ESTIMATED_COST_PER_REPLY_USD = 0.03;
+// Bumped from 0.03 → 0.08 to reflect realistic Sonnet 4 cost with Maya's
+// full context (system prompt + KB + recent thread + projects/rentals
+// blocks). $3/M input + $15/M output × typical ~5K in / ~500 out ≈ $0.075.
+const ESTIMATED_COST_PER_REPLY_USD = 0.08;
 
 export default async function handler(req, res) {
   const VERIFY_TOKEN = process.env.META_WA_VERIFY_TOKEN;

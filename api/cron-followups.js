@@ -48,8 +48,12 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 const FOLLOWUP_INTERVAL_DAYS = 3;
 const MAX_FOLLOWUPS = 4;
 const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
-const DAILY_SPEND_CAP_USD = 2.00;
-const COST_PER_REPLY_USD = 0.02; // Sonnet 4 ~$0.02/follow-up
+// Tightened from 2.00 → 0.75 to match webhook cap after one broadcast
+// day burned prepaid credits. Both caps share the same daily_usage
+// counter, so the lower number is the effective ceiling for the whole
+// CRM's Claude spend.
+const DAILY_SPEND_CAP_USD = 0.75;
+const COST_PER_REPLY_USD = 0.05; // Sonnet 4 with smaller follow-up context
 const WA_MESSAGE_RETENTION_DAYS = 90; // older rows are pruned on each cron run
 
 export default async function handler(req, res) {
