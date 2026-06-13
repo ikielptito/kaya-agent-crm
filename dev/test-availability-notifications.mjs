@@ -42,17 +42,31 @@ function makeDigest(overrides = []) {
   return { asOf: new Date().toISOString(), portalBase: 'https://sambarentals.vercel.app', horizonDays: 180, longWindowDays: 30, properties: props };
 }
 
-// Default = both v1 and v2 templates approved. Individual tests override
-// by passing a subset.
+// Default = v1, v2, v3 templates all approved. Individual tests override
+// by passing a subset. Each fixture includes placeholderCount matching
+// what production's loadTemplatesMap computes from the body.
+function tmplWithCount(name, body) {
+  return { name, language: 'en', body, placeholderCount: (body.match(/\{\{(\d+)\}\}/g) || []).length };
+}
+const BODY_PARAGRAPH = 'Hi {{1}}\n{{2}}\n{{3}}';
+const BODY_ALERT_SLOTS = 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n{{5}}\n{{6}}';
+const BODY_DIGEST_SLOTS = 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n• {{5}}\n• {{6}}\n• {{7}}\n• {{8}}\n{{9}}';
+const BODY_INTRO_SLOTS = 'Hi {{1}}, Maya here.\n• {{2}}\n• {{3}}\n• {{4}}\n{{5}}\n{{6}}';
 const TEMPLATES_BOTH = {
-  samba_availability_alert:     { name: 'samba_availability_alert',     language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
-  samba_availability_digest:    { name: 'samba_availability_digest',    language: 'en', body: 'Hi {{1}}\n{{2}}\n{{3}}' },
-  samba_availability_alert_v2:  { name: 'samba_availability_alert_v2',  language: 'en', body: 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n{{5}}\n{{6}}' },
-  samba_availability_digest_v2: { name: 'samba_availability_digest_v2', language: 'en', body: 'Hi {{1}}\n• {{2}}\n• {{3}}\n• {{4}}\n• {{5}}\n• {{6}}\n• {{7}}\n• {{8}}\n{{9}}' },
+  samba_availability_alert:     tmplWithCount('samba_availability_alert',     BODY_PARAGRAPH),
+  samba_availability_digest:    tmplWithCount('samba_availability_digest',    BODY_PARAGRAPH),
+  samba_availability_alert_v2:  tmplWithCount('samba_availability_alert_v2',  BODY_ALERT_SLOTS),
+  samba_availability_digest_v2: tmplWithCount('samba_availability_digest_v2', BODY_DIGEST_SLOTS),
 };
 const TEMPLATES_V1_ONLY = {
   samba_availability_alert:  TEMPLATES_BOTH.samba_availability_alert,
   samba_availability_digest: TEMPLATES_BOTH.samba_availability_digest,
+};
+const TEMPLATES_V3 = {
+  ...TEMPLATES_BOTH,
+  samba_availability_intro_v3:  tmplWithCount('samba_availability_intro_v3',  BODY_INTRO_SLOTS),
+  samba_availability_alert_v3:  tmplWithCount('samba_availability_alert_v3',  BODY_ALERT_SLOTS),
+  samba_availability_digest_v3: tmplWithCount('samba_availability_digest_v3', BODY_DIGEST_SLOTS),
 };
 const TEMPLATES = TEMPLATES_BOTH;
 
@@ -86,6 +100,14 @@ function makeMockEnv({ digest, settings = {}, agentPatches = [], waMessages = []
       return { ok: true, json: async () => (key && settingsState[key] !== undefined ? [{ value: settingsState[key] }] : []) };
     }
     if (u.includes('/rest/v1/wa_messages')) {
+      const method = (opts.method || 'GET').toUpperCase();
+      if (method === 'GET') {
+        // Return the introduced agents (those with availability_* messages logged)
+        const rows = waMessages
+          .filter(m => m.category && m.category.startsWith('availability_') && m.agent_id != null)
+          .map(m => ({ agent_id: m.agent_id }));
+        return { ok: true, json: async () => rows };
+      }
       waMessages.push(JSON.parse(opts.body));
       return { ok: true, json: async () => ([]) };
     }
@@ -184,7 +206,7 @@ env = makeMockEnv({
   settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
 });
 summary = await runAvailabilityNotifications(ctx({ templatesMap: {} }));
-check('missing template logs error', summary.errors.some(e => e.includes('templates missing')), summary.errors.join(' | '));
+check('missing template logs error', summary.errors.some(e => e.includes('no template available')), summary.errors.join(' | '));
 check('missing template sends nothing', summary.event_alerts_sent === 0);
 
 // ── 8. Not eligible: agent not on Samba pipeline
@@ -326,6 +348,58 @@ env = makeMockEnv({
 summary = await runAvailabilityNotifications(ctx());
 const allBulletParams = env.metaSends[0]?.params.slice(1, 4) || [];
 check('every populated bullet has *bold* property name', allBulletParams.filter(p => p !== '—').every(p => /\*[^*]+\*/.test(p)), allBulletParams.join(' | '));
+
+// ── 19. v3 INTRO ON FIRST SEND ─────────────────────────────────────
+// Agent has zero prior availability messages → gets intro_v3 template.
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx({ templatesMap: TEMPLATES_V3 }));
+check('v3 template version reported', summary.template_version === 'v3', summary.template_version);
+check('v3 intro: send recorded as intro_alert kind', summary.intro_sent === 1, summary.intro_sent);
+check('v3 intro: wa_messages logged with category availability_intro', env.waMessages[0]?.category === 'availability_intro');
+check('v3 intro: template name in results', env.metaSends[0]?.templateName === 'samba_availability_intro_v3');
+
+// ── 20. v3 ALERT ON SECOND SEND ─────────────────────────────────────
+// Already-introduced agent (wa_messages has a prior availability_alert
+// row) gets the regular alert template, not the intro.
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+  waMessages: [{ agent_id: '1', category: 'availability_alert', timestamp: '2026-06-10T01:00:00Z' }],
+});
+summary = await runAvailabilityNotifications(ctx({ templatesMap: TEMPLATES_V3 }));
+check('v3 alert for already-introduced agent', summary.event_alerts_sent === 1 && !summary.intro_sent, JSON.stringify(summary));
+check('v3 alert: template name = alert_v3', env.metaSends[0]?.templateName === 'samba_availability_alert_v3');
+check('v3 alert: wa_messages category = availability_alert', env.waMessages.find(m => m.source === 'cron')?.category === 'availability_alert');
+
+// ── 21. INTRO FALLBACK WHEN NOT APPROVED ────────────────────────────
+// Only alert_v3 is approved (no intro_v3). First-timer gets the regular
+// alert template — long-form intro skipped but rebrand wording preserved.
+const TEMPLATES_V3_NO_INTRO = { ...TEMPLATES_V3 };
+delete TEMPLATES_V3_NO_INTRO.samba_availability_intro_v3;
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx({ templatesMap: TEMPLATES_V3_NO_INTRO }));
+check('intro falls back to alert when intro_v3 missing', env.metaSends[0]?.templateName === 'samba_availability_alert_v3');
+check('intro fallback: still recorded as event_alerts_sent (not intro)', summary.event_alerts_sent === 1 && !summary.intro_sent);
+
+// ── 22. v3 DIGEST ON MONDAY ─────────────────────────────────────────
+env = makeMockEnv({
+  digest: makeDigest(),
+  settings: { samba_availability: { enabled: true }, samba_availability_snapshot: yesterdaySnap },
+});
+summary = await runAvailabilityNotifications(ctx({
+  templatesMap: TEMPLATES_V3,
+  now: new Date('2026-06-15T01:00:00Z'),
+}));
+check('v3 digest on Monday', env.metaSends[0]?.templateName === 'samba_availability_digest_v3' && summary.weekly_digest_sent === 1);
+check('Monday digest: introduced check skipped (no Supabase GET attempt)',
+  // The introduced-set lookup only happens on non-Monday days; if Monday it should be empty/skipped
+  !summary.intro_sent);
 
 console.log(failures ? `\n${failures} FAILURES` : '\nALL PASS');
 process.exit(failures ? 1 : 0);

@@ -589,13 +589,24 @@ function buildPortfolioContextFromDb(projects) {
 //
 // Default-off so it ships dark. Flip enabled=true in Supabase when ready.
 
-// v2 templates use one variable per bullet line, rendering as a real
-// list because the static template body provides the surrounding bullets.
-// v1 is a single-paragraph fallback that works without re-approval.
+// Template versioning:
+//   v3 — fully branded: "Maya from Samba Rentals", 10% commission line,
+//        "Agent Portal" naming. v3 alert has a separate INTRO variant
+//        used the very first time an agent ever gets an availability
+//        message (long-form greeting), then the regular ALERT every time
+//        after — so agents see the introduction once, not on repeat.
+//   v2 — slot-based bulleted list, but plainer wording (no intro framing)
+//   v1 — single-paragraph fallback before slot templates existed
+// We prefer v3 → v2 → v1 per category, and the intro-vs-alert decision
+// happens per-agent so introduction state is correct even across rollouts.
+const ALERT_INTRO_V3     = 'samba_availability_intro_v3';
+const ALERT_TEMPLATE_V3  = 'samba_availability_alert_v3';
+const DIGEST_TEMPLATE_V3 = 'samba_availability_digest_v3';
 const ALERT_TEMPLATE_V2  = 'samba_availability_alert_v2';
 const DIGEST_TEMPLATE_V2 = 'samba_availability_digest_v2';
 const ALERT_TEMPLATE_V1  = 'samba_availability_alert';
 const DIGEST_TEMPLATE_V1 = 'samba_availability_digest';
+const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro'];
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
@@ -645,18 +656,25 @@ export async function runAvailabilityNotifications(ctx) {
     return summary;
   }
 
-  // ── Template lookup (v2 preferred, v1 fallback, fail loud if none) ──
+  // ── Template lookup (v3 preferred, v2 fallback, v1 last) ────────────
   const isMonday = now.getUTCDay() === 1; // 1am UTC Monday ≈ 9am WITA Monday
-  const v2Name = isMonday ? DIGEST_TEMPLATE_V2 : ALERT_TEMPLATE_V2;
-  const v1Name = isMonday ? DIGEST_TEMPLATE_V1 : ALERT_TEMPLATE_V1;
-  const tmpl = templatesMap[v2Name] || templatesMap[v1Name];
-  const tmplVersion = templatesMap[v2Name] ? 'v2' : 'v1';
-  if (!tmpl) {
-    summary.errors.push(`templates missing: ${v2Name} / ${v1Name}`);
-    results.push({ availability: true, action: 'template_missing', template: `${v2Name} / ${v1Name}` });
+  const pick = (...names) => names.find(n => templatesMap[n]);
+  const regularName = pick(ALERT_TEMPLATE_V3, ALERT_TEMPLATE_V2, ALERT_TEMPLATE_V1);
+  // Intro is v3-only; if v3 intro isn't approved yet, first-timers get the
+  // regular alert (still rebrand-correct under v3, just less long-form).
+  const introName = pick(ALERT_INTRO_V3) || regularName;
+  const digestName = pick(DIGEST_TEMPLATE_V3, DIGEST_TEMPLATE_V2, DIGEST_TEMPLATE_V1);
+  const neededName = isMonday ? digestName : regularName;
+  if (!neededName) {
+    summary.errors.push(`no template available (none of v3/v2/v1 ${isMonday ? 'digest' : 'alert'} found)`);
+    results.push({ availability: true, action: 'template_missing' });
     return summary;
   }
-  summary.template_version = tmplVersion;
+  summary.template_version = versionOfName(neededName);
+
+  // First-contact detection — agents who've ever received an availability
+  // message in any category. Drives intro vs alert choice per agent.
+  const introducedSet = isMonday ? new Set() : await loadIntroducedSet(supabaseUrl, sbHeaders);
 
   // ── Snapshot diff (event alerts only) ───────────────────────────
   const prevSnapshot = (await loadSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot')) || null;
@@ -705,14 +723,23 @@ export async function runAvailabilityNotifications(ctx) {
 
     const firstName = agent.name ? agent.name.split(' ')[0] : 'there';
     const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${agent.id}`;
+    // Per-agent template choice: digest on Mondays, intro on first-ever
+    // availability send (non-Monday only), regular alert otherwise.
+    const isFirstSend = !isMonday && !introducedSet.has(agent.id);
+    const useName = isMonday ? digestName : (isFirstSend ? introName : regularName);
+    const tmpl = templatesMap[useName];
+    const useSlots = (tmpl?.placeholderCount || 0) > 3;
     let params;
-    if (tmplVersion === 'v2') {
+    if (useSlots) {
       params = isMonday
         ? composeDigestParamsV2(firstName, digest.properties, trackedUrl)
         : composeAlertParamsV2(firstName, improvements.items, trackedUrl);
     } else {
       params = [firstName, isMonday ? digestBody : alertBody, trackedUrl];
     }
+    const category = isMonday
+      ? 'availability_digest'
+      : (isFirstSend && useName === ALERT_INTRO_V3 ? 'availability_intro' : 'availability_alert');
 
     // Inline the send so we can capture the Meta error body — sendTemplate
     // returns boolean only and the cause is invaluable for diagnosing template
@@ -758,7 +785,7 @@ export async function runAvailabilityNotifications(ctx) {
       body: JSON.stringify({
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
-        source: 'cron', category: isMonday ? 'availability_digest' : 'availability_alert',
+        source: 'cron', category,
       }),
     }).catch(() => {});
     await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
@@ -767,8 +794,11 @@ export async function runAvailabilityNotifications(ctx) {
     }).catch(() => {});
 
     if (isMonday) summary.weekly_digest_sent++;
+    else if (isFirstSend && useName === ALERT_INTRO_V3) { summary.event_alerts_sent++; summary.intro_sent = (summary.intro_sent || 0) + 1; }
     else summary.event_alerts_sent++;
-    results.push({ availability: true, agent: agent.name || agent.id, kind: isMonday ? 'weekly_digest' : 'event_alert' });
+    results.push({ availability: true, agent: agent.name || agent.id,
+      kind: isMonday ? 'weekly_digest' : (isFirstSend && useName === ALERT_INTRO_V3 ? 'intro_alert' : 'event_alert'),
+      template: useName });
   }
 
   // Persist the new snapshot only after a successful send pass — if Supabase
@@ -776,6 +806,32 @@ export async function runAvailabilityNotifications(ctx) {
   await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
   summary.ran = true;
   return summary;
+}
+
+function versionOfName(name) {
+  if (!name) return null;
+  if (name.endsWith('_v3')) return 'v3';
+  if (name.endsWith('_v2')) return 'v2';
+  return 'v1';
+}
+
+// Distinct agent_ids that have ever received any availability-category
+// message. Used as the "already introduced" set so we know not to send the
+// long-form intro twice. Returns an empty set on query failure so a degraded
+// Supabase doesn't suppress sends — the worst case is a repeat intro.
+async function loadIntroducedSet(url, headers) {
+  try {
+    const params = AVAILABILITY_CATEGORIES.map(c => encodeURIComponent(c)).join(',');
+    const r = await fetch(
+      `${url}/rest/v1/wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&limit=10000`,
+      { headers }
+    );
+    if (!r.ok) return new Set();
+    const rows = await r.json();
+    return new Set((rows || []).map(x => x.agent_id));
+  } catch (e) {
+    return new Set();
+  }
 }
 
 // Per-agent eligibility. The CRM's campaign_engagement.samba.status is
