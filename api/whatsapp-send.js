@@ -10,6 +10,7 @@
 //   - 'image'    — inline photo with optional caption
 //   - 'recall'   — attempt to delete a previously-sent message (24h window)
 //   - 'edit'     — attempt to edit a previously-sent text message (15min window)
+//   - 'fetch_media' — proxy an inbound WhatsApp media id through to a temp signed URL
 //
 // All sends log to wa_messages. Recall/edit also update the existing wa_messages
 // row's deleted_at / edited_at + content as appropriate. If Meta's API rejects
@@ -23,6 +24,11 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // fetch_media supports GET too so <img src="/api/whatsapp-send?fetch_media=ID"> works
+  if (req.method === 'GET' && req.query?.fetch_media) {
+    return await handleFetchMedia(req, res, req.query.fetch_media, process.env.META_WA_TOKEN);
+  }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const TOKEN = process.env.META_WA_TOKEN;
@@ -49,6 +55,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (action === 'fetch_media') return await handleFetchMedia(req, res, body.mediaId, TOKEN);
     if (action === 'recall')   return await handleRecall(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'edit')     return await handleEdit(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'image')    return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'image');
@@ -142,6 +149,42 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
   }
 
   return res.status(200).json({ success: true, waMessageId });
+}
+
+// ── FETCH_MEDIA (proxy WhatsApp media id → temp signed URL) ─────────
+// WhatsApp Cloud API requires bearer auth to fetch media URLs, and the URLs
+// expire in ~5min. The inbox loads images via <img src="...?fetch_media=ID">,
+// we resolve the signed URL server-side then stream the bytes back so the
+// browser sees a normal image response (cacheable, embeddable, no auth flow).
+async function handleFetchMedia(req, res, mediaId, TOKEN) {
+  if (!mediaId) return res.status(400).json({ error: 'mediaId is required' });
+  if (!TOKEN) return res.status(500).json({ error: 'META_WA_TOKEN not configured' });
+  try {
+    // Step 1: get the temp signed URL + mime type
+    const metaRes = await fetch(`${GRAPH}/${encodeURIComponent(mediaId)}`, {
+      headers: { 'Authorization': 'Bearer ' + TOKEN },
+    });
+    if (!metaRes.ok) {
+      const d = await metaRes.json().catch(() => ({}));
+      return res.status(metaRes.status).json({ error: d.error?.message || 'media lookup failed' });
+    }
+    const meta = await metaRes.json();
+    if (!meta.url) return res.status(404).json({ error: 'media url missing' });
+
+    // Step 2: stream the bytes through. Meta requires the same bearer token
+    // to fetch the actual file, so we have to proxy rather than redirect.
+    const fileRes = await fetch(meta.url, {
+      headers: { 'Authorization': 'Bearer ' + TOKEN },
+    });
+    if (!fileRes.ok) return res.status(fileRes.status).json({ error: 'media fetch failed' });
+
+    res.setHeader('Content-Type', meta.mime_type || fileRes.headers.get('content-type') || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    const buf = Buffer.from(await fileRes.arrayBuffer());
+    return res.status(200).send(buf);
+  } catch (e) {
+    return res.status(500).json({ error: e.message });
+  }
 }
 
 // ── RECALL (delete a sent message) ───────────────────────────────────

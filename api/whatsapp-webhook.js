@@ -206,9 +206,21 @@ export default async function handler(req, res) {
     if (!msg) return res.status(200).end(); // status update, not a message
 
     const fromNum = msg.from;
-    const text = msg.text?.body || '';
     const waMessageId = msg.id;
     const timestamp = new Date(parseInt(msg.timestamp) * 1000).toISOString();
+
+    // ── Extract content from ANY message type ─────────────────────
+    // WhatsApp delivers text, image, document, audio, video, sticker,
+    // location, contact, and reaction messages. We extract a readable
+    // content string + a media reference (if applicable) so the inbox
+    // shows the actual message instead of a blank row.
+    const extracted = extractInboundContent(msg);
+    const text = extracted.textForClaude;     // what Maya sees as the inbound prompt
+    const dbContent = extracted.dbContent;    // what gets stored in wa_messages.content
+    const mediaType = extracted.mediaType;    // 'image' | 'document' | 'audio' | etc, or null
+    const mediaId = extracted.mediaId;        // WhatsApp media id, fetched on demand by /api/wa-media
+    const reactionTarget = extracted.reactionTarget; // for reactions, the original message_id
+    const reactionEmoji = extracted.reactionEmoji;
 
     // Mark the inbound as read + show typing indicator immediately. This gives
     // the agent the "blue ticks" + a brief "Maya is typing..." while we
@@ -234,12 +246,25 @@ export default async function handler(req, res) {
     );
     const agent = (await agentRes.json())?.[0];
 
-    // Store inbound message
+    // Handle reactions inline — they're not standalone messages, they
+    // annotate a previous outbound. Patch the original row's reactions
+    // field instead of storing a new message.
+    if (reactionTarget && reactionEmoji !== undefined) {
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(reactionTarget)}`, {
+        method: 'PATCH', headers: sbHeaders,
+        body: JSON.stringify({ reaction: reactionEmoji || null }),
+      }).catch(() => {});
+      return res.status(200).end();
+    }
+
+    // Store inbound message — content is human-readable summary, media
+    // identifiers go in dedicated columns for the inbox to render inline.
     await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
         agent_id: agent?.id || null, wa_num: fromNum, direction: 'inbound',
-        content: text, wa_message_id: waMessageId, timestamp, source: 'webhook'
+        content: dbContent, wa_message_id: waMessageId, timestamp, source: 'webhook',
+        media_type: mediaType || null, media_id: mediaId || null,
       })
     });
 
@@ -419,6 +444,87 @@ export default async function handler(req, res) {
 // ── Helpers ──────────────────────────────────────────────
 
 // Returns true if current time is between 9am and 9pm WITA (UTC+8).
+// Extract a readable summary + media reference from any inbound WhatsApp
+// message type. Returns:
+//   { textForClaude, dbContent, mediaType, mediaId, reactionTarget, reactionEmoji }
+// textForClaude is what we feed Maya as the inbound prompt (she shouldn't
+// reply to silent reactions); dbContent is the human-readable inbox row.
+function extractInboundContent(msg) {
+  const out = {
+    textForClaude: '', dbContent: '', mediaType: null, mediaId: null,
+    reactionTarget: null, reactionEmoji: undefined,
+  };
+  if (msg.text?.body) {
+    out.textForClaude = msg.text.body;
+    out.dbContent = msg.text.body;
+    return out;
+  }
+  if (msg.image) {
+    out.mediaType = 'image';
+    out.mediaId = msg.image.id || null;
+    const cap = msg.image.caption ? ` "${msg.image.caption}"` : '';
+    out.dbContent = `[Image]${cap}`;
+    out.textForClaude = msg.image.caption || '[Agent sent an image — say briefly that you cannot view images yet and offer to have Ikiel review it.]';
+    return out;
+  }
+  if (msg.document) {
+    out.mediaType = 'document';
+    out.mediaId = msg.document.id || null;
+    const name = msg.document.filename || 'document';
+    const cap = msg.document.caption ? ` "${msg.document.caption}"` : '';
+    out.dbContent = `[Document: ${name}]${cap}`;
+    out.textForClaude = msg.document.caption || `[Agent sent a document: ${name}. Briefly acknowledge receipt and say you will pass it to Ikiel.]`;
+    return out;
+  }
+  if (msg.audio || msg.voice) {
+    const a = msg.audio || msg.voice;
+    out.mediaType = 'audio';
+    out.mediaId = a.id || null;
+    out.dbContent = '[Voice note]';
+    out.textForClaude = '[Agent sent a voice note. Say briefly that you cannot process voice notes yet and ask them to send the question as text, or offer to have Ikiel call them back.]';
+    return out;
+  }
+  if (msg.video) {
+    out.mediaType = 'video';
+    out.mediaId = msg.video.id || null;
+    const cap = msg.video.caption ? ` "${msg.video.caption}"` : '';
+    out.dbContent = `[Video]${cap}`;
+    out.textForClaude = msg.video.caption || '[Agent sent a video. Acknowledge briefly and offer to have Ikiel review it.]';
+    return out;
+  }
+  if (msg.sticker) {
+    out.mediaType = 'sticker';
+    out.mediaId = msg.sticker.id || null;
+    out.dbContent = '[Sticker]';
+    out.textForClaude = '[Agent sent a sticker — no need to reply unless context demands it.]';
+    return out;
+  }
+  if (msg.location) {
+    const lat = msg.location.latitude;
+    const lng = msg.location.longitude;
+    const nm = msg.location.name ? ` ${msg.location.name}` : '';
+    out.mediaType = 'location';
+    out.mediaId = `${lat},${lng}`;
+    out.dbContent = `[Location${nm}: ${lat}, ${lng}]`;
+    out.textForClaude = `[Agent shared a location${nm}. Acknowledge briefly.]`;
+    return out;
+  }
+  if (msg.contacts && Array.isArray(msg.contacts)) {
+    const names = msg.contacts.map(c => c.name?.formatted_name || 'contact').join(', ');
+    out.dbContent = `[Contact card: ${names}]`;
+    out.textForClaude = `[Agent shared a contact card: ${names}.]`;
+    return out;
+  }
+  if (msg.reaction) {
+    out.reactionTarget = msg.reaction.message_id;
+    out.reactionEmoji = msg.reaction.emoji || '';
+    out.dbContent = `[Reacted ${msg.reaction.emoji || '(removed)'}]`;
+    return out;
+  }
+  out.dbContent = `[Unknown message type: ${msg.type}]`;
+  return out;
+}
+
 function isWithinOperationalHours() {
   const nowUtc = new Date();
   // WITA = UTC+8. Convert hour by adding 8.

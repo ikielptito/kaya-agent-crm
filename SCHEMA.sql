@@ -112,6 +112,20 @@ alter table agents add column if not exists last_availability_alert_at timestamp
 alter table wa_messages add column if not exists category text;
   -- null (legacy) | 'availability_alert' | 'availability_digest' | 'followup' | 'sequence'
 
+-- ── INBOUND MEDIA + REACTIONS (added 2026-06-14) ────────────────────
+-- Before these columns, an inbound image/document/voice was logged as an
+-- empty content row (the webhook only read text bodies). The inbox now
+-- renders inline previews using media_type + media_id (the WhatsApp media
+-- id, proxied through /api/whatsapp-send?fetch_media=ID).
+alter table wa_messages add column if not exists media_type text;
+  -- 'image' | 'document' | 'audio' | 'video' | 'sticker' | 'location' | null
+alter table wa_messages add column if not exists media_id text;
+  -- the WhatsApp media id, used to fetch the file via the proxy endpoint
+alter table wa_messages add column if not exists reaction text;
+  -- WhatsApp reactions arrive as separate webhook events targeting a prior
+  -- message; we PATCH the original row's reaction column rather than
+  -- create a noisy 'reacted 👍' line in the timeline.
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (

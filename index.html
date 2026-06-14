@@ -446,6 +446,17 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .inbox-conv-time { font-size: 10px; color: var(--ink4); }
 .inbox-unread { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; background: var(--wa); color: white; border-radius: 9px; font-size: 10px; font-weight: 600; }
 .inbox-draft-flag { font-size: 9px; font-weight: 600; letter-spacing: 0.03em; color: var(--accent); background: var(--accent-light); padding: 2px 5px; border-radius: 4px; }
+.conv-status { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; }
+.conv-status-draft { color: var(--accent); background: var(--accent-light); }
+.conv-status-needs { color: #c83232; background: #fde7e7; }
+.conv-status-waiting { color: #b06a00; background: #fcecc6; }
+.conv-status-replied { color: #1c7c44; background: #d6f0de; }
+.conv-status-paused { color: var(--ink3); background: var(--sand); }
+.inbox-search-row { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--sand2); background: white; position: sticky; top: 0; z-index: 2; }
+.inbox-search-input { flex: 1; height: 30px; padding: 0 10px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 6px; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink); outline: none; }
+.inbox-search-input:focus { background: white; border-color: var(--accent-mid); }
+.inbox-search-clear { height: 30px; padding: 0 8px; background: none; border: none; color: var(--ink3); cursor: pointer; font-size: 14px; line-height: 1; border-radius: 6px; }
+.inbox-search-clear:hover { color: var(--ink); background: var(--sand); }
 .inbox-thread { flex: 1; display: flex; flex-direction: column; background: var(--sand); min-width: 0; }
 .inbox-thread-header { background: white; border-bottom: 1px solid var(--sand3); padding: 12px 18px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .inbox-thread-msgs { flex: 1; overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 8px; }
@@ -453,6 +464,22 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .bubble.in { align-self: flex-start; background: white; color: var(--ink); border-bottom-left-radius: 3px; }
 .bubble.out { align-self: flex-end; background: var(--wa); color: white; border-bottom-right-radius: 3px; }
 .bubble-time { font-size: 9px; opacity: 0.6; margin-top: 3px; }
+.bubble.has-media { padding: 4px 4px 6px; }
+.bubble.has-media .bubble-time { padding: 0 8px; }
+.bubble-media-img { max-width: 100%; max-height: 280px; border-radius: 8px; display: block; cursor: zoom-in; }
+.bubble-media-audio { width: 220px; height: 32px; display: block; margin: 2px 0; }
+.bubble-media-video { max-width: 100%; max-height: 280px; border-radius: 8px; display: block; }
+.bubble-media-doc { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(0,0,0,0.06); border-radius: 6px; font-size: 12px; color: inherit; text-decoration: none; margin: 2px 0; }
+.bubble.out .bubble-media-doc { background: rgba(255,255,255,0.18); color: white; }
+.bubble-media-doc:hover { background: rgba(0,0,0,0.1); }
+.bubble-media-loc { display: inline-block; padding: 8px 12px; background: rgba(0,0,0,0.06); border-radius: 6px; font-size: 12px; color: inherit; text-decoration: none; margin: 2px 0; }
+.bubble.out .bubble-media-loc { background: rgba(255,255,255,0.18); color: white; }
+.bubble-reaction { position: absolute; bottom: -10px; right: 8px; background: white; border: 1px solid var(--sand3); border-radius: 12px; padding: 2px 7px; font-size: 12px; line-height: 1; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+.bubble-portal-card { display: block; margin-top: 6px; padding: 9px 12px; background: rgba(0,0,0,0.05); border-radius: 8px; text-decoration: none; color: inherit; border-left: 3px solid var(--accent); }
+.bubble.out .bubble-portal-card { background: rgba(255,255,255,0.15); border-left-color: white; }
+.bubble-portal-host { font-size: 10px; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+.bubble-portal-title { font-size: 13px; font-weight: 600; margin-bottom: 1px; }
+.bubble-portal-sub { font-size: 11px; opacity: 0.75; }
 .bubble.bubble-deleted { opacity: 0.55; font-style: italic; background: var(--sand); color: var(--ink3); border: 1px dashed var(--sand3); }
 .bubble.out.bubble-deleted { background: var(--sand); color: var(--ink3); }
 .inbox-reply { background: white; border-top: 1px solid var(--sand3); padding: 12px 16px; flex-shrink: 0; }
@@ -460,6 +487,16 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .inbox-reply textarea { flex: 1; min-height: 38px; max-height: 120px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 8px; padding: 9px 12px; font-family: 'Geist',sans-serif; font-size: 13px; color: var(--ink); resize: vertical; outline: none; }
 .inbox-reply textarea:focus { background: white; border-color: var(--accent-mid); }
 .inbox-suggest-btn { height: 38px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 8px; color: var(--accent); font-family: 'Geist',sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.inbox-icon-btn { height: 38px; padding: 0 10px; border: 1px solid var(--sand3); border-radius: 8px; background: white; color: var(--ink2); cursor: pointer; flex-shrink: 0; font-size: 16px; }
+.inbox-icon-btn:hover { background: var(--sand); }
+.inbox-popover { position: absolute; bottom: 56px; left: 16px; right: 16px; max-width: 360px; background: white; border: 1px solid var(--sand3); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.12); padding: 10px; z-index: 50; max-height: 280px; overflow-y: auto; }
+.emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
+.emoji-grid button { width: 30px; height: 30px; border: none; background: none; font-size: 20px; cursor: pointer; border-radius: 5px; padding: 0; }
+.emoji-grid button:hover { background: var(--sand); }
+.quick-reply-item { display: block; width: 100%; text-align: left; padding: 8px 10px; background: none; border: none; border-radius: 6px; cursor: pointer; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink); }
+.quick-reply-item:hover, .quick-reply-item.focused { background: var(--accent-light); }
+.quick-reply-item .qr-key { font-size: 11px; color: var(--accent); font-weight: 600; margin-right: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.quick-reply-item .qr-preview { color: var(--ink3); display: block; margin-top: 2px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .inbox-send-btn { height: 38px; padding: 0 16px; background: var(--wa); border: none; border-radius: 8px; color: white; font-family: 'Geist',sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
 .inbox-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .inbox-draft-banner { background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; padding: 8px 11px; margin-bottom: 8px; font-size: 11px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -4890,13 +4927,49 @@ async function renderInbox(silent) {
     return;
   }
 
-  list.innerHTML = convs.map(a => {
+  // Apply the inbox search filter (name, agency, last-snippet). Preserved
+  // across re-renders so the user keeps their filter when new messages land.
+  const q = (window._inboxQuery || '').trim().toLowerCase();
+  const filtered = q
+    ? convs.filter(a => {
+        const m = msgMap[a.id];
+        const hay = `${a.name||''} ${a.agency||''} ${a.wa_num||''} ${m?.lastContent||''}`.toLowerCase();
+        return hay.includes(q);
+      })
+    : convs;
+
+  const searchBarHtml = `
+    <div class="inbox-search-row">
+      <input class="inbox-search-input" type="text" placeholder="Search conversations…"
+        value="${(q || '').replace(/"/g,'&quot;')}"
+        oninput="window._inboxQuery=this.value;renderInbox(true)"
+        onkeydown="if(event.key==='Escape'){this.value='';window._inboxQuery='';renderInbox(true);this.blur();}">
+      ${q ? `<button class="inbox-search-clear" onclick="window._inboxQuery='';renderInbox(true)" title="Clear">✕</button>` : ''}
+    </div>`;
+
+  list.innerHTML = searchBarHtml + (filtered.length === 0
+    ? `<div style="padding:30px 16px;text-align:center;color:var(--ink3);font-size:12px">No conversations match "${q.replace(/</g,'&lt;')}"</div>`
+    : filtered.map(a => {
     const ini = initials(a.name, a.agency);
     const m = msgMap[a.id];
     const lastTs = m?.lastTimestamp || a.last_inbound_at;
     const time = lastTs ? timeAgo(new Date(lastTs)) : '';
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
     const snippet = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
+    // Conversation status pill — scannable at a glance.
+    let statusPill = '';
+    if (a.automation_override === 'paused') {
+      statusPill = '<span class="conv-status conv-status-paused" title="Manual mode — Maya silent">PAUSED</span>';
+    } else if (hasDraft) {
+      statusPill = '<span class="conv-status conv-status-draft" title="Maya drafted a reply waiting for you">DRAFT</span>';
+    } else if (m?.direction === 'inbound') {
+      const ageH = lastTs ? (Date.now() - new Date(lastTs).getTime()) / 3.6e6 : 0;
+      statusPill = ageH > 2
+        ? '<span class="conv-status conv-status-needs" title="Agent waiting more than 2 hours">NEEDS YOU</span>'
+        : '<span class="conv-status conv-status-waiting" title="Agent\'s last message — Maya has not replied yet">WAITING</span>';
+    } else if (m?.direction === 'outbound') {
+      statusPill = '<span class="conv-status conv-status-replied" title="Last beat was an outbound reply">REPLIED</span>';
+    }
     // Tiny track indicator: which relationship(s) this agent has activity in.
     const hasKaya = bestKayaStatus(a) !== 'Not contacted';
     const hasSamba = getSambaStatus(a) !== 'Not contacted';
@@ -4912,10 +4985,10 @@ async function renderInbox(silent) {
       <div class="inbox-conv-meta">
         <span class="inbox-conv-time">${time}</span>
         ${a.unread_count ? `<span class="inbox-unread">${a.unread_count}</span>` : ''}
-        ${hasDraft ? `<span class="inbox-draft-flag">DRAFT</span>` : ''}
+        ${statusPill}
       </div>
     </div>`;
-  }).join('');
+  }).join(''));
 }
 
 async function openConversation(agentId) {
@@ -4940,11 +5013,17 @@ async function openConversation(agentId) {
       <div id="inboxAttachChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px"></div>
       <div class="inbox-reply-row">
         <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})" title="Claude suggests a reply">✦</button>
-        <button onclick="openInboxAttachMenu(${a.id})" title="Attach a file" style="height:38px;padding:0 10px;border:1px solid var(--sand3);border-radius:8px;background:white;color:var(--ink2);cursor:pointer;flex-shrink:0;font-size:16px">📎</button>
+        <button class="inbox-icon-btn" onclick="openInboxAttachMenu(${a.id})" title="Attach a file">📎</button>
+        <button class="inbox-icon-btn" onclick="toggleEmojiPicker(event)" title="Insert emoji">😀</button>
+        <button class="inbox-icon-btn" onclick="toggleQuickReplies(event, ${a.id})" title="Quick replies (or type / at the start of a message)">⚡</button>
         <input type="file" id="inboxFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg,.jpeg" style="display:none" onchange="handleInboxFileUpload(this, ${a.id})">
-        <textarea id="replyBox" placeholder="Type a reply...">${(a.suggested_reply || '').replace(/</g,'&lt;')}</textarea>
+        <textarea id="replyBox" placeholder="Type a reply…  (Enter to send · Shift+Enter newline · / for snippets)"
+          onkeydown="handleReplyKeydown(event, ${a.id})"
+          oninput="handleReplyInput(event, ${a.id})">${(a.suggested_reply || '').replace(/</g,'&lt;')}</textarea>
         <button class="inbox-send-btn" id="replySendBtn" onclick="sendReply(${a.id})">Send</button>
       </div>
+      <div id="emojiPicker" class="inbox-popover" style="display:none"></div>
+      <div id="quickReplyMenu" class="inbox-popover" style="display:none"></div>
       <div id="inboxBrochureMenu" style="display:none;margin-top:8px;padding:8px;background:var(--sand);border-radius:8px;flex-wrap:wrap;gap:5px"></div>
     </div>`;
   // Reset inbox attachments
@@ -4997,7 +5076,16 @@ function renderMessageBubble(m) {
     </div>`;
   }
 
-  const safeContent = (m.content || '').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  // Media-first rendering: inbound images/docs/audio render inline via the
+  // /api/whatsapp-send?fetch_media=ID proxy (text/caption falls under it).
+  const mediaHtml = renderMessageMedia(m);
+  const captionRaw = (m.content || '').replace(/^\[(?:Image|Document:[^\]]*|Voice note|Video|Sticker|Location[^\]]*|Contact card[^\]]*)\]\s*/, '').replace(/^"|"$/g, '');
+  const bodyText = m.media_type ? captionRaw : (m.content || '');
+  const safeContent = bodyText.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  const linkPreviewHtml = renderInlineLinkPreviews(bodyText);
+  const reactionHtml = m.reaction
+    ? `<div class="bubble-reaction" title="Agent reacted ${m.reaction}">${m.reaction}</div>`
+    : '';
   const editedLabel = isEdited
     ? `<span style="font-size:9px;color:var(--ink4);margin-left:6px">(edited)</span>` : '';
 
@@ -5015,11 +5103,71 @@ function renderMessageBubble(m) {
     }
   }
 
-  return `<div class="bubble ${isOut ? 'out' : 'in'}" style="position:relative" onmouseenter="this.querySelector('.bubble-actions')?.style.setProperty('display','flex')" onmouseleave="this.querySelector('.bubble-actions')?.style.setProperty('display','none')">
+  return `<div class="bubble ${isOut ? 'out' : 'in'} ${m.media_type ? 'has-media' : ''}" style="position:relative" onmouseenter="this.querySelector('.bubble-actions')?.style.setProperty('display','flex')" onmouseleave="this.querySelector('.bubble-actions')?.style.setProperty('display','none')">
     ${actions}
+    ${mediaHtml}
     ${safeContent}${editedLabel}
+    ${linkPreviewHtml}
     <div class="bubble-time">${t}</div>
+    ${reactionHtml}
   </div>`;
+}
+
+// Render inbound WhatsApp media via the /api/whatsapp-send fetch_media proxy.
+// Images render inline; documents become a downloadable chip; audio gets a
+// player; everything else gets a labeled placeholder.
+function renderMessageMedia(m) {
+  if (!m.media_type || !m.media_id) return '';
+  const src = '/api/whatsapp-send?fetch_media=' + encodeURIComponent(m.media_id);
+  if (m.media_type === 'image' || m.media_type === 'sticker') {
+    return `<img class="bubble-media-img" src="${src}" alt="${m.media_type}" onclick="openImageLightbox('${src}')" loading="lazy">`;
+  }
+  if (m.media_type === 'audio') {
+    return `<audio class="bubble-media-audio" controls preload="metadata" src="${src}"></audio>`;
+  }
+  if (m.media_type === 'video') {
+    return `<video class="bubble-media-video" controls preload="metadata" src="${src}"></video>`;
+  }
+  if (m.media_type === 'document') {
+    const name = (m.content || '').match(/^\[Document:\s*([^\]]+)\]/)?.[1] || 'document';
+    return `<a class="bubble-media-doc" href="${src}" download="${name.replace(/"/g, '')}" target="_blank">📄 ${name.replace(/</g, '&lt;')}</a>`;
+  }
+  if (m.media_type === 'location') {
+    const coords = m.media_id;
+    return `<a class="bubble-media-loc" href="https://www.google.com/maps?q=${coords}" target="_blank">📍 Open in Maps</a>`;
+  }
+  return '';
+}
+
+// Match sambarentals.vercel.app links (portal home or /l/<slug>) in the
+// message body and render them as a clickable card with the listing's OG
+// preview image. No network call needed — the OG image is built from
+// listing data already.
+function renderInlineLinkPreviews(text) {
+  if (!text) return '';
+  const re = /https?:\/\/(?:www\.)?sambarentals\.vercel\.app(?:\/l\/([a-z0-9-]+))?[^\s]*/gi;
+  const matches = [...text.matchAll(re)].slice(0, 2);
+  if (!matches.length) return '';
+  return matches.map(m => {
+    const slug = m[1];
+    const title = slug
+      ? slug.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      : 'Samba Rentals — Agent Portal';
+    const url = m[0];
+    return `<a class="bubble-portal-card" href="${url}" target="_blank" rel="noopener">
+      <div class="bubble-portal-host">sambarentals.vercel.app</div>
+      <div class="bubble-portal-title">${title.replace(/</g, '&lt;')}</div>
+      <div class="bubble-portal-sub">${slug ? 'Live availability + photos' : 'Live agent portal'}</div>
+    </a>`;
+  }).join('');
+}
+
+function openImageLightbox(src) {
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;z-index:9999;cursor:zoom-out';
+  overlay.onclick = () => overlay.remove();
+  overlay.innerHTML = `<img src="${src}" style="max-width:92vw;max-height:92vh;object-fit:contain;border-radius:6px">`;
+  document.body.appendChild(overlay);
 }
 
 async function editMessage(waMessageId, rowId) {
@@ -5080,6 +5228,157 @@ async function suggestReply(agentId) {
     alert('Could not generate a suggestion: ' + e.message);
   }
 }
+
+// ── Inbox reply UX: shortcuts + emoji + quick replies ──────────────
+// Quick reply snippets — typed `/` at the start of the textarea opens
+// the menu, or click the ⚡ button. Press 1-9 to insert, or arrow keys.
+const QUICK_REPLIES = [
+  { key: 'portal',     label: 'Send portal link',      body: 'You can check out our Agent Portal to see all available properties in real time, download photos, and share listings with your clients: https://sambarentals.vercel.app' },
+  { key: 'commission', label: 'Explain commission',    body: 'The 10% agent commission is already included in the portal price. You quote the portal price to your client as-is, and earn 10% of that. If you prefer 20%, you can quote the portal price + 10% to your client — the extra 10% comes from them.' },
+  { key: 'visit',      label: 'Coordinate a visit',    body: 'Happy to coordinate a visit. Let me have Ikiel reach out directly to find a time that works for you and the property.' },
+  { key: 'photos',     label: 'Direct to photos',      body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.vercel.app' },
+  { key: 'thanks',     label: 'Closing thanks',        body: 'Thanks for reaching out — let me know if anything else comes up.' },
+  { key: 'agreement',  label: 'Listing agreement',     body: 'Ikiel will follow up with the listing agreement directly. Let us know if you have any specific questions about the terms in the meantime.' },
+  { key: 'pause',      label: 'No rush / business hours', body: 'No rush at all — happy to share more whenever you\'re free.' },
+];
+
+// Most-used emojis for a CRM context — keep small and curated rather than
+// shipping a 3000-emoji picker library.
+const EMOJI_SET = [
+  '👍','🙏','😊','😅','💪','🎉','✨','✅','❤️','🔥',
+  '😂','💯','👀','🤝','👋','🌴','🏠','🏡','📍','📸',
+  '💬','📲','📞','🗓','📋','💰','🤙','😎','🙌','🤔',
+  '👇','👆','👉','👈','⭐','🌅','🥥','☀️','🌧','💭',
+];
+
+function handleReplyKeydown(e, agentId) {
+  // Quick-reply menu navigation
+  const qr = document.getElementById('quickReplyMenu');
+  if (qr && qr.style.display === 'block') {
+    const items = [...qr.querySelectorAll('.quick-reply-item')];
+    let idx = items.findIndex(x => x.classList.contains('focused'));
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      idx = Math.min(items.length - 1, idx < 0 ? 0 : idx + 1);
+      items.forEach((x, i) => x.classList.toggle('focused', i === idx));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      idx = Math.max(0, idx < 0 ? 0 : idx - 1);
+      items.forEach((x, i) => x.classList.toggle('focused', i === idx));
+      return;
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const pick = items[idx >= 0 ? idx : 0];
+      pick?.click();
+      return;
+    }
+    if (e.key === 'Escape') { qr.style.display = 'none'; return; }
+    // Number key shortcuts
+    const n = parseInt(e.key);
+    if (n >= 1 && n <= 9 && items[n - 1]) {
+      e.preventDefault();
+      items[n - 1].click();
+      return;
+    }
+  }
+  // Send on Enter, newline on Shift+Enter
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendReply(agentId);
+  }
+}
+
+function handleReplyInput(e, agentId) {
+  const box = e.target;
+  const v = box.value;
+  // Open quick-reply menu when user types `/` as the first non-space char
+  if (v.trimStart().startsWith('/') && v.length <= 30) {
+    const filter = v.trim().slice(1).toLowerCase();
+    showQuickReplies(agentId, filter);
+  } else {
+    const qr = document.getElementById('quickReplyMenu');
+    if (qr) qr.style.display = 'none';
+  }
+}
+
+function toggleEmojiPicker(e) {
+  e.stopPropagation();
+  const ep = document.getElementById('emojiPicker');
+  const qr = document.getElementById('quickReplyMenu');
+  if (qr) qr.style.display = 'none';
+  if (ep.style.display === 'block') { ep.style.display = 'none'; return; }
+  ep.innerHTML = `<div class="emoji-grid">${EMOJI_SET.map(e =>
+    `<button onclick="insertAtCursor('${e}');event.stopPropagation()" title="${e}">${e}</button>`
+  ).join('')}</div>`;
+  ep.style.display = 'block';
+}
+
+function toggleQuickReplies(e, agentId) {
+  e.stopPropagation();
+  const qr = document.getElementById('quickReplyMenu');
+  const ep = document.getElementById('emojiPicker');
+  if (ep) ep.style.display = 'none';
+  if (qr.style.display === 'block') { qr.style.display = 'none'; return; }
+  showQuickReplies(agentId, '');
+}
+
+function showQuickReplies(agentId, filter) {
+  const qr = document.getElementById('quickReplyMenu');
+  const matches = QUICK_REPLIES.filter(r =>
+    !filter || r.key.includes(filter) || r.label.toLowerCase().includes(filter)
+  );
+  if (!matches.length) { qr.style.display = 'none'; return; }
+  qr.innerHTML = matches.map((r, i) =>
+    `<button class="quick-reply-item ${i === 0 ? 'focused' : ''}" onclick="insertQuickReply('${r.key}', ${agentId})">
+      <span class="qr-key">${i < 9 ? (i+1)+' · ' : ''}${r.key}</span>
+      <span>${r.label}</span>
+      <span class="qr-preview">${r.body.slice(0, 80).replace(/</g,'&lt;')}…</span>
+    </button>`
+  ).join('');
+  qr.style.display = 'block';
+}
+
+function insertQuickReply(key, agentId) {
+  const item = QUICK_REPLIES.find(r => r.key === key);
+  if (!item) return;
+  const box = document.getElementById('replyBox');
+  if (box.value.trimStart().startsWith('/')) {
+    box.value = item.body;
+  } else {
+    insertAtCursor(item.body);
+  }
+  document.getElementById('quickReplyMenu').style.display = 'none';
+  box.focus();
+}
+
+function insertAtCursor(text) {
+  const box = document.getElementById('replyBox');
+  if (!box) return;
+  const start = box.selectionStart, end = box.selectionEnd;
+  box.value = box.value.slice(0, start) + text + box.value.slice(end);
+  box.setSelectionRange(start + text.length, start + text.length);
+  box.dispatchEvent(new Event('input'));
+  box.focus();
+}
+
+// Click-outside closes popovers + Cmd+K focuses search
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#emojiPicker, #quickReplyMenu, .inbox-icon-btn')) {
+    const ep = document.getElementById('emojiPicker');
+    const qr = document.getElementById('quickReplyMenu');
+    if (ep) ep.style.display = 'none';
+    if (qr) qr.style.display = 'none';
+  }
+});
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    const search = document.querySelector('.inbox-search-input');
+    if (search) { e.preventDefault(); search.focus(); search.select(); }
+  }
+});
 
 async function sendReply(agentId) {
   const a = agents.find(x => x.id === agentId);
