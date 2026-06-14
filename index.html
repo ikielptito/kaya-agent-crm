@@ -742,7 +742,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   <div class="inbox-bar">
     <div style="display:flex;align-items:center;gap:10px">
       <span style="font-size:13px;font-weight:600;color:var(--ink)">Inbox</span>
-      <button onclick="renderInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
+      <button onclick="refreshInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-size:11px;font-weight:600;letter-spacing:0.04em;color:var(--ink3);text-transform:uppercase">Claude automation</span>
@@ -4877,6 +4877,35 @@ function toggleInbox() {
     inboxPollTimer = setInterval(() => { if (inboxOpen) renderInbox(true); }, 20000);
   } else {
     clearInterval(inboxPollTimer);
+  }
+}
+
+// Explicit refresh — re-fetches agents (so unread counts, drafts, inbound
+// timestamps are fresh), invalidates the message cache, re-renders the
+// conversation list, and reloads the currently open thread. The 20s silent
+// poller doesn't refetch agents — it'd be wasteful — so a manual click is
+// the only path that pulls the most up-to-date everything.
+async function refreshInbox() {
+  const btn = event?.currentTarget;
+  if (btn) { btn.disabled = true; const orig = btn.textContent; btn.textContent = '↻ Refreshing…';
+    setTimeout(() => { if (btn) { btn.textContent = orig; btn.disabled = false; } }, 1200);
+  }
+  try {
+    // 1. Fresh agents (parallel with the messages fetch)
+    const agentsPromise = fetch('/api/supabase', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'get_agents' }),
+    }).then(r => r.ok ? r.json() : null);
+    // 2. Invalidate message cache so renderInbox does a fresh fetch
+    window._inboxMsgAgentIds = null;
+    const fresh = await agentsPromise;
+    if (Array.isArray(fresh) && fresh.length) agents = fresh;
+  } catch (e) { console.warn('refreshInbox: agents reload failed', e.message); }
+  await renderInbox();
+  // 3. If a conversation is open, reload its thread so new inbound msgs appear
+  if (activeConvId != null) {
+    const stillThere = agents.find(a => a.id === activeConvId);
+    if (stillThere) await openConversation(activeConvId);
   }
 }
 
