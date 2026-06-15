@@ -369,11 +369,18 @@ export default async function handler(req, res) {
     // already approved on the WhatsApp Business account. Owns its own
     // settings flags so it can ship dark and be flipped on per-cohort
     // without touching the existing follow-up logic.
+    // Preview mode: cron URL came with ?preview=1 (used by the manual-
+    // broadcast UI in the analytics dashboard). Composes the message and
+    // returns the rendered body + recipient count, but skips the Meta send,
+    // skips wa_messages logging, and does not persist a new snapshot. The
+    // caller can then show the user what would go out before they confirm.
+    const previewMode = req.query?.preview === '1';
     const availabilityResult = await runAvailabilityNotifications({
       now, sbHeaders, supabaseUrl: SUPABASE_URL,
       agents, templatesMap,
       waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
       results,
+      previewMode,
     });
 
     // Write back the accumulated daily spend
@@ -623,13 +630,14 @@ const EMPTY_SLOT = '—';               // pad for unused bullet slots (Meta rej
 const PORTAL_BASE = 'https://sambarentals.vercel.app';
 
 export async function runAvailabilityNotifications(ctx) {
-  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results, previewMode } = ctx;
 
   const summary = {
     enabled: false, ran: false, recipients: 0,
     event_alerts_sent: 0, weekly_digest_sent: 0,
     skipped_no_changes: 0, skipped_freq_cap: 0, skipped_opt_out: 0,
     skipped_not_eligible: 0, errors: [],
+    preview: previewMode ? {} : undefined,
   };
 
   // ── Kill switch + cohort filter ─────────────────────────────────
@@ -711,6 +719,42 @@ export async function runAvailabilityNotifications(ctx) {
   // v1 = single body var (paragraph), v2 = one var per bullet slot (real list)
   const alertBody = composeAlertBody(improvements.items);
   const digestBody = composeDigestBody(digest.properties);
+
+  // ── PREVIEW MODE ────────────────────────────────────────────────
+  // Composes the message that would be sent to a sample agent — no Meta
+  // call, no wa_messages log, no snapshot write. The caller renders this
+  // in a confirm-and-fire UI.
+  if (previewMode) {
+    const sample = eligible.find(a => a.is_test) || eligible[0];
+    const sampleName = sample ? firstNameOf(sample.name) : 'Era';
+    const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${sample?.id || 'preview'}`;
+    const useName = isMonday ? digestName : regularName;
+    const tmpl = templatesMap[useName];
+    const useSlots = (tmpl?.placeholderCount || 0) > 3;
+    let params;
+    if (useSlots) {
+      params = isMonday
+        ? composeDigestParamsV2(sampleName, digest.properties, trackedUrl)
+        : composeAlertParamsV2(sampleName, improvements.items, trackedUrl);
+    } else {
+      params = [sampleName, isMonday ? digestBody : alertBody, trackedUrl];
+    }
+    let rendered = (tmpl?.body || '');
+    params.forEach((p, i) => {
+      rendered = rendered.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
+    });
+    summary.preview = {
+      mode: isMonday ? 'weekly_digest' : (improvements.items.length === 0 ? 'no_alerts_no_changes' : 'event_alert'),
+      template_name: useName,
+      sample_first_name: sampleName,
+      sample_agent_id: sample?.id || null,
+      rendered_body: rendered,
+      improvements_count: improvements.items.length,
+      available_now_count: digest.properties.filter(p => p.availability?.availableToday && !p.isHidden).length,
+    };
+    summary.ran = true;
+    return summary;
+  }
 
   // ── Send loop ───────────────────────────────────────────────────
   for (const agent of eligible) {
