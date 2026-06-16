@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Maya</title>
+
+<!-- PWA / iOS homescreen -->
+<meta name="theme-color" content="#008069">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Maya">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/maya-icon.svg">
+<link rel="icon" href="/maya-icon.svg">
+
+<style>
+  :root {
+    --wa-green: #008069;        /* header / brand */
+    --wa-green-dark: #017561;
+    --wa-accent: #00a884;       /* send button / active */
+    --wa-tick: #53bdeb;
+    --wa-bg: #efeae2;           /* chat wallpaper */
+    --wa-panel: #ffffff;
+    --wa-panel-2: #f0f2f5;      /* list header / composer bar */
+    --wa-out: #d9fdd3;          /* outgoing bubble */
+    --wa-in: #ffffff;           /* incoming bubble */
+    --wa-ink: #111b21;
+    --wa-ink-2: #667781;
+    --wa-rule: #e9edef;
+    --wa-unread: #25d366;
+    --wa-shadow: 0 1px 1px rgba(11,20,26,0.13);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: var(--wa-ink);
+    background: var(--wa-panel-2);
+    overscroll-behavior: none;
+  }
+  body { height: 100dvh; overflow: hidden; }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ── PIN gate ─────────────────────────────────────────── */
+  .gate {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--wa-green);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; padding: 24px;
+  }
+  .gate-logo {
+    width: 84px; height: 84px; border-radius: 22px; background: #ffffff22;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid #ffffff33;
+  }
+  .gate-logo svg { width: 50px; height: 50px; }
+  .gate h1 { color: #fff; font-weight: 500; font-size: 22px; margin: 0; letter-spacing: 0.02em; }
+  .gate p { color: #ffffffbb; font-size: 13px; margin: -10px 0 0; }
+  .gate input {
+    width: 220px; text-align: center; font-size: 26px; letter-spacing: 0.4em;
+    padding: 12px; border: none; border-radius: 12px; outline: none;
+    background: #ffffff; color: var(--wa-ink);
+  }
+  .gate button {
+    width: 220px; padding: 12px; border: none; border-radius: 12px;
+    background: var(--wa-accent); color: #fff; font-size: 15px; font-weight: 600;
+  }
+  .gate-err { color: #ffd9d9; font-size: 12px; min-height: 14px; margin: -10px 0 0; }
+
+  /* ── App shell ────────────────────────────────────────── */
+  #app { display: none; height: 100dvh; }
+  #app.ready { display: flex; }
+
+  .pane-list {
+    width: 100%; max-width: 460px; flex-shrink: 0;
+    display: flex; flex-direction: column;
+    background: var(--wa-panel); border-right: 1px solid var(--wa-rule);
+  }
+
+  /* List header */
+  .list-head {
+    background: var(--wa-panel-2);
+    padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+    border-bottom: 1px solid var(--wa-rule);
+  }
+  .list-head-top { display: flex; align-items: center; gap: 10px; }
+  .list-title { font-size: 19px; font-weight: 600; color: var(--wa-ink); flex: 1; }
+  .refresh-btn {
+    background: none; border: none; color: var(--wa-ink-2); font-size: 19px;
+    padding: 4px 6px; border-radius: 50%;
+  }
+  .refresh-btn.spin { animation: spin 0.7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Maya mode selector */
+  .mode-bar { margin-top: 10px; }
+  .mode-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--wa-ink-2); margin-bottom: 5px; display: flex; align-items: center; gap: 6px;
+  }
+  .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #c2c9ce; }
+  .mode-dot.live { background: var(--wa-unread); box-shadow: 0 0 0 3px #25d36633; }
+  .mode-seg { display: flex; background: #fff; border: 1px solid var(--wa-rule); border-radius: 10px; padding: 3px; gap: 2px; }
+  .mode-seg button {
+    flex: 1; border: none; background: none; padding: 7px 4px; border-radius: 7px;
+    font-size: 11px; font-weight: 600; color: var(--wa-ink-2); transition: all 0.12s;
+  }
+  .mode-seg button.on { background: var(--wa-green); color: #fff; }
+  .mode-hint { font-size: 11px; color: var(--wa-ink-2); margin-top: 6px; min-height: 14px; line-height: 1.3; }
+
+  /* Search */
+  .search-wrap { padding: 8px 12px; background: var(--wa-panel); border-bottom: 1px solid var(--wa-rule); }
+  .search-wrap input {
+    width: 100%; border: none; background: var(--wa-panel-2); border-radius: 9px;
+    padding: 9px 14px; font-size: 14px; outline: none; color: var(--wa-ink);
+  }
+
+  /* Conversation rows */
+  .conv-list { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  .conv {
+    display: flex; align-items: center; gap: 13px; padding: 11px 14px;
+    cursor: pointer; border-bottom: 1px solid var(--wa-rule);
+  }
+  .conv:active { background: var(--wa-panel-2); }
+  .conv.active { background: #f0f2f5; }
+  .avatar {
+    width: 49px; height: 49px; border-radius: 50%; flex-shrink: 0;
+    background: var(--wa-green); color: #fff; font-weight: 600; font-size: 17px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .conv-mid { flex: 1; min-width: 0; }
+  .conv-name { font-size: 16px; font-weight: 500; color: var(--wa-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conv-snip { font-size: 13.5px; color: var(--wa-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .conv-right { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+  .conv-time { font-size: 11.5px; color: var(--wa-ink-2); }
+  .conv-time.unread-time { color: var(--wa-unread); font-weight: 600; }
+  .conv-badges { display: flex; align-items: center; gap: 5px; }
+  .unread-pill {
+    background: var(--wa-unread); color: #fff; font-size: 11px; font-weight: 700;
+    min-width: 19px; height: 19px; border-radius: 10px; padding: 0 5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .pill {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.04em; padding: 2px 6px;
+    border-radius: 5px; text-transform: uppercase;
+  }
+  .pill-draft  { background: #fff3cd; color: #8a6d00; }
+  .pill-needs  { background: #ffe0e0; color: #b42318; }
+  .pill-wait   { background: #e7f0ff; color: #1d4ed8; }
+  .pill-paused { background: #ececec; color: #555; }
+
+  .empty { padding: 50px 24px; text-align: center; color: var(--wa-ink-2); font-size: 13.5px; line-height: 1.5; }
+
+  /* ── Thread pane ──────────────────────────────────────── */
+  .pane-thread {
+    flex: 1; display: flex; flex-direction: column; min-width: 0;
+    background: var(--wa-bg);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cg fill='%23000' fill-opacity='0.02'%3E%3Ccircle cx='8' cy='8' r='1.5'/%3E%3Ccircle cx='28' cy='24' r='1.5'/%3E%3C/g%3E%3C/svg%3E");
+  }
+  .thread-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--wa-ink-2); gap: 14px; text-align: center; padding: 30px;
+    background: var(--wa-panel-2);
+  }
+  .thread-empty svg { width: 90px; height: 90px; opacity: 0.35; }
+
+  .thread-head {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--wa-panel-2);
+    padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
+    border-bottom: 1px solid var(--wa-rule);
+  }
+  .back-btn { display: none; background: none; border: none; font-size: 24px; color: var(--wa-ink-2); padding: 0 2px; }
+  .thread-head .avatar { width: 40px; height: 40px; font-size: 15px; }
+  .thread-head-info { flex: 1; min-width: 0; }
+  .thread-head-name { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thread-head-sub { font-size: 12px; color: var(--wa-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .thread-body { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 14px 6%; display: flex; flex-direction: column; gap: 3px; }
+
+  .day-sep { align-self: center; background: #ffffffcc; color: var(--wa-ink-2); font-size: 11px; font-weight: 600;
+    padding: 4px 12px; border-radius: 8px; margin: 8px 0; box-shadow: var(--wa-shadow); text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .bubble {
+    max-width: 80%; padding: 6px 9px 7px; border-radius: 8px; position: relative;
+    box-shadow: var(--wa-shadow); font-size: 14.5px; line-height: 1.38; word-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  .bubble.in  { align-self: flex-start; background: var(--wa-in);  border-top-left-radius: 2px; }
+  .bubble.out { align-self: flex-end;   background: var(--wa-out); border-top-right-radius: 2px; }
+  .bubble-time { font-size: 10.5px; color: var(--wa-ink-2); float: right; margin: 3px 0 -2px 10px; user-select: none; }
+  .bubble.deleted { font-style: italic; color: var(--wa-ink-2); }
+  .bubble-img { display: block; max-width: 100%; border-radius: 6px; margin-bottom: 3px; cursor: zoom-in; }
+  .bubble-doc, .bubble-loc { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; background: #00000008;
+    border-radius: 7px; color: var(--wa-green-dark); text-decoration: none; font-weight: 500; font-size: 13.5px; margin-bottom: 3px; }
+  .bubble audio, .bubble video { max-width: 240px; display: block; margin-bottom: 3px; }
+  .bubble-tag { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--wa-accent);
+    text-transform: uppercase; margin-bottom: 2px; }
+
+  /* Paused banner */
+  .pause-banner {
+    background: #fff8e1; border: 1px solid #ffe082; color: #7a5b00; font-size: 12.5px;
+    padding: 8px 12px; margin: 0 6% 6px; border-radius: 9px; display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  }
+  .pause-banner button { background: #fff; border: 1px solid #ffcd5a; color: #7a5b00; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; }
+  .draft-banner {
+    background: #fff3cd; color: #8a6d00; font-size: 12px; font-weight: 600;
+    padding: 6px 12px; margin: 0 6% 6px; border-radius: 9px; text-align: center;
+  }
+
+  /* Composer */
+  .composer {
+    display: flex; align-items: flex-end; gap: 8px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+    background: var(--wa-panel-2);
+  }
+  .composer textarea {
+    flex: 1; border: none; border-radius: 22px; resize: none; outline: none;
+    padding: 11px 16px; font-size: 15px; font-family: inherit; line-height: 1.35;
+    max-height: 120px; background: #fff; color: var(--wa-ink);
+  }
+  .icon-btn {
+    width: 44px; height: 44px; border-radius: 50%; border: none; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+    background: #fff; color: var(--wa-ink-2);
+  }
+  .send-btn { background: var(--wa-accent); color: #fff; }
+  .send-btn:disabled { opacity: 0.5; }
+  .suggest-btn { background: #fff; color: var(--wa-accent); font-size: 19px; }
+  .suggest-btn.loading { animation: spin 0.7s linear infinite; }
+
+  /* Lightbox */
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .lightbox img { max-width: 94vw; max-height: 94vh; object-fit: contain; border-radius: 6px; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 90px; transform: translateX(-50%) translateY(20px);
+    background: #111b21ee; color: #fff; padding: 10px 18px; border-radius: 22px; font-size: 13px;
+    opacity: 0; transition: all 0.25s; z-index: 300; pointer-events: none; max-width: 80vw; text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── Responsive: single-pane on phones ────────────────── */
+  @media (max-width: 759px) {
+    .pane-list { max-width: none; }
+    .pane-thread {
+      position: fixed; inset: 0; z-index: 50; transform: translateX(100%);
+      transition: transform 0.22s ease; visibility: hidden;
+    }
+    #app.show-thread .pane-thread { transform: translateX(0); visibility: visible; }
+    #app.show-thread .pane-list { display: flex; } /* stays mounted underneath */
+    .back-btn { display: block; }
+  }
+  @media (min-width: 760px) {
+    .pane-thread { display: flex; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── PIN GATE ─────────────────────────────────────────── -->
+<div class="gate" id="gate">
+  <div class="gate-logo">
+    <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2zm0 18a8 8 0 0 1-4.1-1.1l-.3-.2-2.8.8.8-2.8-.2-.3A8 8 0 1 1 12 20z"/><path d="M8.5 7.3c-.2-.5-.4-.5-.6-.5h-.5c-.2 0-.5.1-.7.3-.3.3-.9.9-.9 2.1s.9 2.5 1 2.6c.1.2 1.8 2.9 4.5 4 .6.2 1.1.4 1.5.5.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2-.1-.1-.2-.2-.5-.3l-1.6-.8c-.2-.1-.4-.1-.5.1l-.7.9c-.1.1-.2.2-.5.1-.2-.1-.9-.4-1.8-1.2-.7-.6-1.1-1.3-1.3-1.5-.1-.2 0-.3.1-.5l.4-.4c.1-.1.1-.3.2-.4 0-.2 0-.3 0-.4l-.7-1.7z"/></svg>
+  </div>
+  <h1>Maya</h1>
+  <p>Enter your passcode</p>
+  <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="••••" maxlength="12">
+  <div class="gate-err" id="pinErr"></div>
+  <button onclick="checkPin()">Unlock</button>
+</div>
+
+<!-- ── APP ──────────────────────────────────────────────── -->
+<div id="app">
+  <!-- Conversation list -->
+  <div class="pane-list">
+    <div class="list-head">
+      <div class="list-head-top">
+        <div class="list-title">Maya</div>
+        <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
+      </div>
+      <div class="mode-bar">
+        <div class="mode-label"><span class="mode-dot" id="modeDot"></span> Maya automation</div>
+        <div class="mode-seg" id="modeSeg">
+          <button data-mode="off"       onclick="setMode('off')">Off</button>
+          <button data-mode="draft"     onclick="setMode('draft')">Draft</button>
+          <button data-mode="hybrid"    onclick="setMode('hybrid')">Hybrid</button>
+          <button data-mode="autopilot" onclick="setMode('autopilot')">Auto</button>
+        </div>
+        <div class="mode-hint" id="modeHint"></div>
+      </div>
+    </div>
+    <div class="search-wrap">
+      <input id="searchInput" type="text" placeholder="Search" oninput="state.query=this.value; renderList()">
+    </div>
+    <div class="conv-list" id="convList">
+      <div class="empty">Loading conversations…</div>
+    </div>
+  </div>
+
+  <!-- Thread -->
+  <div class="pane-thread" id="threadPane">
+    <div class="thread-empty" id="threadEmpty">
+      <svg viewBox="0 0 24 24" fill="#54656f"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2z"/></svg>
+      <div>Select a conversation to start chatting</div>
+    </div>
+    <div id="threadView" style="display:none; flex:1; min-height:0; flex-direction:column;">
+      <div class="thread-head">
+        <button class="back-btn" onclick="closeConv()">‹</button>
+        <div class="avatar" id="thAvatar"></div>
+        <div class="thread-head-info">
+          <div class="thread-head-name" id="thName"></div>
+          <div class="thread-head-sub" id="thSub"></div>
+        </div>
+      </div>
+      <div class="thread-body" id="threadBody"></div>
+      <div id="threadBanner"></div>
+      <div class="composer">
+        <button class="icon-btn suggest-btn" id="suggestBtn" onclick="suggest()" title="Maya drafts a reply">✦</button>
+        <textarea id="replyBox" rows="1" placeholder="Type a message" oninput="autoGrow(this)"></textarea>
+        <button class="icon-btn send-btn" id="sendBtn" onclick="send()" title="Send">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ════════════════════════════════════════════════════════════════════
+// Maya — standalone WhatsApp-style inbox for the KAYA agent CRM.
+// Talks to the same /api routes as the main CRM (same origin), so no
+// CORS or extra backend. Designed to be saved to a phone homescreen.
+// ════════════════════════════════════════════════════════════════════
+
+// ⚠️  CHANGE THIS PIN. It's a client-side gate over an obscure URL, not
+// real auth — it just stops casual access from anyone who finds the link.
+const APP_PIN = '2468';
+
+const MODE_HINTS = {
+  off:       'Maya is silent. You answer everything manually.',
+  draft:     'Maya drafts replies for you to review and send.',
+  hybrid:    'Maya auto-answers simple FAQs, escalates the rest to you.',
+  autopilot: 'Maya replies to agents automatically, no review.',
+};
+
+const state = {
+  agents: [],          // all agent records
+  msgMap: {},          // agent_id -> { lastTimestamp, lastContent, direction }
+  activeId: null,
+  query: '',
+  mode: 'draft',
+  pollTimer: null,
+};
+
+// ── PIN gate ──────────────────────────────────────────────────────────
+function checkPin() {
+  const v = document.getElementById('pinInput').value.trim();
+  if (v === APP_PIN) {
+    localStorage.setItem('maya_pin_ok', '1');
+    unlock();
+  } else {
+    document.getElementById('pinErr').textContent = 'Wrong passcode';
+    document.getElementById('pinInput').value = '';
+  }
+}
+function unlock() {
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').classList.add('ready');
+  init();
+}
+document.getElementById('pinInput').addEventListener('keydown', e => { if (e.key === 'Enter') checkPin(); });
+
+// ── API helpers ───────────────────────────────────────────────────────
+async function api(action, payload) {
+  const r = await fetch('/api/supabase', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload ? { action, payload } : { action }),
+  });
+  return r.json();
+}
+
+// ── Init + polling ────────────────────────────────────────────────────
+async function init() {
+  await Promise.all([refreshAll(), loadMode()]);
+  startPolling();
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { refreshAll(); loadMode(); }
+  });
+}
+function startPolling() {
+  if (state.pollTimer) clearInterval(state.pollTimer);
+  state.pollTimer = setInterval(() => {
+    if (document.hidden) return;
+    refreshAll();
+    if (state.activeId) refreshThread();
+  }, 15000);
+}
+
+async function refreshAll(manual) {
+  const btn = document.getElementById('refreshBtn');
+  if (manual && btn) btn.classList.add('spin');
+  try {
+    const [agents, allMsgs] = await Promise.all([
+      api('get_agents'),
+      api('get_messages'),     // no agentId → recent across everyone
+    ]);
+    if (Array.isArray(agents)) state.agents = agents;
+    if (Array.isArray(allMsgs)) {
+      const map = {};
+      allMsgs.forEach(m => {
+        if (m.agent_id == null || m.deleted_at) return;
+        if (!map[m.agent_id] || new Date(m.timestamp) > new Date(map[m.agent_id].lastTimestamp)) {
+          map[m.agent_id] = { lastTimestamp: m.timestamp, lastContent: m.content || '', direction: m.direction };
+        }
+      });
+      state.msgMap = map;
+    }
+    renderList();
+  } catch (e) {
+    console.warn('refresh failed', e);
+  }
+  if (manual && btn) setTimeout(() => btn.classList.remove('spin'), 500);
+}
+
+// ── Maya mode ─────────────────────────────────────────────────────────
+async function loadMode() {
+  try {
+    const val = await api('get_settings', { key: 'automation' });
+    if (val && val.mode) { state.mode = val.mode; renderMode(); }
+  } catch (e) {}
+}
+function renderMode() {
+  document.querySelectorAll('#modeSeg button').forEach(b => {
+    b.classList.toggle('on', b.dataset.mode === state.mode);
+  });
+  document.getElementById('modeHint').textContent = MODE_HINTS[state.mode] || '';
+  const dot = document.getElementById('modeDot');
+  dot.classList.toggle('live', state.mode === 'autopilot' || state.mode === 'hybrid');
+}
+async function setMode(mode) {
+  if (mode === 'autopilot' && state.mode !== 'autopilot') {
+    if (!confirm('Switch Maya to AUTOPILOT?\n\nMaya will reply to agents automatically with no review. You can switch back anytime.')) return;
+  }
+  const prev = state.mode;
+  state.mode = mode;
+  renderMode();
+  try {
+    await api('set_settings', { key: 'automation', value: { mode } });
+    toast('Maya: ' + mode);
+  } catch (e) {
+    state.mode = prev; renderMode();
+    toast('Could not save mode');
+  }
+}
+
+// ── Conversation list ─────────────────────────────────────────────────
+function getWaNum(a) {
+  if (a.wa_url && a.wa_url.startsWith('https://wa.me/')) return a.wa_url.replace('https://wa.me/', '').replace(/\D/g, '');
+  return a.wa_num ? String(a.wa_num).replace(/\D/g, '') : '';
+}
+function initials(name, agency) {
+  const src = (name || agency || '').trim();
+  const w = src.split(/\s+/).filter(Boolean);
+  if (w.length >= 2) return (w[0][0] + w[1][0]).toUpperCase();
+  if (w.length === 1) return w[0].slice(0, 2).toUpperCase();
+  return '?';
+}
+function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function timeAgo(d) {
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'now';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (s < 604800) return d.toLocaleDateString('en-GB', { weekday: 'short' });
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
+}
+
+function renderList() {
+  const el = document.getElementById('convList');
+  const convs = state.agents
+    .filter(a => state.msgMap[a.id] || a.last_inbound_at || a.unread_count || a.suggested_reply)
+    .sort((a, b) => {
+      const at = state.msgMap[a.id]?.lastTimestamp || a.last_inbound_at || 0;
+      const bt = state.msgMap[b.id]?.lastTimestamp || b.last_inbound_at || 0;
+      return new Date(bt) - new Date(at);
+    });
+
+  const q = state.query.trim().toLowerCase();
+  const list = q ? convs.filter(a => {
+    const m = state.msgMap[a.id];
+    return `${a.name || ''} ${a.agency || ''} ${a.wa_num || ''} ${m?.lastContent || ''}`.toLowerCase().includes(q);
+  }) : convs;
+
+  if (list.length === 0) {
+    el.innerHTML = `<div class="empty">${q ? 'No conversations match “' + esc(q) + '”' : 'No conversations yet.<br>Inbound agent messages will appear here.'}</div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(a => {
+    const m = state.msgMap[a.id];
+    const ts = m?.lastTimestamp || a.last_inbound_at;
+    const time = ts ? timeAgo(new Date(ts)) : '';
+    const hasDraft = a.suggested_reply && a.suggested_reply.trim();
+    const unread = a.unread_count || 0;
+    const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
+
+    let pill = '';
+    if (a.automation_override === 'paused') pill = '<span class="pill pill-paused">Paused</span>';
+    else if (hasDraft) pill = '<span class="pill pill-draft">Draft</span>';
+    else if (m?.direction === 'inbound') {
+      const ageH = ts ? (Date.now() - new Date(ts).getTime()) / 3.6e6 : 0;
+      pill = ageH > 2 ? '<span class="pill pill-needs">Needs you</span>' : '<span class="pill pill-wait">Waiting</span>';
+    }
+
+    return `<div class="conv ${a.id === state.activeId ? 'active' : ''}" onclick="openConv(${a.id})">
+      <div class="avatar">${esc(initials(a.name, a.agency))}</div>
+      <div class="conv-mid">
+        <div class="conv-name">${esc(a.name || a.agency || '+' + (a.wa_num || ''))}</div>
+        <div class="conv-snip">${esc(snip)}</div>
+      </div>
+      <div class="conv-right">
+        <span class="conv-time ${unread ? 'unread-time' : ''}">${time}</span>
+        <div class="conv-badges">${pill}${unread ? `<span class="unread-pill">${unread}</span>` : ''}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ── Thread ────────────────────────────────────────────────────────────
+function openConv(id) {
+  state.activeId = id;
+  document.getElementById('app').classList.add('show-thread');
+  document.getElementById('threadEmpty').style.display = 'none';
+  document.getElementById('threadView').style.display = 'flex';
+
+  const a = state.agents.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('thAvatar').textContent = initials(a.name, a.agency);
+  document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
+  document.getElementById('thSub').textContent = '+' + (a.wa_num || '') + (a.agency ? ' · ' + a.agency : '');
+  document.getElementById('replyBox').value = (a.suggested_reply || '');
+  autoGrow(document.getElementById('replyBox'));
+  document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
+  renderBanner(a);
+  renderList();
+
+  // Clear unread locally + server-side
+  if (a.unread_count) {
+    a.unread_count = 0;
+    api('patch_agent', { id, fields: { unread_count: 0 } }).catch(() => {});
+  }
+  refreshThread(true);
+}
+
+function closeConv() {
+  state.activeId = null;
+  document.getElementById('app').classList.remove('show-thread');
+  renderList();
+}
+
+function renderBanner(a) {
+  const el = document.getElementById('threadBanner');
+  let html = '';
+  if (a.automation_override === 'paused') {
+    html = `<div class="pause-banner"><span>⏸ Maya is paused here — you're in control.</span>
+      <button onclick="resumeMaya(${a.id})">Resume Maya</button></div>`;
+  } else if (a.suggested_reply && a.suggested_reply.trim()) {
+    html = `<div class="draft-banner">✦ Maya drafted a reply — review &amp; send</div>`;
+  }
+  el.innerHTML = html;
+}
+
+async function refreshThread(scroll) {
+  const id = state.activeId;
+  if (!id) return;
+  let msgs;
+  try {
+    msgs = await api('get_messages', { agentId: id });
+  } catch (e) { return; }
+  if (id !== state.activeId) return; // user switched away mid-fetch
+  const body = document.getElementById('threadBody');
+  if (!Array.isArray(msgs) || msgs.length === 0) {
+    body.innerHTML = '<div class="empty">No messages yet.</div>';
+    return;
+  }
+  const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
+  const asc = msgs.slice().reverse();
+  let lastDay = '';
+  const rows = [];
+  asc.forEach(m => {
+    const d = new Date(m.timestamp);
+    const day = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (day !== lastDay) { rows.push(`<div class="day-sep">${daySep(d)}</div>`); lastDay = day; }
+    rows.push(renderBubble(m));
+  });
+  body.innerHTML = rows.join('');
+  if (scroll || nearBottom) body.scrollTop = body.scrollHeight;
+}
+
+function daySep(d) {
+  const today = new Date(); const y = new Date(); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return 'Today';
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
+}
+
+function renderBubble(m) {
+  const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const isOut = m.direction !== 'inbound';
+  if (m.deleted_at) {
+    return `<div class="bubble ${isOut ? 'out' : 'in'} deleted">🚫 Message recalled <span class="bubble-time">${t}</span></div>`;
+  }
+  const media = renderMedia(m);
+  const caption = (m.content || '').replace(/^\[(?:Image|Document:[^\]]*|Voice note|Video|Sticker|Location[^\]]*|Contact card[^\]]*)\]\s*/, '').replace(/^"|"$/g, '');
+  const bodyText = m.media_type ? caption : (m.content || '');
+  const edited = m.edited_at ? ' <span style="font-size:10px;color:#8a9499">(edited)</span>' : '';
+  return `<div class="bubble ${isOut ? 'out' : 'in'}">${media}${esc(bodyText).replace(/\n/g, '<br>')}${edited}<span class="bubble-time">${t}</span></div>`;
+}
+
+function renderMedia(m) {
+  if (!m.media_type || !m.media_id) return '';
+  const src = '/api/whatsapp-send?fetch_media=' + encodeURIComponent(m.media_id);
+  if (m.media_type === 'image' || m.media_type === 'sticker')
+    return `<img class="bubble-img" src="${src}" loading="lazy" onclick="lightbox('${src}')">`;
+  if (m.media_type === 'audio') return `<audio controls preload="metadata" src="${src}"></audio>`;
+  if (m.media_type === 'video') return `<video controls preload="metadata" src="${src}"></video>`;
+  if (m.media_type === 'document') {
+    const name = (m.content || '').match(/^\[Document:\s*([^\]]+)\]/)?.[1] || 'document';
+    return `<a class="bubble-doc" href="${src}" target="_blank" download="${esc(name)}">📄 ${esc(name)}</a>`;
+  }
+  if (m.media_type === 'location') return `<a class="bubble-loc" href="https://www.google.com/maps?q=${esc(m.media_id)}" target="_blank">📍 Open in Maps</a>`;
+  return '';
+}
+
+// ── Suggest (Maya draft) ──────────────────────────────────────────────
+async function suggest() {
+  const id = state.activeId; if (!id) return;
+  const box = document.getElementById('replyBox');
+  const btn = document.getElementById('suggestBtn');
+  btn.classList.add('loading'); box.disabled = true;
+  const prev = box.value;
+  box.value = '';
+  box.placeholder = 'Maya is thinking…';
+  try {
+    const data = await api('suggest_reply', { agentId: id });
+    if (data.error) throw new Error(data.error);
+    box.value = (data.reply || '').trim();
+  } catch (e) {
+    box.value = prev;
+    toast('Suggest failed: ' + e.message);
+  }
+  box.disabled = false; box.placeholder = 'Type a message';
+  btn.classList.remove('loading'); autoGrow(box);
+}
+
+// ── Send ──────────────────────────────────────────────────────────────
+async function send() {
+  const id = state.activeId; if (!id) return;
+  const a = state.agents.find(x => x.id === id); if (!a) return;
+  const box = document.getElementById('replyBox');
+  const msg = box.value.trim();
+  if (!msg) return;
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id }),
+    });
+    const res = await r.json();
+    if (!res.success) throw new Error(res.error || 'send failed');
+    box.value = ''; autoGrow(box);
+    // A manual reply pauses Maya for this agent (matches the main CRM).
+    a.suggested_reply = '';
+    a.automation_override = 'paused';
+    api('patch_agent', { id: a.id, fields: { suggested_reply: '', automation_override: 'paused' } }).catch(() => {});
+    renderBanner(a);
+    await refreshThread(true);
+    refreshAll();
+  } catch (e) {
+    toast('Send failed: ' + e.message);
+  }
+  btn.disabled = false;
+}
+
+async function resumeMaya(id) {
+  const a = state.agents.find(x => x.id === id); if (!a) return;
+  if (!confirm('Resume Maya for this conversation? She will auto-reply to the next message based on the global mode.')) return;
+  a.automation_override = null;
+  await api('patch_agent', { id, fields: { automation_override: null } }).catch(() => {});
+  renderBanner(a); renderList();
+  toast('Maya resumed');
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────
+function autoGrow(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }
+function lightbox(src) {
+  const o = document.createElement('div');
+  o.className = 'lightbox';
+  o.onclick = () => o.remove();
+  o.innerHTML = `<img src="${src}">`;
+  document.body.appendChild(o);
+}
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+// Enter-to-send on physical keyboards; Shift+Enter = newline. On touch
+// devices the on-screen Return key inserts a newline (no keydown hijack).
+document.getElementById('replyBox').addEventListener('keydown', e => {
+  const touch = window.matchMedia('(pointer: coarse)').matches;
+  if (e.key === 'Enter' && !e.shiftKey && !touch) { e.preventDefault(); send(); }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────
+if (localStorage.getItem('maya_pin_ok') === '1') unlock();
+else document.getElementById('pinInput').focus();
+</script>
+</body>
+</html>

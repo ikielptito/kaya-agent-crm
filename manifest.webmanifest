@@ -1,0 +1,14 @@
+{
+  "name": "Maya — Agent Inbox",
+  "short_name": "Maya",
+  "description": "Reply to rental agents from the Maya WhatsApp account",
+  "start_url": "/chat.html",
+  "scope": "/chat.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#008069",
+  "theme_color": "#008069",
+  "icons": [
+    { "src": "/maya-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
