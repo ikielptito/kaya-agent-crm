@@ -126,6 +126,14 @@ alter table wa_messages add column if not exists reaction text;
   -- message; we PATCH the original row's reaction column rather than
   -- create a noisy 'reacted 👍' line in the timeline.
 
+-- ── DELIVERY STATUS + REPLY CONTEXT (added 2026-06-17) ──────────────
+alter table wa_messages add column if not exists status text;
+  -- outbound only: 'sent' | 'delivered' | 'read' | 'failed', advanced by the
+  -- webhook's statuses handler. Drives ✓ / ✓✓ / blue ticks in the chat inbox.
+alter table wa_messages add column if not exists reply_to text;
+  -- wa_message_id of the message this one quotes (reply context), either
+  -- direction. The inbox renders a quoted preview above the bubble.
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (

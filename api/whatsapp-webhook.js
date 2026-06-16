@@ -249,8 +249,37 @@ export default async function handler(req, res) {
     if (body.object !== 'whatsapp_business_account') return res.status(200).end();
 
     const value = body.entry?.[0]?.changes?.[0]?.value;
+
+    // ── Delivery/read status events ───────────────────────────────
+    // Meta sends these (separate from messages) as outbound messages are
+    // sent → delivered → read. We PATCH the matching wa_messages row's
+    // status so the inbox can show ✓ / ✓✓ / blue ticks. Status only ever
+    // advances (sent < delivered < read), never regresses.
+    if (Array.isArray(value?.statuses) && value.statuses.length) {
+      if (SUPABASE_URL && SUPABASE_KEY) {
+        const sh = {
+          'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY,
+          'Content-Type': 'application/json', 'Prefer': 'return=minimal'
+        };
+        const RANK = { sent: 1, delivered: 2, read: 3, failed: 4 };
+        await Promise.all(value.statuses.map(async st => {
+          if (!st.id || !st.status) return;
+          // Only advance forward — fetch current, compare rank.
+          try {
+            const cur = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}&select=status`, { headers: sh });
+            const curStatus = (await cur.json())?.[0]?.status;
+            if (curStatus && curStatus !== 'failed' && (RANK[st.status] || 0) <= (RANK[curStatus] || 0)) return;
+          } catch (_) {}
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}`, {
+            method: 'PATCH', headers: sh, body: JSON.stringify({ status: st.status })
+          }).catch(() => {});
+        }));
+      }
+      return res.status(200).end();
+    }
+
     const msg = value?.messages?.[0];
-    if (!msg) return res.status(200).end(); // status update, not a message
+    if (!msg) return res.status(200).end(); // not a message or status we handle
 
     const fromNum = msg.from;
     const waMessageId = msg.id;
@@ -312,6 +341,7 @@ export default async function handler(req, res) {
         agent_id: agent?.id || null, wa_num: fromNum, direction: 'inbound',
         content: dbContent, wa_message_id: waMessageId, timestamp, source: 'webhook',
         media_type: mediaType || null, media_id: mediaId || null,
+        reply_to: msg.context?.id || null,   // id of the message this one quotes, if any
       })
     });
 

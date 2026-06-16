@@ -158,7 +158,7 @@
 
   /* ── Thread pane ──────────────────────────────────────── */
   .pane-thread {
-    flex: 1; display: flex; flex-direction: column; min-width: 0;
+    flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative;
     background: var(--wa-bg);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cg fill='%23000' fill-opacity='0.02'%3E%3Ccircle cx='8' cy='8' r='1.5'/%3E%3Ccircle cx='28' cy='24' r='1.5'/%3E%3C/g%3E%3C/svg%3E");
   }
@@ -246,6 +246,124 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* ── Delivery ticks ───────────────────────────────────── */
+  .ticks { display: inline-block; margin-left: 3px; font-size: 11px; vertical-align: baseline; }
+  .ticks.read { color: var(--wa-tick); }
+  .ticks.failed { color: #d12; }
+
+  /* ── Reactions ────────────────────────────────────────── */
+  .bubble { padding-bottom: 7px; }
+  .bubble.has-reaction { margin-bottom: 14px; }
+  .bubble-reaction {
+    position: absolute; bottom: -12px; right: 8px; background: #fff;
+    border: 1px solid var(--wa-rule); border-radius: 11px; padding: 1px 5px;
+    font-size: 12px; box-shadow: var(--wa-shadow); line-height: 1.3;
+  }
+  .bubble.in .bubble-reaction { right: auto; left: 8px; }
+
+  /* ── Quoted reply block inside a bubble ───────────────── */
+  .quote {
+    display: block; border-left: 3px solid var(--wa-accent); background: #00000008;
+    border-radius: 5px; padding: 4px 8px; margin-bottom: 4px; font-size: 12.5px;
+    color: var(--wa-ink-2); cursor: pointer; max-width: 100%; overflow: hidden;
+  }
+  .quote-who { color: var(--wa-green-dark); font-weight: 600; font-size: 11.5px; display: block; }
+  .quote-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .bubble.flash { animation: flash 1s ease; }
+  @keyframes flash { 0%,100% { box-shadow: var(--wa-shadow); } 30% { box-shadow: 0 0 0 3px var(--wa-accent); } }
+  mark { background: #ffe680; color: inherit; border-radius: 2px; }
+
+  /* ── Reply chip above composer ────────────────────────── */
+  .reply-chip {
+    display: flex; align-items: center; gap: 8px; background: var(--wa-panel-2);
+    border-left: 3px solid var(--wa-accent); margin: 0 10px; padding: 7px 10px;
+    border-radius: 8px 8px 0 0; font-size: 13px;
+  }
+  .reply-chip-body { flex: 1; min-width: 0; }
+  .reply-chip-who { color: var(--wa-green-dark); font-weight: 600; font-size: 11.5px; }
+  .reply-chip-txt { color: var(--wa-ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .reply-chip button { background: none; border: none; font-size: 18px; color: var(--wa-ink-2); cursor: pointer; }
+
+  /* ── Composer extras ──────────────────────────────────── */
+  #attachBtn { background: #fff; color: var(--wa-ink-2); font-size: 24px; font-weight: 300; }
+
+  /* ── Bottom sheets / popovers ─────────────────────────── */
+  .sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 150; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 151;
+    background: var(--wa-panel); border-radius: 16px 16px 0 0; padding: 8px 0 calc(14px + env(safe-area-inset-bottom));
+    box-shadow: 0 -4px 24px rgba(0,0,0,0.18); max-width: 460px; margin: 0 auto;
+    animation: sheetUp 0.2s ease;
+  }
+  @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet-grip { width: 38px; height: 4px; background: var(--wa-rule); border-radius: 2px; margin: 4px auto 10px; }
+  .sheet-item {
+    display: flex; align-items: center; gap: 14px; padding: 13px 22px; font-size: 15px;
+    color: var(--wa-ink); cursor: pointer; border: none; background: none; width: 100%; text-align: left;
+  }
+  .sheet-item:active { background: var(--wa-panel-2); }
+  .sheet-item.danger { color: #d12; }
+  .sheet-item .ico { font-size: 19px; width: 24px; text-align: center; }
+  .sheet-react { display: flex; justify-content: space-around; padding: 6px 14px 12px; border-bottom: 1px solid var(--wa-rule); }
+  .sheet-react button { background: none; border: none; font-size: 27px; cursor: pointer; padding: 2px; }
+
+  /* Emoji + quick-reply popovers anchored above composer */
+  .pop {
+    position: absolute; left: 8px; right: 8px; bottom: 64px; z-index: 60;
+    background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15); max-height: 240px; overflow-y: auto; max-width: 444px; margin: 0 auto;
+  }
+  .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); padding: 8px; }
+  .emoji-grid button { background: none; border: none; font-size: 23px; padding: 5px; cursor: pointer; border-radius: 8px; }
+  .emoji-grid button:active { background: var(--wa-panel-2); }
+  .qr-item { padding: 11px 14px; border-bottom: 1px solid var(--wa-rule); cursor: pointer; }
+  .qr-item:active { background: var(--wa-panel-2); }
+  .qr-item-label { font-size: 13px; font-weight: 600; color: var(--wa-ink); }
+  .qr-item-body { font-size: 12px; color: var(--wa-ink-2); margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* ── Thread search bar ────────────────────────────────── */
+  .thread-search { display: flex; align-items: center; gap: 6px; padding: 7px 12px; background: var(--wa-panel-2); border-bottom: 1px solid var(--wa-rule); }
+  .thread-search input { flex: 1; border: none; background: #fff; border-radius: 8px; padding: 8px 12px; font-size: 14px; outline: none; }
+  .thread-search span { font-size: 12px; color: var(--wa-ink-2); min-width: 38px; text-align: center; }
+  .thread-search button { background: none; border: none; font-size: 15px; color: var(--wa-ink-2); padding: 4px 6px; cursor: pointer; }
+
+  /* ── Scroll-to-bottom FAB ─────────────────────────────── */
+  .scroll-fab {
+    position: absolute; right: 14px; bottom: 78px; z-index: 40; width: 40px; height: 40px;
+    border-radius: 50%; border: 1px solid var(--wa-rule); background: var(--wa-panel);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18); font-size: 20px; color: var(--wa-ink-2);
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  .scroll-fab .fab-badge {
+    position: absolute; top: -6px; right: -6px; background: var(--wa-unread); color: #fff;
+    font-size: 10px; font-weight: 700; min-width: 17px; height: 17px; border-radius: 9px;
+    display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  }
+
+  /* ── Unread divider ───────────────────────────────────── */
+  .unread-div { align-self: stretch; text-align: center; color: var(--wa-green-dark); font-size: 11px; font-weight: 700;
+    letter-spacing: 0.05em; text-transform: uppercase; background: #d9fdd366; padding: 4px; margin: 6px 0; border-radius: 4px; }
+
+  /* ── Template picker modal ────────────────────────────── */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 160; display: flex; align-items: flex-end; justify-content: center; }
+  .modal {
+    background: var(--wa-panel); border-radius: 16px 16px 0 0; width: 100%; max-width: 460px;
+    max-height: 80vh; display: flex; flex-direction: column; animation: sheetUp 0.2s ease;
+  }
+  .modal-head { padding: 16px 18px 10px; border-bottom: 1px solid var(--wa-rule); display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-head button { background: none; border: none; font-size: 20px; color: var(--wa-ink-2); cursor: pointer; }
+  .modal-body { overflow-y: auto; padding: 6px 0 calc(10px + env(safe-area-inset-bottom)); }
+  .tpl-item { padding: 12px 18px; border-bottom: 1px solid var(--wa-rule); cursor: pointer; }
+  .tpl-item:active { background: var(--wa-panel-2); }
+  .tpl-name { font-size: 13px; font-weight: 600; color: var(--wa-green-dark); }
+  .tpl-body { font-size: 13px; color: var(--wa-ink); margin-top: 3px; white-space: pre-wrap; }
+  .win-banner {
+    background: #fff3cd; color: #7a5b00; font-size: 12.5px; padding: 8px 12px; margin: 0 6% 6px;
+    border-radius: 9px; display: flex; align-items: center; gap: 8px; justify-content: space-between;
+  }
+  .win-banner button { background: #fff; border: 1px solid #ffcd5a; color: #7a5b00; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
+
   /* ── Responsive: single-pane on phones ────────────────── */
   @media (max-width: 759px) {
     .pane-list { max-width: none; }
@@ -319,19 +437,39 @@
           <div class="thread-head-name" id="thName"></div>
           <div class="thread-head-sub" id="thSub"></div>
         </div>
+        <button class="refresh-btn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
       </div>
-      <div class="thread-body" id="threadBody"></div>
+      <div class="thread-search" id="threadSearch" style="display:none">
+        <input id="threadSearchInput" type="text" placeholder="Search in conversation" oninput="runThreadSearch(this.value)">
+        <span id="threadSearchCount"></span>
+        <button onclick="threadSearchStep(-1)" title="Previous">▲</button>
+        <button onclick="threadSearchStep(1)" title="Next">▼</button>
+        <button onclick="toggleThreadSearch()" title="Close">✕</button>
+      </div>
+      <div class="thread-body" id="threadBody" onscroll="onThreadScroll()"></div>
+      <button class="scroll-fab" id="scrollFab" onclick="scrollThreadToBottom()" style="display:none">⌄</button>
       <div id="threadBanner"></div>
+      <div class="reply-chip" id="replyChip" style="display:none"></div>
       <div class="composer">
-        <button class="icon-btn suggest-btn" id="suggestBtn" onclick="suggest()" title="Maya drafts a reply">✦</button>
-        <textarea id="replyBox" rows="1" placeholder="Type a message" oninput="autoGrow(this)"></textarea>
+        <button class="icon-btn" id="attachBtn" onclick="toggleAttachSheet()" title="Attach / actions">＋</button>
+        <textarea id="replyBox" rows="1" placeholder="Type a message" oninput="onReplyInput()"></textarea>
         <button class="icon-btn send-btn" id="sendBtn" onclick="send()" title="Send">➤</button>
       </div>
+      <input type="file" id="fileImage"  accept="image/*" style="display:none" onchange="onFilePicked(this,'image')">
+      <input type="file" id="fileCamera" accept="image/*" capture="environment" style="display:none" onchange="onFilePicked(this,'image')">
+      <input type="file" id="fileDoc"    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" style="display:none" onchange="onFilePicked(this,'document')">
+      <div class="pop" id="emojiPop" style="display:none"></div>
+      <div class="pop" id="qrPop" style="display:none"></div>
     </div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- Attach / message-action bottom sheet -->
+<div id="sheetHost"></div>
+<!-- Template picker modal -->
+<div id="modalHost"></div>
 
 <script>
 // ════════════════════════════════════════════════════════════════════
@@ -367,6 +505,11 @@ const state = {
   lastInbound: {},     // agent_id -> last seen inbound timestamp (for new-msg detection)
   primed: false,       // true once the first poll has set a baseline
   swReg: null,
+  threadMsgs: [],      // currently-loaded thread (ascending)
+  msgIndex: {},        // wa_message_id -> message (for quote lookup)
+  replyTarget: null,   // { waMessageId, who, text } when composing a reply
+  search: { q: '', matches: [], idx: 0 },
+  atBottom: true,
 };
 
 // ── PIN gate ──────────────────────────────────────────────────────────
@@ -666,10 +809,20 @@ function openConv(id) {
 
   const a = state.agents.find(x => x.id === id);
   if (!a) return;
+  // Reset per-conversation UI state.
+  state.replyTarget = null; renderReplyChip();
+  state.search = { q: '', matches: [], idx: 0 };
+  document.getElementById('threadSearch').style.display = 'none';
+  document.getElementById('emojiPop').style.display = 'none';
+  document.getElementById('qrPop').style.display = 'none';
+  state.threadMsgs = []; state.msgIndex = {};
+  state.threadLastRead = localStorage.getItem('maya_read_' + id) || null;
+
   document.getElementById('thAvatar').textContent = initials(a.name, a.agency);
   document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
   document.getElementById('thSub').textContent = '+' + (a.wa_num || '') + (a.agency ? ' · ' + a.agency : '');
-  document.getElementById('replyBox').value = (a.suggested_reply || '');
+  // Prefer Maya's pending draft; else restore a saved local draft.
+  document.getElementById('replyBox').value = (a.suggested_reply || '') || localStorage.getItem('maya_draft_' + id) || '';
   autoGrow(document.getElementById('replyBox'));
   document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
   renderBanner(a);
@@ -693,11 +846,16 @@ function closeConv() {
 function renderBanner(a) {
   const el = document.getElementById('threadBanner');
   let html = '';
+  // WhatsApp only allows free-text within 24h of the agent's last message.
+  const li = lastInboundMs(a);
+  if (!li || (Date.now() - li) > 24 * 3600 * 1000) {
+    html += `<div class="win-banner"><span>⏱ Outside the 24-hour window — a plain message may not deliver. Use an approved template.</span><button onclick="openTemplatePicker()">Templates</button></div>`;
+  }
   if (a.automation_override === 'paused') {
-    html = `<div class="pause-banner"><span>⏸ Maya is paused here — you're in control.</span>
+    html += `<div class="pause-banner"><span>⏸ Maya is paused here — you're in control.</span>
       <button onclick="resumeMaya(${a.id})">Resume Maya</button></div>`;
   } else if (a.suggested_reply && a.suggested_reply.trim()) {
-    html = `<div class="draft-banner">✦ Maya drafted a reply — review &amp; send</div>`;
+    html += `<div class="draft-banner">✦ Maya drafted a reply — review &amp; send</div>`;
   }
   el.innerHTML = html;
 }
@@ -717,16 +875,30 @@ async function refreshThread(scroll) {
   }
   const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
   const asc = msgs.slice().reverse();
-  let lastDay = '';
+  state.threadMsgs = asc;
+  state.msgIndex = {};
+  asc.forEach(m => { if (m.wa_message_id) state.msgIndex[m.wa_message_id] = m; });
+
+  const lastReadMs = state.threadLastRead ? new Date(state.threadLastRead).getTime() : 0;
+  let dividerShown = false, lastDay = '';
   const rows = [];
   asc.forEach(m => {
     const d = new Date(m.timestamp);
     const day = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     if (day !== lastDay) { rows.push(`<div class="day-sep">${daySep(d)}</div>`); lastDay = day; }
+    if (!dividerShown && m.direction === 'inbound' && lastReadMs && d.getTime() > lastReadMs) {
+      rows.push('<div class="unread-div">Unread messages</div>'); dividerShown = true;
+    }
     rows.push(renderBubble(m));
   });
   body.innerHTML = rows.join('');
-  if (scroll || nearBottom) body.scrollTop = body.scrollHeight;
+  if (state.search.q) applySearchHighlights();
+  if (scroll || nearBottom) { body.scrollTop = body.scrollHeight; state.atBottom = true; }
+  const newest = asc[asc.length - 1]?.timestamp;
+  if (newest) localStorage.setItem('maya_read_' + id, newest);
+  updateScrollFab();
+  const a = state.agents.find(x => x.id === id);
+  if (a) renderBanner(a);
 }
 
 function daySep(d) {
@@ -736,23 +908,55 @@ function daySep(d) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' });
 }
 
+function currentAgentName() {
+  const a = state.agents.find(x => x.id === state.activeId);
+  return a ? (a.name || a.agency || 'Agent') : 'Agent';
+}
+function quoteSnippet(m) {
+  if (m.media_type) return (MEDIA_LABELS[m.media_type] || 'Attachment');
+  return (m.content || '').slice(0, 80);
+}
+function statusTicks(m, isOut) {
+  if (!isOut) return '';
+  switch (m.status) {
+    case 'failed':    return ' <span class="ticks failed" title="Failed to send">⚠</span>';
+    case 'read':      return ' <span class="ticks read" title="Read">✓✓</span>';
+    case 'delivered': return ' <span class="ticks" title="Delivered">✓✓</span>';
+    case 'sent':      return ' <span class="ticks" title="Sent">✓</span>';
+    default:          return '';
+  }
+}
+
 function renderBubble(m) {
   const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
   const isOut = m.direction !== 'inbound';
+  const wid = m.wa_message_id || '';
   if (m.deleted_at) {
     return `<div class="bubble ${isOut ? 'out' : 'in'} deleted">🚫 Message recalled <span class="bubble-time">${t}</span></div>`;
+  }
+  // Quoted reply context
+  let quoteHtml = '';
+  if (m.reply_to && state.msgIndex[m.reply_to]) {
+    const q = state.msgIndex[m.reply_to];
+    const who = q.direction === 'inbound' ? currentAgentName() : 'You';
+    quoteHtml = `<span class="quote" onclick="scrollToMessage('${m.reply_to}')"><span class="quote-who">${esc(who)}</span><span class="quote-txt">${esc(quoteSnippet(q))}</span></span>`;
+  } else if (m.reply_to) {
+    quoteHtml = `<span class="quote"><span class="quote-txt">↩︎ replying to a message</span></span>`;
   }
   const media = renderMedia(m);
   const caption = (m.content || '').replace(/^\[(?:Image|Document:[^\]]*|Voice note|Video|Sticker|Location[^\]]*|Contact card[^\]]*)\]\s*/, '').replace(/^"|"$/g, '');
   const bodyText = m.media_type ? caption : (m.content || '');
   const edited = m.edited_at ? ' <span style="font-size:10px;color:#8a9499">(edited)</span>' : '';
   let inner = media + esc(bodyText).replace(/\n/g, '<br>');
-  // Never show a fully blank bubble. Media sent before inbound-media support
-  // (≈14 Jun 2026) was logged as an empty row — surface that instead of nothing.
   if (!media && !bodyText.trim()) {
     inner = `<span class="bubble-missing">📎 Media message — not saved (sent before media support)</span>`;
   }
-  return `<div class="bubble ${isOut ? 'out' : 'in'}">${inner}${edited}<span class="bubble-time">${t}</span></div>`;
+  const reaction = m.reaction ? `<span class="bubble-reaction">${esc(m.reaction)}</span>` : '';
+  const ticks = statusTicks(m, isOut);
+  const menuAttr = wid
+    ? `oncontextmenu="return openMsgMenu(event,'${wid}')" ontouchstart="pressStart(event,'${wid}')" ontouchend="pressEnd()" ontouchmove="pressEnd()"`
+    : '';
+  return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}" ${menuAttr}>${quoteHtml}${inner}${edited}<span class="bubble-time">${t}${ticks}</span>${reaction}</div>`;
 }
 
 const MEDIA_LABELS = { image: 'Photo', sticker: 'Sticker', video: 'Video', audio: 'Voice note', document: 'Document', location: 'Location', contact: 'Contact card' };
@@ -787,12 +991,270 @@ function mediaFailed(el, src, label) {
   el.replaceWith(a);
 }
 
+// ── Bottom sheets ─────────────────────────────────────────────────────
+function openSheet(html) {
+  document.getElementById('sheetHost').innerHTML =
+    `<div class="sheet-backdrop" onclick="closeSheet()"></div><div class="sheet"><div class="sheet-grip"></div>${html}</div>`;
+}
+function closeSheet() { document.getElementById('sheetHost').innerHTML = ''; }
+function closeModal() { document.getElementById('modalHost').innerHTML = ''; }
+
+// ── Long-press → message actions ──────────────────────────────────────
+let _pressTimer;
+function pressStart(e, wid) { _pressTimer = setTimeout(() => openMsgMenu(e, wid), 480); }
+function pressEnd() { clearTimeout(_pressTimer); }
+
+function openMsgMenu(e, wid) {
+  if (e) e.preventDefault();
+  const m = state.msgIndex[wid];
+  if (!m) return false;
+  const isOut = m.direction !== 'inbound';
+  const ageMs = Date.now() - new Date(m.timestamp).getTime();
+  const canEdit = isOut && ageMs < 15 * 60 * 1000 && !m.media_type && !m.deleted_at;
+  const canRecall = isOut && ageMs < 24 * 3600 * 1000 && !m.deleted_at;
+  const reactRow = ['👍', '❤️', '😂', '😮', '🙏', '🔥'].map(em => `<button onclick="sendReaction('${wid}','${em}')">${em}</button>`).join('');
+  const items = [
+    `<button class="sheet-item" onclick="startReply('${wid}')"><span class="ico">↩︎</span> Reply</button>`,
+    `<button class="sheet-item" onclick="copyMsg('${wid}')"><span class="ico">⧉</span> Copy text</button>`,
+  ];
+  if (canEdit) items.push(`<button class="sheet-item" onclick="editMsg('${wid}')"><span class="ico">✏️</span> Edit</button>`);
+  if (canRecall) items.push(`<button class="sheet-item danger" onclick="recallMsg('${wid}')"><span class="ico">🗑</span> Delete for everyone</button>`);
+  openSheet(`<div class="sheet-react">${reactRow}</div>${items.join('')}`);
+  return false;
+}
+
+function startReply(wid) {
+  closeSheet();
+  const m = state.msgIndex[wid]; if (!m) return;
+  state.replyTarget = { waMessageId: wid, who: m.direction === 'inbound' ? currentAgentName() : 'You', text: quoteSnippet(m) };
+  renderReplyChip();
+  document.getElementById('replyBox').focus();
+}
+function clearReply() { state.replyTarget = null; renderReplyChip(); }
+function renderReplyChip() {
+  const el = document.getElementById('replyChip');
+  if (!state.replyTarget) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = 'flex';
+  el.innerHTML = `<div class="reply-chip-body"><div class="reply-chip-who">${esc(state.replyTarget.who)}</div><div class="reply-chip-txt">${esc(state.replyTarget.text)}</div></div><button onclick="clearReply()">✕</button>`;
+}
+function copyMsg(wid) {
+  closeSheet();
+  const m = state.msgIndex[wid]; if (!m) return;
+  navigator.clipboard?.writeText(m.content || '').then(() => toast('Copied'), () => {});
+}
+function scrollToMessage(wid) {
+  const el = document.querySelector(`.bubble[data-id="${wid}"]`);
+  if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1000); }
+}
+
+async function sendReaction(wid, emoji) {
+  closeSheet();
+  const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
+  try {
+    const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'reaction', waNum: getWaNum(a), waMessageId: wid, emoji }) });
+    const res = await r.json(); if (!res.success) throw new Error(res.error || 'failed');
+    if (state.msgIndex[wid]) state.msgIndex[wid].reaction = emoji;
+    refreshThread();
+  } catch (e) { toast('React failed: ' + e.message); }
+}
+async function editMsg(wid) {
+  closeSheet();
+  const m = state.msgIndex[wid]; if (!m) return;
+  const txt = prompt('Edit message:', m.content || ''); if (txt === null) return;
+  try {
+    const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'edit', waMessageId: wid, newText: txt }) });
+    const res = await r.json(); if (!res.success) throw new Error(res.error || 'failed');
+    refreshThread();
+  } catch (e) { toast('Edit failed: ' + e.message); }
+}
+async function recallMsg(wid) {
+  closeSheet();
+  if (!confirm('Delete this message for everyone?')) return;
+  try {
+    const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'recall', waMessageId: wid }) });
+    const res = await r.json(); if (!res.success) throw new Error(res.error || 'failed');
+    refreshThread();
+  } catch (e) { toast('Delete failed: ' + e.message); }
+}
+
+// ── Attachments ───────────────────────────────────────────────────────
+function toggleAttachSheet() {
+  openSheet(`
+    <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">📷</span> Take photo</button>
+    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">🖼</span> Photo library</button>
+    <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">📄</span> Document</button>
+    <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">✦</span> Maya draft a reply</button>
+    <button class="sheet-item" onclick="closeSheet();openQuickReplies()"><span class="ico">⚡</span> Quick replies</button>
+    <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">😀</span> Emoji</button>
+  `);
+}
+function pick(inputId) { closeSheet(); document.getElementById(inputId).click(); }
+function fileToBase64(file) {
+  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
+}
+async function onFilePicked(input, kind) {
+  const file = input.files && input.files[0]; input.value = '';
+  if (!file) return;
+  const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
+  toast('Uploading ' + file.name + '…');
+  try {
+    const b64 = await fileToBase64(file);
+    const path = Date.now() + '_' + file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const up = await api('upload_file', { path, contentType: file.type, fileBase64: b64 });
+    if (!up.publicUrl) throw new Error(up.error || 'upload failed');
+    const waNum = getWaNum(a);
+    const payload = kind === 'image'
+      ? { action: 'image', waNum, imageUrl: up.publicUrl, agentId: a.id }
+      : { action: 'document', waNum, docUrl: up.publicUrl, docFilename: file.name, agentId: a.id };
+    const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const res = await r.json(); if (!res.success) throw new Error(res.error || 'send failed');
+    pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Sent');
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+// ── Emoji + quick replies ─────────────────────────────────────────────
+const EMOJI_SET = ['👍','🙏','😊','😅','💪','🎉','✨','✅','❤️','🔥','😂','💯','👀','🤝','👋','🌴','🏠','🏡','📍','📸','💬','📲','📞','🗓','📋','💰','🤙','😎','🙌','🤔','👇','😉','🥥','☀️','🌧','💭','👌','🫶','😍','🤩'];
+function openEmoji() {
+  const pop = document.getElementById('emojiPop');
+  document.getElementById('qrPop').style.display = 'none';
+  if (pop.style.display === 'block') { pop.style.display = 'none'; return; }
+  pop.innerHTML = `<div class="emoji-grid">${EMOJI_SET.map(e => `<button onclick="insertEmoji('${e}')">${e}</button>`).join('')}</div>`;
+  pop.style.display = 'block';
+}
+function insertEmoji(e) { const box = document.getElementById('replyBox'); box.value += e; box.focus(); onReplyInput(); }
+
+const QUICK_REPLIES = [
+  { label: 'Send portal link', body: 'You can browse all available properties in real time, download photos, and share listings here: https://sambarentals.vercel.app' },
+  { label: 'Explain commission', body: 'The 10% agent commission is already included in the portal price — quote it to your client as-is and earn 10%. Prefer 20%? Quote portal price + 10%; the extra comes from the client.' },
+  { label: 'Coordinate a visit', body: 'Happy to coordinate a visit — let me have Ikiel reach out directly to find a time that works for you and the property.' },
+  { label: 'Direct to photos', body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.vercel.app' },
+  { label: 'Closing thanks', body: 'Thanks for reaching out — let me know if anything else comes up.' },
+  { label: 'Listing agreement', body: 'Ikiel will follow up with the listing agreement directly. Let me know if you have questions on the terms in the meantime.' },
+];
+function openQuickReplies() {
+  const pop = document.getElementById('qrPop');
+  document.getElementById('emojiPop').style.display = 'none';
+  if (pop.style.display === 'block') { pop.style.display = 'none'; return; }
+  pop.innerHTML = QUICK_REPLIES.map((q, i) => `<div class="qr-item" onclick="useQuickReply(${i})"><div class="qr-item-label">${esc(q.label)}</div><div class="qr-item-body">${esc(q.body)}</div></div>`).join('');
+  pop.style.display = 'block';
+}
+function useQuickReply(i) {
+  const q = QUICK_REPLIES[i]; if (!q) return;
+  const box = document.getElementById('replyBox'); box.value = q.body;
+  document.getElementById('qrPop').style.display = 'none'; box.focus(); onReplyInput();
+}
+
+// ── Template picker (24h window) ──────────────────────────────────────
+async function openTemplatePicker() {
+  document.getElementById('modalHost').innerHTML =
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Message templates</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="tplList"><div class="empty">Loading templates…</div></div></div></div>`;
+  try {
+    const r = await fetch('/api/whatsapp-templates');
+    const data = await r.json();
+    const tpls = (data.templates || []).filter(t => t.status === 'APPROVED');
+    window.__tpls = tpls;
+    const list = document.getElementById('tplList');
+    if (!list) return;
+    list.innerHTML = tpls.length
+      ? tpls.map((t, i) => `<div class="tpl-item" onclick="sendTemplate(${i})"><div class="tpl-name">${esc(t.name)} · ${esc(t.language)}</div><div class="tpl-body">${esc((t.body || '').slice(0, 240))}</div></div>`).join('')
+      : '<div class="empty">No approved templates found.</div>';
+  } catch (e) {
+    const list = document.getElementById('tplList'); if (list) list.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
+  }
+}
+async function sendTemplate(i) {
+  const t = (window.__tpls || [])[i]; if (!t) return;
+  const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
+  const params = []; let bodyText = t.body || '';
+  for (let n = 1; n <= t.placeholderCount; n++) {
+    const v = prompt(`Value for {{${n}}} in "${t.name}":`); if (v === null) return;
+    params.push(v); bodyText = bodyText.replace('{{' + n + '}}', v);
+  }
+  closeModal();
+  try {
+    const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'template', waNum: getWaNum(a), templateName: t.name, templateLanguage: t.language, templateParams: params, templateBodyText: bodyText, agentId: a.id }) });
+    const res = await r.json(); if (!res.success) throw new Error(res.error || 'failed');
+    pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Template sent');
+  } catch (e) { toast('Template failed: ' + e.message); }
+}
+
+// ── In-thread search ──────────────────────────────────────────────────
+function toggleThreadSearch() {
+  const bar = document.getElementById('threadSearch');
+  if (bar.style.display === 'none') { bar.style.display = 'flex'; document.getElementById('threadSearchInput').focus(); }
+  else { bar.style.display = 'none'; state.search = { q: '', matches: [], idx: 0 }; document.getElementById('threadSearchInput').value = ''; document.getElementById('threadSearchCount').textContent = ''; }
+}
+function applySearchHighlights() {  // recompute matches against current DOM (no scroll)
+  const body = document.getElementById('threadBody');
+  const q = state.search.q.toLowerCase();
+  state.search.matches = [];
+  if (!q) { document.getElementById('threadSearchCount').textContent = ''; return; }
+  [...body.querySelectorAll('.bubble')].forEach(b => {
+    const m = state.msgIndex[b.getAttribute('data-id')];
+    const text = (m?.content || b.textContent || '').toLowerCase();
+    if (text.includes(q)) state.search.matches.push(b);
+  });
+  const n = state.search.matches.length;
+  document.getElementById('threadSearchCount').textContent = n ? `${Math.min(state.search.idx + 1, n)}/${n}` : '0';
+}
+function runThreadSearch(q) {
+  state.search.q = q.trim(); state.search.idx = 0;
+  applySearchHighlights();
+  if (state.search.matches.length) focusMatch(0);
+}
+function focusMatch(i) {
+  const el = state.search.matches[i]; if (!el) return;
+  state.search.idx = i;
+  document.getElementById('threadSearchCount').textContent = `${i + 1}/${state.search.matches.length}`;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 1000);
+}
+function threadSearchStep(dir) {
+  if (!state.search.matches.length) return;
+  focusMatch((state.search.idx + dir + state.search.matches.length) % state.search.matches.length);
+}
+
+// ── Scroll-to-bottom FAB ──────────────────────────────────────────────
+function onThreadScroll() { updateScrollFab(); }
+function updateScrollFab() {
+  const body = document.getElementById('threadBody'); const fab = document.getElementById('scrollFab');
+  if (!body || !fab) return;
+  const dist = body.scrollHeight - body.scrollTop - body.clientHeight;
+  state.atBottom = dist < 80;
+  fab.style.display = dist > 200 ? 'flex' : 'none';
+}
+function scrollThreadToBottom() { const body = document.getElementById('threadBody'); body.scrollTop = body.scrollHeight; updateScrollFab(); }
+
+// ── Draft autosave + 24h window helpers ───────────────────────────────
+function onReplyInput() {
+  autoGrow(document.getElementById('replyBox'));
+  if (!state.activeId) return;
+  const v = document.getElementById('replyBox').value;
+  if (v) localStorage.setItem('maya_draft_' + state.activeId, v);
+  else localStorage.removeItem('maya_draft_' + state.activeId);
+}
+function pauseMayaAfterManual(a) {
+  a.suggested_reply = ''; a.automation_override = 'paused';
+  api('patch_agent', { id: a.id, fields: { suggested_reply: '', automation_override: 'paused' } }).catch(() => {});
+  renderBanner(a);
+}
+function lastInboundMs(a) {
+  let t = 0;
+  if (a.last_inbound_at) t = Math.max(t, new Date(a.last_inbound_at).getTime());
+  if (state.lastInbound[a.id]) t = Math.max(t, new Date(state.lastInbound[a.id]).getTime());
+  state.threadMsgs.forEach(m => { if (m.direction === 'inbound') t = Math.max(t, new Date(m.timestamp).getTime()); });
+  return t;
+}
+
 // ── Suggest (Maya draft) ──────────────────────────────────────────────
 async function suggest() {
   const id = state.activeId; if (!id) return;
   const box = document.getElementById('replyBox');
-  const btn = document.getElementById('suggestBtn');
-  btn.classList.add('loading'); box.disabled = true;
+  box.disabled = true;
   const prev = box.value;
   box.value = '';
   box.placeholder = 'Maya is thinking…';
@@ -805,7 +1267,7 @@ async function suggest() {
     toast('Suggest failed: ' + e.message);
   }
   box.disabled = false; box.placeholder = 'Type a message';
-  btn.classList.remove('loading'); autoGrow(box);
+  autoGrow(box); onReplyInput();
 }
 
 // ── Send ──────────────────────────────────────────────────────────────
@@ -817,19 +1279,21 @@ async function send() {
   if (!msg) return;
   const btn = document.getElementById('sendBtn');
   btn.disabled = true;
+  const replyTo = state.replyTarget?.waMessageId || null;
   try {
     const r = await fetch('/api/whatsapp-send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id }),
+      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id, ...(replyTo ? { replyTo } : {}) }),
     });
     const res = await r.json();
     if (!res.success) throw new Error(res.error || 'send failed');
     box.value = ''; autoGrow(box);
+    localStorage.removeItem('maya_draft_' + a.id);
+    clearReply();
+    document.getElementById('emojiPop').style.display = 'none';
+    document.getElementById('qrPop').style.display = 'none';
     // A manual reply pauses Maya for this agent (matches the main CRM).
-    a.suggested_reply = '';
-    a.automation_override = 'paused';
-    api('patch_agent', { id: a.id, fields: { suggested_reply: '', automation_override: 'paused' } }).catch(() => {});
-    renderBanner(a);
+    pauseMayaAfterManual(a);
     await refreshThread(true);
     refreshAll();
   } catch (e) {

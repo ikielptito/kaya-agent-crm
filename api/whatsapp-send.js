@@ -56,6 +56,7 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'fetch_media') return await handleFetchMedia(req, res, body.mediaId, TOKEN);
+    if (action === 'reaction') return await handleReaction(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'recall')   return await handleRecall(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'edit')     return await handleEdit(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'image')    return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'image');
@@ -75,10 +76,14 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     docUrl, docFilename,
     imageUrl,
     caption,
-    agentId, campaignId
+    agentId, campaignId,
+    replyTo,            // wa_message_id this send quotes (reply context), optional
   } = body;
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
+
+  // Reply context — quote a prior message. Templates can't carry context.
+  const ctx = replyTo ? { context: { message_id: replyTo } } : {};
 
   let metaBody;
   let logContent;
@@ -89,7 +94,8 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
       messaging_product: 'whatsapp',
       to: waNum,
       type: 'image',
-      image: { link: imageUrl, ...(caption ? { caption } : {}) }
+      image: { link: imageUrl, ...(caption ? { caption } : {}) },
+      ...ctx
     };
     logContent = `[Image]${caption ? ' ' + caption : ''}`;
   } else if (type === 'document') {
@@ -98,7 +104,8 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
       messaging_product: 'whatsapp',
       to: waNum,
       type: 'document',
-      document: { link: docUrl, filename: docFilename || 'document.pdf', ...(caption ? { caption } : {}) }
+      document: { link: docUrl, filename: docFilename || 'document.pdf', ...(caption ? { caption } : {}) },
+      ...ctx
     };
     logContent = `[Document: ${docFilename || 'PDF'}]${caption ? ' ' + caption : ''}`;
   } else if (type === 'template') {
@@ -117,7 +124,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     logContent = templateBodyText || `[Template: ${templateName}]`;
   } else {
     if (!message) return res.status(400).json({ error: 'message is required for free-form send' });
-    metaBody = { messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: message } };
+    metaBody = { messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: message }, ...ctx };
     logContent = message;
   }
 
@@ -143,7 +150,9 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         wa_message_id: waMessageId,
         timestamp: new Date().toISOString(),
         source: 'api',
-        campaign_id: campaignId || null
+        campaign_id: campaignId || null,
+        reply_to: replyTo || null,
+        status: 'sent'
       })
     }).catch(e => console.warn('Failed to log outbound message:', e.message));
   }
@@ -274,4 +283,34 @@ async function handleEdit(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
   }
 
   return res.status(200).json({ success: localOk || metaOk, meta_edited: metaOk, local_updated: localOk, meta_error: metaError });
+}
+
+// ── REACTION (react to an agent's message with an emoji) ─────────────
+// Send empty emoji to remove the reaction. We store it on the target row's
+// `reaction` column — the same column the webhook uses for agent reactions,
+// since a message carries at most one displayed reaction.
+async function handleReaction(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders) {
+  const { waNum, waMessageId, emoji } = body;
+  if (!waNum || !waMessageId) return res.status(400).json({ error: 'waNum and waMessageId are required' });
+
+  const waRes = await fetch(`${GRAPH}/${PHONE_ID}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp', to: waNum, type: 'reaction',
+      reaction: { message_id: waMessageId, emoji: emoji || '' }
+    })
+  });
+  const waData = await waRes.json();
+  if (!waRes.ok) {
+    return res.status(waRes.status).json({ error: waData.error?.message || 'WhatsApp API error', details: waData });
+  }
+
+  if (sbHeaders && SUPABASE_URL) {
+    await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify({ reaction: emoji || null })
+    }).catch(() => {});
+  }
+  return res.status(200).json({ success: true });
 }
