@@ -1,8 +1,55 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
+import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
+
+// ── Web Push to the Maya chat PWA ──────────────────────────────────────
+// Fan out a notification to every subscribed device when an agent messages
+// in. Subscriptions live in settings.push_subscriptions (saved by chat.html
+// via /api/supabase save_push_subscription). Dead endpoints (410/404) are
+// pruned. Fire-and-forget — never blocks or fails the webhook.
+let _vapidReady = false;
+function ensureVapid() {
+  if (_vapidReady) return true;
+  const pub = process.env.VAPID_PUBLIC_KEY;
+  const priv = process.env.VAPID_PRIVATE_KEY;
+  if (!pub || !priv) return false;
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:ikielptito@gmail.com', pub, priv);
+  _vapidReady = true;
+  return true;
+}
+
+async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agentId, badgeCount }) {
+  if (!ensureVapid()) return;
+  let list = [];
+  try {
+    const r = await fetch(`${supabaseUrl}/rest/v1/settings?key=eq.push_subscriptions&select=value`, { headers: sbHeaders });
+    const row = (await r.json())?.[0];
+    list = Array.isArray(row?.value) ? row.value : [];
+  } catch (_) { return; }
+  if (!list.length) return;
+
+  const json = JSON.stringify({ title, body, agentId: agentId || null, url: '/chat.html', badge_count: badgeCount });
+  const dead = [];
+  await Promise.all(list.map(async sub => {
+    try {
+      await webpush.sendNotification(sub, json);
+    } catch (e) {
+      if (e.statusCode === 410 || e.statusCode === 404) dead.push(sub.endpoint);
+    }
+  }));
+
+  if (dead.length) {
+    const alive = list.filter(s => !dead.includes(s.endpoint));
+    fetch(`${supabaseUrl}/rest/v1/settings`, {
+      method: 'POST',
+      headers: { ...sbHeaders, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key: 'push_subscriptions', value: alive })
+    }).catch(() => {});
+  }
+}
 
 // In-memory cache for projects (warm container only). 60s TTL.
 let _projectsCache = null;
@@ -267,6 +314,14 @@ export default async function handler(req, res) {
         media_type: mediaType || null, media_id: mediaId || null,
       })
     });
+
+    // Push a notification to the Maya chat PWA (fire-and-forget).
+    sendPushNotifications(SUPABASE_URL, sbHeaders, {
+      title: agent?.name || agent?.agency || ('+' + fromNum),
+      body: (dbContent || text || 'New message').slice(0, 160),
+      agentId: agent?.id || null,
+      badgeCount: (agent?.unread_count || 0) + 1,
+    }).catch(() => {});
 
     if (!agent) return res.status(200).end(); // unknown sender — logged, nothing else
 

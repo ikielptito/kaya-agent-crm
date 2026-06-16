@@ -375,6 +375,39 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }
 
+    } else if (action === 'save_push_subscription') {
+      // Store a Web Push subscription for the Maya chat PWA. Subscriptions
+      // live in settings.push_subscriptions (an array), deduped by endpoint so
+      // re-subscribing the same device doesn't pile up. The webhook reads this
+      // list to fan out push notifications on inbound agent messages.
+      const sub = payload?.subscription;
+      if (!sub?.endpoint) return res.status(400).json({ error: 'subscription with endpoint required' });
+      const cur = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+      const curRow = await cur.json();
+      const list = Array.isArray(curRow?.[0]?.value) ? curRow[0].value : [];
+      const next = list.filter(s => s.endpoint !== sub.endpoint);
+      next.push(sub);
+      await fetch(SUPABASE_URL + '/rest/v1/settings', {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key: 'push_subscriptions', value: next })
+      });
+      return res.status(200).json({ success: true, count: next.length });
+
+    } else if (action === 'remove_push_subscription') {
+      const endpoint = payload?.endpoint;
+      if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
+      const cur = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+      const curRow = await cur.json();
+      const list = Array.isArray(curRow?.[0]?.value) ? curRow[0].value : [];
+      const next = list.filter(s => s.endpoint !== endpoint);
+      await fetch(SUPABASE_URL + '/rest/v1/settings', {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key: 'push_subscriptions', value: next })
+      });
+      return res.status(200).json({ success: true, count: next.length });
+
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });
     }

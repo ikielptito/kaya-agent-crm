@@ -5,5 +5,8 @@
   "type": "module",
   "engines": {
     "node": "20.x"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }

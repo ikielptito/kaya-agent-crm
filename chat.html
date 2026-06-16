@@ -93,6 +93,9 @@
   }
   .refresh-btn.spin { animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  #notifBtn { font-size: 16px; opacity: 0.45; filter: grayscale(1); }
+  #notifBtn.on { opacity: 1; filter: none; }
+  #notifBtn.denied { opacity: 0.3; filter: grayscale(1); }
 
   /* Maya mode selector */
   .mode-bar { margin-top: 10px; }
@@ -279,6 +282,7 @@
     <div class="list-head">
       <div class="list-head-top">
         <div class="list-title">Maya</div>
+        <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
         <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
       </div>
       <div class="mode-bar">
@@ -339,6 +343,12 @@
 // real auth — it just stops casual access from anyone who finds the link.
 const APP_PIN = '2468';
 
+// Web Push VAPID public key — safe to expose (it's the public half). Must
+// match VAPID_PUBLIC_KEY set in Vercel env (paired with VAPID_PRIVATE_KEY).
+const VAPID_PUBLIC_KEY = 'BAJHYG9hY_LVOBoN4ypJ9U7Tu7kVdKObimwLttgUgmzCDCvuQDaePApNhMZilKzOoN31_5Mgjo6t-sFz7wCl75Q';
+
+const POLL_MS = 8000;        // inbox auto-refresh cadence
+
 const MODE_HINTS = {
   off:       'Maya is silent. You answer everything manually.',
   draft:     'Maya drafts replies for you to review and send.',
@@ -353,6 +363,9 @@ const state = {
   query: '',
   mode: 'draft',
   pollTimer: null,
+  lastInbound: {},     // agent_id -> last seen inbound timestamp (for new-msg detection)
+  primed: false,       // true once the first poll has set a baseline
+  swReg: null,
 };
 
 // ── PIN gate ──────────────────────────────────────────────────────────
@@ -384,11 +397,13 @@ async function api(action, payload) {
 
 // ── Init + polling ────────────────────────────────────────────────────
 async function init() {
+  await registerServiceWorker();
   await Promise.all([refreshAll(), loadMode()]);
   startPolling();
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) { refreshAll(); loadMode(); }
+    if (!document.hidden) { refreshAll(); loadMode(); if (state.activeId) refreshThread(); }
   });
+  handleDeepLink();
 }
 function startPolling() {
   if (state.pollTimer) clearInterval(state.pollTimer);
@@ -396,7 +411,69 @@ function startPolling() {
     if (document.hidden) return;
     refreshAll();
     if (state.activeId) refreshThread();
-  }, 15000);
+  }, POLL_MS);
+}
+
+// ── Service worker + Web Push ─────────────────────────────────────────
+async function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  try {
+    state.swReg = await navigator.serviceWorker.register('/sw.js');
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'open-agent' && e.data.agentId) openConv(Number(e.data.agentId));
+    });
+    refreshNotifButton();
+    // If already granted but not yet subscribed (e.g. new device), (re)subscribe silently.
+    if (Notification.permission === 'granted') subscribePush().catch(() => {});
+  } catch (e) { console.warn('SW register failed', e); }
+}
+
+function refreshNotifButton() {
+  const btn = document.getElementById('notifBtn');
+  if (!btn) return;
+  const perm = ('Notification' in window) ? Notification.permission : 'denied';
+  btn.classList.toggle('on', perm === 'granted');
+  btn.classList.toggle('denied', perm === 'denied');
+  btn.title = perm === 'granted' ? 'Notifications on' : perm === 'denied' ? 'Notifications blocked (enable in Settings)' : 'Enable notifications';
+}
+
+async function enableNotifications() {
+  if (!('Notification' in window)) { toast('Notifications not supported on this device'); return; }
+  if (Notification.permission === 'denied') { toast('Notifications are blocked. Enable them in your device Settings for this app.'); return; }
+  try {
+    const perm = await Notification.requestPermission();
+    refreshNotifButton();
+    if (perm !== 'granted') { toast('Notifications not enabled'); return; }
+    await subscribePush();
+    toast('Notifications on 🔔');
+  } catch (e) { toast('Could not enable: ' + e.message); }
+}
+
+async function subscribePush() {
+  if (!state.swReg || !('PushManager' in window)) return;
+  let sub = await state.swReg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await state.swReg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  }
+  await api('save_push_subscription', { subscription: sub.toJSON() });
+}
+
+function urlB64ToUint8Array(b64) {
+  const pad = '='.repeat((4 - b64.length % 4) % 4);
+  const base64 = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// Open the agent referenced in a #agent=ID deep link (from a notification tap).
+function handleDeepLink() {
+  const m = location.hash.match(/agent=(\d+)/);
+  if (m) { openConv(Number(m[1])); history.replaceState(null, '', location.pathname); }
 }
 
 async function refreshAll(manual) {
@@ -408,21 +485,70 @@ async function refreshAll(manual) {
       api('get_messages'),     // no agentId → recent across everyone
     ]);
     if (Array.isArray(agents)) state.agents = agents;
+    const newInboundAgents = [];
     if (Array.isArray(allMsgs)) {
       const map = {};
+      const inbound = {};
       allMsgs.forEach(m => {
         if (m.agent_id == null || m.deleted_at) return;
         if (!map[m.agent_id] || new Date(m.timestamp) > new Date(map[m.agent_id].lastTimestamp)) {
           map[m.agent_id] = { lastTimestamp: m.timestamp, lastContent: m.content || '', direction: m.direction };
         }
+        if (m.direction === 'inbound' && (!inbound[m.agent_id] || new Date(m.timestamp) > new Date(inbound[m.agent_id]))) {
+          inbound[m.agent_id] = m.timestamp;
+        }
       });
       state.msgMap = map;
+      // Detect inbound messages that arrived since the last poll. Skip the
+      // very first run so we don't "announce" the whole backlog on load.
+      if (state.primed) {
+        Object.keys(inbound).forEach(id => {
+          const prev = state.lastInbound[id];
+          if (!prev || new Date(inbound[id]) > new Date(prev)) newInboundAgents.push(Number(id));
+        });
+      }
+      state.lastInbound = inbound;
+      state.primed = true;
     }
     renderList();
+    updateBadge();
+
+    if (newInboundAgents.length) {
+      playPing();
+      // If the open thread is one of them, pull the new message in immediately.
+      if (state.activeId && newInboundAgents.includes(state.activeId)) refreshThread(true);
+    }
   } catch (e) {
     console.warn('refresh failed', e);
   }
   if (manual && btn) setTimeout(() => btn.classList.remove('spin'), 500);
+}
+
+// ── App-icon badge + arrival ping ─────────────────────────────────────
+function totalUnread() {
+  return state.agents.reduce((n, a) => n + (a.unread_count || 0), 0);
+}
+function updateBadge() {
+  const n = totalUnread();
+  document.title = n > 0 ? `(${n}) Maya` : 'Maya';
+  try {
+    if ('setAppBadge' in navigator) { n > 0 ? navigator.setAppBadge(n) : navigator.clearAppBadge(); }
+  } catch (_) {}
+}
+
+let _audioCtx;
+function playPing() {
+  try {
+    _audioCtx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine'; o.frequency.value = 880;
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.32);
+    o.start(); o.stop(ctx.currentTime + 0.33);
+  } catch (_) {}
 }
 
 // ── Maya mode ─────────────────────────────────────────────────────────
@@ -552,6 +678,7 @@ function openConv(id) {
   if (a.unread_count) {
     a.unread_count = 0;
     api('patch_agent', { id, fields: { unread_count: 0 } }).catch(() => {});
+    updateBadge();
   }
   refreshThread(true);
 }
