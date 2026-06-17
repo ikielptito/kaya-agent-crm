@@ -601,15 +601,40 @@ function refreshNotifButton() {
 }
 
 async function enableNotifications() {
-  if (!('Notification' in window)) { toast('Notifications not supported on this device'); return; }
-  if (Notification.permission === 'denied') { toast('Notifications are blocked. Enable them in your device Settings for this app.'); return; }
+  // iOS only exposes the Notification API inside an installed (home-screen) PWA.
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    toast(standalone ? 'Push not supported on this device/OS (needs iOS 16.4+).' : 'Add the app to your Home Screen first, then open it and tap 🔔.');
+    return;
+  }
+  if (Notification.permission === 'denied') { toast('Blocked. Enable notifications for this app in iOS Settings.'); return; }
   try {
-    const perm = await Notification.requestPermission();
-    refreshNotifButton();
-    if (perm !== 'granted') { toast('Notifications not enabled'); return; }
+    if (Notification.permission !== 'granted') {
+      const perm = await Notification.requestPermission();
+      refreshNotifButton();
+      if (perm !== 'granted') { toast('Notifications not enabled'); return; }
+    }
     await subscribePush();
-    toast('Notifications on 🔔');
+    await diagnoseAndTest();
   } catch (e) { toast('Could not enable: ' + e.message); }
+}
+
+// End-to-end check: confirms the server has VAPID keys, the keys match the app,
+// a subscription is saved, then fires a real test push so you see it arrive.
+async function diagnoseAndTest() {
+  let st;
+  try { st = await api('push_status'); } catch (e) { toast('Status check failed: ' + e.message); return; }
+  if (!st || st.error) { toast('Status error: ' + (st?.error || 'unknown')); return; }
+  if (!st.vapidConfigured) { toast('⚠ Server is missing VAPID keys — set them in Vercel + redeploy.'); return; }
+  if (st.vapidPublicKeyTail && !VAPID_PUBLIC_KEY.endsWith(st.vapidPublicKeyTail)) {
+    toast('⚠ VAPID key mismatch between app and server. Re-check the Vercel env values.'); return;
+  }
+  if (!st.subscriptionCount) { toast('⚠ No subscription saved — try tapping 🔔 again.'); return; }
+  let t;
+  try { t = await api('send_test_push'); } catch (e) { toast('Test send failed: ' + e.message); return; }
+  if (t.error) { toast('Test failed: ' + t.error); return; }
+  if (t.sent > 0) toast(`Test sent to ${t.sent}/${t.total} device(s) 🔔 — check for the banner.`);
+  else toast('Push rejected by ' + t.total + ' device(s): ' + (t.results?.[0]?.status || '') + ' ' + (t.results?.[0]?.error || ''));
 }
 
 async function subscribePush() {

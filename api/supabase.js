@@ -1,4 +1,5 @@
 import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import webpush from 'web-push';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -401,6 +402,44 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
       } catch (e) {
         return res.status(500).json({ error: 'Translate failed: ' + e.message });
       }
+
+    } else if (action === 'push_status') {
+      // Diagnostic: is push wired up? Reports (no secrets) whether the server
+      // has VAPID keys, the public key's tail (to compare against the app's),
+      // and how many device subscriptions are saved.
+      const pub = process.env.VAPID_PUBLIC_KEY || '';
+      const priv = process.env.VAPID_PRIVATE_KEY || '';
+      let count = 0;
+      try {
+        const r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+        const row = await r.json();
+        count = Array.isArray(row?.[0]?.value) ? row[0].value.length : 0;
+      } catch (_) {}
+      return res.status(200).json({
+        vapidConfigured: !!(pub && priv),
+        vapidPublicKeyTail: pub ? pub.slice(-12) : null,
+        subscriptionCount: count
+      });
+
+    } else if (action === 'send_test_push') {
+      // Send a test notification to every saved subscription and report the
+      // per-device result (status codes surface VAPID mismatch / expiry).
+      const pub = process.env.VAPID_PUBLIC_KEY, priv = process.env.VAPID_PRIVATE_KEY;
+      if (!pub || !priv) return res.status(400).json({ error: 'Server is missing VAPID keys (set VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY in Vercel)' });
+      webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:ikielptito@gmail.com', pub, priv);
+      let list = [];
+      try {
+        const r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+        const row = await r.json();
+        list = Array.isArray(row?.[0]?.value) ? row[0].value : [];
+      } catch (_) {}
+      if (!list.length) return res.status(400).json({ error: 'No subscriptions saved yet — tap the bell to subscribe this device first' });
+      const payload = JSON.stringify({ title: 'Maya', body: 'Test notification ✅', url: '/chat.html', badge_count: 1 });
+      const results = await Promise.all(list.map(async s => {
+        try { await webpush.sendNotification(s, payload); return { ok: true }; }
+        catch (e) { return { ok: false, status: e.statusCode, error: (e.body || e.message || '').toString().slice(0, 200) }; }
+      }));
+      return res.status(200).json({ sent: results.filter(r => r.ok).length, total: results.length, results });
 
     } else if (action === 'save_push_subscription') {
       // Store a Web Push subscription for the Maya chat PWA. Subscriptions

@@ -23,9 +23,9 @@ self.addEventListener('push', event => {
 
   event.waitUntil((async () => {
     await self.registration.showNotification(title, options);
-    // Reflect unread on the app icon if the count was provided.
-    if (typeof data.badge_count === 'number' && self.registration.navigationPreload) {
-      try { await self.navigator.setAppBadge?.(data.badge_count); } catch (_) {}
+    // Reflect unread on the app icon (iOS sets the home-screen badge from here).
+    if (typeof data.badge_count === 'number') {
+      try { await self.navigator.setAppBadge(data.badge_count); } catch (_) {}
     }
   })());
 });
