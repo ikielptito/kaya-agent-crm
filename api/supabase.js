@@ -375,6 +375,33 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }
 
+    } else if (action === 'translate') {
+      // Translate one or more messages with Claude Haiku (cheap + fast). Used by
+      // the chat inbox to show inbound Bahasa Indonesia in English, and to
+      // translate a drafted reply. Detects source language; flags messages that
+      // are already in the target so the UI can skip showing a translation.
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      const texts = Array.isArray(payload?.texts) ? payload.texts : (payload?.text != null ? [payload.text] : []);
+      const target = payload?.target || 'English';
+      if (!texts.length) return res.status(400).json({ error: 'text or texts required' });
+      const numbered = texts.map((t, i) => `${i + 1}. ${String(t).replace(/\s+/g, ' ').slice(0, 1000)}`).join('\n');
+      const system = `You are a translator. Translate each numbered message into ${target}, preserving tone and any emoji. Detect the source language. If a message is already written in ${target}, set "same" to true and return it unchanged. Respond with ONLY a JSON array — one object per input, in the same order: {"detected":"<language name>","translated":"<text>","same":<true|false>}. No commentary, no code fences.`;
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, system, messages: [{ role: 'user', content: numbered }] })
+        });
+        const data = await r.json();
+        let txt = (data.content?.[0]?.text || '').trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+        let arr; try { arr = JSON.parse(txt); } catch (_) { arr = null; }
+        if (!Array.isArray(arr)) arr = texts.map(t => ({ detected: 'unknown', translated: t, same: true }));
+        return res.status(200).json({ results: arr });
+      } catch (e) {
+        return res.status(500).json({ error: 'Translate failed: ' + e.message });
+      }
+
     } else if (action === 'save_push_subscription') {
       // Store a Web Push subscription for the Maya chat PWA. Subscriptions
       // live in settings.push_subscriptions (an array), deduped by endpoint so

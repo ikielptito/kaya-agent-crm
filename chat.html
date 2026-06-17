@@ -340,6 +340,20 @@
     display: flex; align-items: center; justify-content: center; padding: 0 4px;
   }
 
+  /* ── Translation line + toggle ────────────────────────── */
+  .xlate { margin-top: 5px; padding-top: 4px; border-top: 1px dashed var(--wa-rule); font-size: 13.5px; color: var(--wa-green-dark); line-height: 1.35; }
+  .xlate .xlate-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.7; display: block; margin-bottom: 1px; }
+  #translateBtn { font-size: 16px; opacity: 0.4; filter: grayscale(1); }
+  #translateBtn.on { opacity: 1; filter: none; }
+
+  /* ── Swipe-to-reply ───────────────────────────────────── */
+  .bubble::before {
+    content: '↩'; position: absolute; top: 50%; left: -26px; transform: translateY(-50%);
+    color: var(--wa-accent); font-size: 18px; font-weight: 700; opacity: 0; pointer-events: none;
+  }
+  .bubble.swiping::before { opacity: var(--sw, 0); }
+  .bubble.swiping { transition: none !important; }
+
   /* ── Unread divider ───────────────────────────────────── */
   .unread-div { align-self: stretch; text-align: center; color: var(--wa-green-dark); font-size: 11px; font-weight: 700;
     letter-spacing: 0.05em; text-transform: uppercase; background: #d9fdd366; padding: 4px; margin: 6px 0; border-radius: 4px; }
@@ -437,6 +451,7 @@
           <div class="thread-head-name" id="thName"></div>
           <div class="thread-head-sub" id="thSub"></div>
         </div>
+        <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English">🌐</button>
         <button class="refresh-btn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
       </div>
       <div class="thread-search" id="threadSearch" style="display:none">
@@ -510,6 +525,8 @@ const state = {
   replyTarget: null,   // { waMessageId, who, text } when composing a reply
   search: { q: '', matches: [], idx: 0 },
   atBottom: true,
+  translations: {},    // wa_message_id -> { translated, same, detected }
+  translateOn: false,  // per-conversation auto-translate
 };
 
 // ── PIN gate ──────────────────────────────────────────────────────────
@@ -541,6 +558,8 @@ async function api(action, payload) {
 
 // ── Init + polling ────────────────────────────────────────────────────
 async function init() {
+  state.translations = loadXlateCache();
+  setupThreadGestures();
   await registerServiceWorker();
   await Promise.all([refreshAll(), loadMode()]);
   startPolling();
@@ -817,6 +836,8 @@ function openConv(id) {
   document.getElementById('qrPop').style.display = 'none';
   state.threadMsgs = []; state.msgIndex = {};
   state.threadLastRead = localStorage.getItem('maya_read_' + id) || null;
+  state.translateOn = localStorage.getItem('maya_xlate_' + id) === '1';
+  updateTranslateBtn();
 
   document.getElementById('thAvatar').textContent = initials(a.name, a.agency);
   document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
@@ -899,6 +920,7 @@ async function refreshThread(scroll) {
   updateScrollFab();
   const a = state.agents.find(x => x.id === id);
   if (a) renderBanner(a);
+  if (state.translateOn) translateOpenThread();
 }
 
 function daySep(d) {
@@ -953,10 +975,13 @@ function renderBubble(m) {
   }
   const reaction = m.reaction ? `<span class="bubble-reaction">${esc(m.reaction)}</span>` : '';
   const ticks = statusTicks(m, isOut);
-  const menuAttr = wid
-    ? `oncontextmenu="return openMsgMenu(event,'${wid}')" ontouchstart="pressStart(event,'${wid}')" ontouchend="pressEnd()" ontouchmove="pressEnd()"`
-    : '';
-  return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}" ${menuAttr}>${quoteHtml}${inner}${edited}<span class="bubble-time">${t}${ticks}</span>${reaction}</div>`;
+  // Translation line for inbound messages (shown when a non-target translation is cached).
+  let xlateHtml = '';
+  const xl = !isOut ? state.translations[wid] : null;
+  if (xl && !xl.same && xl.translated) {
+    xlateHtml = `<span class="xlate"><span class="xlate-tag">🌐 ${esc(xl.detected || 'translated')}</span>${esc(xl.translated).replace(/\n/g, '<br>')}</span>`;
+  }
+  return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}">${quoteHtml}${inner}${xlateHtml}${edited}<span class="bubble-time">${t}${ticks}</span>${reaction}</div>`;
 }
 
 const MEDIA_LABELS = { image: 'Photo', sticker: 'Sticker', video: 'Video', audio: 'Voice note', document: 'Document', location: 'Location', contact: 'Contact card' };
@@ -1016,6 +1041,7 @@ function openMsgMenu(e, wid) {
   const items = [
     `<button class="sheet-item" onclick="startReply('${wid}')"><span class="ico">↩︎</span> Reply</button>`,
     `<button class="sheet-item" onclick="copyMsg('${wid}')"><span class="ico">⧉</span> Copy text</button>`,
+    `<button class="sheet-item" onclick="translateOne('${wid}')"><span class="ico">🌐</span> Translate</button>`,
   ];
   if (canEdit) items.push(`<button class="sheet-item" onclick="editMsg('${wid}')"><span class="ico">✏️</span> Edit</button>`);
   if (canRecall) items.push(`<button class="sheet-item danger" onclick="recallMsg('${wid}')"><span class="ico">🗑</span> Delete for everyone</button>`);
@@ -1089,6 +1115,7 @@ function toggleAttachSheet() {
     <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">✦</span> Maya draft a reply</button>
     <button class="sheet-item" onclick="closeSheet();openQuickReplies()"><span class="ico">⚡</span> Quick replies</button>
     <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">😀</span> Emoji</button>
+    <button class="sheet-item" onclick="translateDraft()"><span class="ico">🌐</span> Translate my draft → Indonesian</button>
   `);
 }
 function pick(inputId) { closeSheet(); document.getElementById(inputId).click(); }
@@ -1248,6 +1275,115 @@ function lastInboundMs(a) {
   if (state.lastInbound[a.id]) t = Math.max(t, new Date(state.lastInbound[a.id]).getTime());
   state.threadMsgs.forEach(m => { if (m.direction === 'inbound') t = Math.max(t, new Date(m.timestamp).getTime()); });
   return t;
+}
+
+// ── Auto-translate ────────────────────────────────────────────────────
+function loadXlateCache() { try { return JSON.parse(localStorage.getItem('maya_xlate_cache') || '{}'); } catch (_) { return {}; } }
+function saveXlateCache() {
+  try {
+    const keys = Object.keys(state.translations);
+    if (keys.length > 600) { const t = {}; keys.slice(-500).forEach(k => t[k] = state.translations[k]); state.translations = t; }
+    localStorage.setItem('maya_xlate_cache', JSON.stringify(state.translations));
+  } catch (_) {}
+}
+function updateTranslateBtn() {
+  const btn = document.getElementById('translateBtn');
+  if (btn) btn.classList.toggle('on', !!state.translateOn);
+}
+function toggleTranslate() {
+  if (!state.activeId) return;
+  state.translateOn = !state.translateOn;
+  localStorage.setItem('maya_xlate_' + state.activeId, state.translateOn ? '1' : '0');
+  updateTranslateBtn();
+  if (state.translateOn) { toast('Auto-translate on'); translateOpenThread(); }
+  else toast('Auto-translate off');
+}
+// Translate any inbound messages in the open thread that aren't cached yet.
+async function translateOpenThread() {
+  const id = state.activeId; if (!id) return;
+  const pending = state.threadMsgs.filter(m =>
+    m.direction === 'inbound' && m.wa_message_id && !state.translations[m.wa_message_id] && (m.content || '').trim() && !m.media_type);
+  if (!pending.length) return;
+  try {
+    const data = await api('translate', { texts: pending.map(m => m.content), target: 'English' });
+    if (id !== state.activeId) return;
+    const results = data.results || [];
+    pending.forEach((m, i) => { const r = results[i]; if (r) state.translations[m.wa_message_id] = { translated: r.translated, same: !!r.same, detected: r.detected }; });
+    saveXlateCache();
+    refreshThread();
+  } catch (_) {}
+}
+async function translateOne(wid) {
+  closeSheet();
+  const m = state.msgIndex[wid]; if (!m) return;
+  toast('Translating…');
+  try {
+    const data = await api('translate', { text: m.content || '', target: 'English' });
+    const r = (data.results || [])[0];
+    if (r) { state.translations[wid] = { translated: r.translated, same: !!r.same, detected: r.detected }; saveXlateCache(); refreshThread(); if (r.same) toast('Already English'); }
+  } catch (e) { toast('Translate failed'); }
+}
+async function translateDraft() {
+  closeSheet();
+  const box = document.getElementById('replyBox');
+  const t = box.value.trim();
+  if (!t) { toast('Nothing to translate'); return; }
+  toast('Translating…');
+  try {
+    const data = await api('translate', { text: t, target: 'Indonesian' });
+    const r = (data.results || [])[0];
+    if (r && r.translated) { box.value = r.translated; onReplyInput(); }
+  } catch (e) { toast('Translate failed'); }
+}
+
+// ── Swipe-to-reply + long-press (delegated on the thread body) ────────
+function setupThreadGestures() {
+  const body = document.getElementById('threadBody');
+  if (!body) return;
+  let sw = null, timer = null;
+  const reset = b => { if (b) { b.classList.remove('swiping'); b.style.transform = ''; b.style.removeProperty('--sw'); } };
+
+  body.addEventListener('touchstart', e => {
+    const b = e.target.closest('.bubble[data-id]');
+    const wid = b && b.getAttribute('data-id');
+    if (!b || !wid) { sw = null; return; }
+    sw = { b, wid, x: e.touches[0].clientX, y: e.touches[0].clientY, dx: 0, active: false };
+    timer = setTimeout(() => { if (sw && Math.abs(sw.dx) < 8) { openMsgMenu(null, wid); sw = null; } }, 480);
+  }, { passive: true });
+
+  body.addEventListener('touchmove', e => {
+    if (!sw) return;
+    sw.dx = e.touches[0].clientX - sw.x;
+    const dy = e.touches[0].clientY - sw.y;
+    if (!sw.active) {
+      if (sw.dx > 10 && sw.dx > Math.abs(dy)) { sw.active = true; clearTimeout(timer); sw.b.classList.add('swiping'); }
+      else if (Math.abs(dy) > 10 || sw.dx < -8) { clearTimeout(timer); reset(sw.b); sw = null; return; }
+    }
+    if (sw.active) {
+      const d = Math.max(0, Math.min(sw.dx, 80));
+      sw.b.style.transform = `translateX(${d}px)`;
+      sw.b.style.setProperty('--sw', (d / 80).toFixed(2));
+    }
+  }, { passive: true });
+
+  body.addEventListener('touchend', () => {
+    clearTimeout(timer);
+    if (sw && sw.active) {
+      const trigger = sw.dx > 55;
+      sw.b.style.transition = 'transform 0.18s';
+      reset(sw.b);
+      setTimeout(() => { if (sw && sw.b) sw.b.style.transition = ''; }, 200);
+      if (trigger) startReply(sw.wid);
+    }
+    sw = null;
+  }, { passive: true });
+
+  // Desktop: right-click opens the same menu.
+  body.addEventListener('contextmenu', e => {
+    const b = e.target.closest('.bubble[data-id]');
+    const wid = b && b.getAttribute('data-id');
+    if (wid) { e.preventDefault(); openMsgMenu(e, wid); }
+  });
 }
 
 // ── Suggest (Maya draft) ──────────────────────────────────────────────
