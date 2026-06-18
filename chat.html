@@ -371,7 +371,19 @@
   .tpl-item { padding: 12px 18px; border-bottom: 1px solid var(--wa-rule); cursor: pointer; }
   .tpl-item:active { background: var(--wa-panel-2); }
   .tpl-name { font-size: 13px; font-weight: 600; color: var(--wa-green-dark); }
+  .tpl-fieldcount { font-size: 10px; font-weight: 600; color: var(--wa-ink-2); background: var(--wa-panel-2); padding: 1px 6px; border-radius: 8px; margin-left: 4px; }
   .tpl-body { font-size: 13px; color: var(--wa-ink); margin-top: 3px; white-space: pre-wrap; }
+  .tpl-fill { padding: 14px 18px; }
+  .tpl-back { background: none; border: none; color: var(--wa-green-dark); font-size: 13px; font-weight: 600; padding: 0 0 12px; cursor: pointer; }
+  .tpl-fields { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .tpl-field { display: flex; flex-direction: column; gap: 4px; }
+  .tpl-field span { font-size: 11px; font-weight: 700; color: var(--wa-ink-2); }
+  .tpl-field input { border: 1px solid var(--wa-rule); border-radius: 8px; padding: 9px 12px; font-size: 14px; outline: none; }
+  .tpl-field input:focus { border-color: var(--wa-accent); }
+  .tpl-nofield { font-size: 13px; color: var(--wa-ink-2); margin-bottom: 14px; }
+  .tpl-preview-label { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--wa-ink-2); margin-bottom: 5px; }
+  .tpl-preview { background: var(--wa-out); border-radius: 8px; padding: 10px 12px; font-size: 14px; white-space: pre-wrap; color: var(--wa-ink); margin-bottom: 16px; }
+  .tpl-send { width: 100%; background: var(--wa-accent); color: #fff; border: none; border-radius: 10px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
   .win-banner {
     background: #fff3cd; color: #7a5b00; font-size: 12.5px; padding: 8px 12px; margin: 0 6% 6px;
     border-radius: 9px; display: flex; align-items: center; gap: 8px; justify-content: space-between;
@@ -1202,28 +1214,69 @@ function useQuickReply(i) {
 // ── Template picker (24h window) ──────────────────────────────────────
 async function openTemplatePicker() {
   document.getElementById('modalHost').innerHTML =
-    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Message templates</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="tplList"><div class="empty">Loading templates…</div></div></div></div>`;
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Choose a template</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="tplList"><div class="empty">Loading templates…</div></div></div></div>`;
   try {
     const r = await fetch('/api/whatsapp-templates');
     const data = await r.json();
-    const tpls = (data.templates || []).filter(t => t.status === 'APPROVED');
+    // Simplest templates (fewest fields to fill) first — the 1-field intro is
+    // the easiest way to re-open a cold thread.
+    const tpls = (data.templates || []).filter(t => t.status === 'APPROVED')
+      .sort((a, b) => (a.placeholderCount || 0) - (b.placeholderCount || 0));
     window.__tpls = tpls;
     const list = document.getElementById('tplList');
     if (!list) return;
     list.innerHTML = tpls.length
-      ? tpls.map((t, i) => `<div class="tpl-item" onclick="sendTemplate(${i})"><div class="tpl-name">${esc(t.name)} · ${esc(t.language)}</div><div class="tpl-body">${esc((t.body || '').slice(0, 240))}</div></div>`).join('')
+      ? tpls.map((t, i) => {
+          const n = t.placeholderCount || 0;
+          const fields = n === 0 ? 'ready to send' : n + (n === 1 ? ' field' : ' fields');
+          return `<div class="tpl-item" onclick="fillTemplate(${i})"><div class="tpl-name">${esc(t.name)} · ${esc(t.language)} <span class="tpl-fieldcount">${fields}</span></div><div class="tpl-body">${esc((t.body || '').slice(0, 240))}</div></div>`;
+        }).join('')
       : '<div class="empty">No approved templates found.</div>';
   } catch (e) {
     const list = document.getElementById('tplList'); if (list) list.innerHTML = '<div class="empty">Failed to load: ' + esc(e.message) + '</div>';
   }
+}
+
+// Expand a template into a fill form (one input per placeholder, name
+// pre-filled into {{1}}) with a live preview — instead of chained prompts.
+function fillTemplate(i) {
+  const t = (window.__tpls || [])[i]; if (!t) return;
+  const a = state.agents.find(x => x.id === state.activeId);
+  const firstName = a && a.name ? a.name.split(/\s+/)[0] : '';
+  const guess = n => (n === 1 ? firstName : '');
+  const host = document.querySelector('#modalHost .modal-body');
+  if (!host) return;
+  let fields = '';
+  for (let n = 1; n <= t.placeholderCount; n++) {
+    fields += `<label class="tpl-field"><span>{{${n}}}</span><input id="tplp_${n}" value="${esc(guess(n))}" oninput="updateTplPreview(${i})" placeholder="value for {{${n}}}"></label>`;
+  }
+  document.querySelector('#modalHost .modal-head h3').textContent = t.name;
+  host.innerHTML = `<div class="tpl-fill">
+    <button class="tpl-back" onclick="openTemplatePicker()">‹ All templates</button>
+    ${t.placeholderCount ? `<div class="tpl-fields">${fields}</div>` : '<div class="tpl-nofield">No fields to fill — ready to send.</div>'}
+    <div class="tpl-preview-label">Preview</div>
+    <div class="tpl-preview" id="tplPreview"></div>
+    <button class="tpl-send" onclick="sendTemplate(${i})">Send template</button>
+  </div>`;
+  updateTplPreview(i);
+}
+function updateTplPreview(i) {
+  const t = (window.__tpls || [])[i]; if (!t) return;
+  let body = t.body || '';
+  for (let n = 1; n <= t.placeholderCount; n++) {
+    const v = (document.getElementById('tplp_' + n)?.value || '').trim();
+    body = body.replaceAll('{{' + n + '}}', v || `{{${n}}}`);
+  }
+  const el = document.getElementById('tplPreview'); if (el) el.textContent = body;
 }
 async function sendTemplate(i) {
   const t = (window.__tpls || [])[i]; if (!t) return;
   const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
   const params = []; let bodyText = t.body || '';
   for (let n = 1; n <= t.placeholderCount; n++) {
-    const v = prompt(`Value for {{${n}}} in "${t.name}":`); if (v === null) return;
-    params.push(v); bodyText = bodyText.replace('{{' + n + '}}', v);
+    const v = (document.getElementById('tplp_' + n)?.value || '').trim();
+    if (!v) { toast(`Fill in {{${n}}} first`); return; }
+    params.push(v); bodyText = bodyText.replaceAll('{{' + n + '}}', v);
   }
   closeModal();
   try {
