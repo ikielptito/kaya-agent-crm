@@ -387,7 +387,7 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
           method: 'POST',
           headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: 'claude-sonnet-4-20250514',
+            model: 'claude-sonnet-4-6',
             max_tokens: 500,
             system,
             messages: [{ role: 'user', content: 'Generate the reply now.' }]
@@ -395,11 +395,7 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         });
         const data = await r.json();
         const reply = (data.content?.[0]?.text || '').trim();
-        // Diagnostic surface: when the reply is empty, return the upstream HTTP
-        // status + raw response so the caller can see *why* (model deprecated,
-        // overloaded, rate limited, refusal, etc.) instead of silently empty.
-        const diag = reply ? undefined : { status: r.status, raw: data };
-        return res.status(200).json({ reply, diag });
+        return res.status(200).json({ reply });
       } catch (e) {
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }

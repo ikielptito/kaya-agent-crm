@@ -1057,7 +1057,7 @@ Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           max_tokens: 800,
           system,
           messages,
