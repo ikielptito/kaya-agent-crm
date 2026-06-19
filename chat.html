@@ -113,11 +113,17 @@
   .mode-seg button.on { background: var(--wa-green); color: #fff; }
   .mode-hint { font-size: 11px; color: var(--wa-ink-2); margin-top: 6px; min-height: 14px; line-height: 1.3; }
 
-  /* Per-chat Maya override picker (in thread header strip) */
+  /* Per-chat Maya override picker (in thread header strip).
+     flex-shrink:0 + position:relative + z-index:1 are defensive — the bar must
+     hold its natural height and never be covered by something the iOS PWA
+     viewport places on top of it. touch-action:manipulation suppresses iOS
+     double-tap-zoom delay so each tap registers immediately. */
   .chat-mode-bar {
     display: flex; align-items: center; gap: 8px;
     padding: 6px 12px 8px; background: var(--wa-panel-2);
     border-bottom: 1px solid var(--wa-rule); font-size: 11px;
+    flex-shrink: 0; position: relative; z-index: 1;
+    touch-action: manipulation;
   }
   .chat-mode-bar .chat-mode-label {
     font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
@@ -126,8 +132,9 @@
   .chat-mode-seg { display: flex; flex: 1; background: #fff; border: 1px solid var(--wa-rule); border-radius: 8px; padding: 2px; gap: 2px; min-width: 0; }
   .chat-mode-seg button {
     flex: 1; border: none; background: none; padding: 5px 4px; border-radius: 6px;
-    font-size: 11px; font-weight: 600; color: var(--wa-ink-2); transition: all 0.12s;
+    font-size: 11px; font-weight: 600; color: var(--wa-ink-2); transition: background 0.12s, color 0.12s;
     cursor: pointer; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0.06);
   }
   .chat-mode-seg button.on { background: var(--wa-green); color: #fff; }
   .chat-mode-seg button.on-default { background: #6b7c87; color: #fff; }
