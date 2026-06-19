@@ -343,11 +343,35 @@ export default async function handler(req, res) {
           }).join('\n')}\n\nSAMBA HARD RULES: Quote MONTHLY IDR only. Never nightly USD. Never invent prices, beds, locations, types. Missing field → "let me check with Ikiel". Photos → share photos_url. Location → share maps_url.`
         : '';
 
+      // Live availability summary from the Samba portal digest (best-effort).
+      let availabilityCtx = '';
+      try {
+        const secret = process.env.DIGEST_SHARED_SECRET;
+        if (secret) {
+          const dRes = await fetch('https://sambarentals.vercel.app/api/digest', { headers: { Authorization: `Bearer ${secret}` } });
+          if (dRes.ok) {
+            const digest = await dRes.json();
+            if (digest && Array.isArray(digest.properties) && digest.properties.length) {
+              const lines = digest.properties.map(p => {
+                const a = p.availability || {};
+                const nowState = a.availableToday ? 'available now' : 'occupied now';
+                const next = a.nextAvailableFrom ? `next free ${a.nextAvailableFrom}` : 'no free day in horizon';
+                const longw = a.nextLongWindowFrom ? `30+ day window from ${a.nextLongWindowFrom}` : 'no 30+ day window';
+                return `- ${p.name} — ${nowState}; ${next}; ${longw}`;
+              });
+              availabilityCtx = `SAMBA LIVE AVAILABILITY (real calendar data):\n${lines.join('\n')}\n\nUse this to answer availability questions directly. For a specific date range you cannot resolve from this summary, say you'll confirm the exact dates and check the portal calendar.`;
+            }
+          }
+        }
+      } catch (e) { /* availability is best-effort */ }
+
       const system = `${MAYA_PERSONA}
 
 ${portfolioCtx}
 
 ${rentalsCtx}
+
+${availabilityCtx}
 
 This agent's context:
 Name: ${agent.name || 'unknown'}

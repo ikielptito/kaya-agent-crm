@@ -58,6 +58,84 @@ const PROJECTS_CACHE_TTL_MS = 60 * 1000;
 let _rentalsCache = null;
 let _rentalsCacheAt = 0;
 
+// Live availability digest from the Samba portal (warm-container cache, 5 min).
+const PORTAL_BASE = 'https://sambarentals.vercel.app';
+let _digestCache = null;
+let _digestCacheAt = 0;
+const DIGEST_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function loadDigest() {
+  const now = Date.now();
+  if (_digestCache && (now - _digestCacheAt) < DIGEST_CACHE_TTL_MS) return _digestCache;
+  const secret = process.env.DIGEST_SHARED_SECRET;
+  if (!secret) return _digestCache;  // not configured -> no live availability
+  try {
+    const r = await fetch(`${PORTAL_BASE}/api/digest`, { headers: { Authorization: `Bearer ${secret}` } });
+    if (!r.ok) return _digestCache;  // keep stale data on a transient failure
+    const data = await r.json();
+    if (data && Array.isArray(data.properties)) {
+      _digestCache = data;
+      _digestCacheAt = now;
+      return data;
+    }
+  } catch (e) {
+    console.warn('loadDigest failed:', e.message);
+  }
+  return _digestCache;
+}
+
+// Per-property availability summary block for Maya's system prompt.
+function buildAvailabilityContext(digest) {
+  if (!digest || !Array.isArray(digest.properties) || digest.properties.length === 0) return '';
+  const today = new Date().toISOString().slice(0, 10);
+  let asOf = 'just now';
+  try {
+    asOf = new Date(digest.asOf).toLocaleString('en-GB', { timeZone: 'Asia/Makassar', dateStyle: 'medium', timeStyle: 'short' });
+  } catch { /* keep default */ }
+  const lines = digest.properties.map(p => {
+    const a = p.availability || {};
+    const nowState = a.availableToday ? 'available now' : 'occupied now';
+    const next = a.nextAvailableFrom ? `next free from ${a.nextAvailableFrom}` : 'no free day in horizon';
+    const longw = a.nextLongWindowFrom
+      ? `open 30+ day window from ${a.nextLongWindowFrom} (${a.longWindowDays} days open)`
+      : 'no 30+ day window in horizon';
+    return `- ${p.name} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}`;
+  });
+  return `SAMBA LIVE AVAILABILITY (as of ${asOf} WITA, ${digest.horizonDays || 180}-day horizon — this is real calendar data):
+${lines.join('\n')}
+
+Today's date is ${today} (Bali/WITA). Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
+
+For a SPECIFIC DATE RANGE the agent names (e.g. "free March 10-20?", "anything in February?", "available next month for my client?"), do NOT estimate from the summary above. Instead return action "need_availability" with an "availability_query" object: { "slug": "<property slug from the list above>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" }. The system will check the live calendar and immediately re-prompt you with the result, then you reply to the agent. Resolve relative dates ("this weekend", "next month", "end of Feb") against today's date above. check_out is the guest's departure day (exclusive), so a 10-night stay from the 5th has check_out on the 15th. If the agent names a property that is not in the list, do not invent a slug — ask which property or escalate.`;
+}
+
+// Ask the portal whether a property is free across an exact range. Returns a
+// short natural-language result string to feed back into Maya's next turn.
+async function checkPortalAvailability(q) {
+  const secret = process.env.DIGEST_SHARED_SECRET;
+  if (!secret) return 'could not verify (availability service not configured)';
+  if (!q || !q.slug || !q.check_in || !q.check_out) return 'could not verify (missing property or dates)';
+  try {
+    const url = `${PORTAL_BASE}/api/check-availability?slug=${encodeURIComponent(q.slug)}`
+      + `&check_in=${encodeURIComponent(q.check_in)}&check_out=${encodeURIComponent(q.check_out)}`;
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${secret}` } });
+    if (!r.ok) {
+      if (r.status === 404) return `could not verify: "${q.slug}" is not a recognised property slug.`;
+      return `could not verify (calendar returned ${r.status}).`;
+    }
+    const j = await r.json();
+    const label = j.name || q.slug;
+    if (j.available) {
+      return `${label} is AVAILABLE for the full range ${q.check_in} to ${q.check_out} (${j.nights} nights).`;
+    }
+    const booked = (j.bookedDates || []);
+    const detail = booked.length ? ` Booked/blocked dates in that range: ${booked.join(', ')}.` : '';
+    return `${label} is NOT fully available for ${q.check_in} to ${q.check_out}.${detail}`;
+  } catch (e) {
+    return 'could not verify (network error reaching the calendar).';
+  }
+}
+
 async function loadRentals(supabaseUrl, sbHeaders) {
   const now = Date.now();
   if (_rentalsCache && (now - _rentalsCacheAt) < PROJECTS_CACHE_TTL_MS) {
@@ -435,8 +513,10 @@ export default async function handler(req, res) {
     // Generate a reply with Claude — load live project + rental data from DB first
     const projects = await loadProjects(SUPABASE_URL, sbHeaders);
     const rentals = await loadRentals(SUPABASE_URL, sbHeaders);
+    const digest = await loadDigest();
     const liveContext = buildPortfolioContext(projects);
     const rentalsContext = buildRentalsContext(rentals);
+    const availabilityContext = buildAvailabilityContext(digest);
     const liveBrochures = buildBrochures(projects);
     const rentalPhotos = buildRentalPhotos(rentals);
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
@@ -453,10 +533,12 @@ export default async function handler(req, res) {
         if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
       } catch (e) { /* non-fatal */ }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext);
 
-    // Increment today's spend by the estimated cost of this Claude call
-    await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD);
+    // Increment today's spend by the estimated cost of the Claude call(s). A
+    // date-range availability lookup costs one extra Claude turn, so charge per
+    // actual LLM call made (aiResult.llm_calls, default 1).
+    await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD * (aiResult.llm_calls || 1));
 
     // Apply any CRM updates Maya suggested (status changes, tags)
     // Each update is logged with evidence and a "by_maya: true" flag
@@ -838,7 +920,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}) {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '') {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -854,6 +936,8 @@ KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current vi
 ${portfolio}
 
 ${rentalsContext || ''}
+
+${availabilityContext || ''}
 
 WHICH PORTFOLIO TO REFERENCE:
 KAYA Sales = freehold/leasehold property SALES (Clay House, Tropical Townhouses, Palem Kembar, Sabit House, LaneHAUS). For agents looking to LIST properties for sale.
@@ -944,14 +1028,16 @@ When updating .stage, ALSO set projects.<Name>.stage_updated_at = "__NOW__" so w
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate",
-  "reply": "the message to send to the agent (1-4 sentences typical)",
+  "action": "auto" | "escalate" | "need_availability",
+  "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability",
+  "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
   "send_doc": null | one of [${brochureKeys}],
   "send_photo": null | one of [${Object.keys(rentalPhotos).join(', ') || '(no rental hero photos available)'}],
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ]
 }
+Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
 ${isHybrid
   ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
@@ -959,33 +1045,56 @@ Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document
 Set "send_photo" when the agent asks to SEE a Samba rental ("can you send a photo of HAUS Canggu", "what does Villa Saturno look like", "show me LaneHAUS"). Pick the slug of the specific property they asked about — exact match required. The system will send the property's hero photo inline. ALSO mention in your text reply that the photo is for [property name] and that the full set is in the portal. If multiple units are in a property group (e.g. Tropicana has 7 units), prefer the first unit's slug (e.g. tropicana_a4). If no specific property was asked about, set send_photo to null.
 Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
 
+  // Conversation turns for this reply. A date-range availability check appends
+  // an assistant turn + the calendar result, then re-prompts once (max 2 calls).
+  const messages = [{ role: 'user', content: `The agent just sent: "${inbound}"` }];
+  let llmCalls = 0;
+  const MAX_LLM_CALLS = 2;
+
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 800,
-        system,
-        messages: [{ role: 'user', content: `The agent just sent: "${inbound}"` }]
-      })
-    });
-    const data = await res.json();
-    const raw = data.content?.[0]?.text || '';
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
+    for (let hop = 0; hop < MAX_LLM_CALLS; hop++) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 800,
+          system,
+          messages,
+        })
+      });
+      llmCalls++;
+      const data = await res.json();
+      const raw = data.content?.[0]?.text || '';
+      const jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls };
+      }
       const parsed = JSON.parse(jsonMatch[0]);
+
+      // Maya wants a live calendar check for a specific range — do it, then
+      // feed the result back for a final reply. Only on the first hop.
+      if (parsed.action === 'need_availability' && parsed.availability_query && hop < MAX_LLM_CALLS - 1) {
+        const result = await checkPortalAvailability(parsed.availability_query);
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Live calendar result: ${result}\n\nNow reply to the agent with a final JSON response (action "auto" or "escalate"). Quote the dates and be specific. If not available, mention the next free option if helpful.` });
+        continue;
+      }
+
       return {
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
         send_doc: parsed.send_doc || null,
         send_photo: parsed.send_photo || null,
-        crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : []
+        crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
+        llm_calls: llmCalls,
       };
     }
-    return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [] };
+    // Exhausted hops without a terminal reply (e.g. Maya asked for availability
+    // twice) — escalate so a human picks it up rather than sending nothing.
+    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [] };
+    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls || 1 };
   }
 }
