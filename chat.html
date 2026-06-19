@@ -113,6 +113,25 @@
   .mode-seg button.on { background: var(--wa-green); color: #fff; }
   .mode-hint { font-size: 11px; color: var(--wa-ink-2); margin-top: 6px; min-height: 14px; line-height: 1.3; }
 
+  /* Per-chat Maya override picker (in thread header strip) */
+  .chat-mode-bar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px 8px; background: var(--wa-panel-2);
+    border-bottom: 1px solid var(--wa-rule); font-size: 11px;
+  }
+  .chat-mode-bar .chat-mode-label {
+    font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--wa-ink-2); white-space: nowrap;
+  }
+  .chat-mode-seg { display: flex; flex: 1; background: #fff; border: 1px solid var(--wa-rule); border-radius: 8px; padding: 2px; gap: 2px; min-width: 0; }
+  .chat-mode-seg button {
+    flex: 1; border: none; background: none; padding: 5px 4px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; color: var(--wa-ink-2); transition: all 0.12s;
+    cursor: pointer; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .chat-mode-seg button.on { background: var(--wa-green); color: #fff; }
+  .chat-mode-seg button.on-default { background: #6b7c87; color: #fff; }
+
   /* Search */
   .search-wrap { padding: 8px 12px; background: var(--wa-panel); border-bottom: 1px solid var(--wa-rule); }
   .search-wrap input {
@@ -153,6 +172,7 @@
   .pill-needs  { background: #ffe0e0; color: #b42318; }
   .pill-wait   { background: #e7f0ff; color: #1d4ed8; }
   .pill-paused { background: #ececec; color: #555; }
+  .pill-pinned { background: #d6f3df; color: #066a35; }
 
   .empty { padding: 50px 24px; text-align: center; color: var(--wa-ink-2); font-size: 13.5px; line-height: 1.5; }
 
@@ -465,6 +485,16 @@
         </div>
         <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English">🌐</button>
         <button class="refresh-btn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
+      </div>
+      <div class="chat-mode-bar" id="chatModeBar">
+        <span class="chat-mode-label">Maya here</span>
+        <div class="chat-mode-seg" id="chatModeSeg">
+          <button data-cmode=""           onclick="setChatMode('')"          title="Use the global Maya setting">Default</button>
+          <button data-cmode="off"        onclick="setChatMode('off')"       title="Maya off in this chat only">Off</button>
+          <button data-cmode="draft"      onclick="setChatMode('draft')"     title="Maya drafts replies for this chat">Draft</button>
+          <button data-cmode="hybrid"     onclick="setChatMode('hybrid')"    title="Maya auto-replies to factual questions; escalates the rest">Hybrid</button>
+          <button data-cmode="autopilot"  onclick="setChatMode('autopilot')" title="Maya replies automatically with no review">Auto</button>
+        </div>
       </div>
       <div class="thread-search" id="threadSearch" style="display:none">
         <input id="threadSearchInput" type="text" placeholder="Search in conversation" oninput="runThreadSearch(this.value)">
@@ -782,6 +812,49 @@ async function setMode(mode) {
   }
 }
 
+// ── Per-chat Maya override ────────────────────────────────────────────
+// automation_override values: '' (use global) | 'off' | 'draft' | 'hybrid' | 'autopilot'.
+// 'paused' is a separate sentinel set by manual sends; it shows the existing
+// "Maya paused" banner. Picking any explicit mode here clears 'paused' too.
+function renderChatMode() {
+  const a = state.agents.find(x => x.id === state.activeId);
+  if (!a) return;
+  // 'paused' isn't one of the picker positions — surface 'Default' as the
+  // selected chip in that case so the picker still reads sensibly.
+  const raw = a.automation_override || '';
+  const cur = raw === 'paused' ? '' : raw;
+  document.querySelectorAll('#chatModeSeg button').forEach(b => {
+    const match = b.dataset.cmode === cur;
+    b.classList.toggle('on', match && cur !== '');
+    b.classList.toggle('on-default', match && cur === '');
+  });
+}
+
+async function setChatMode(mode) {
+  const a = state.agents.find(x => x.id === state.activeId);
+  if (!a) return;
+  if (mode === 'autopilot' && a.automation_override !== 'autopilot') {
+    if (!confirm('Set this chat to AUTOPILOT?\n\nMaya will reply automatically to this agent regardless of the global mode. You can switch back anytime.')) return;
+  }
+  const prev = a.automation_override;
+  // Empty string = "use global" = null in the DB.
+  const dbValue = mode === '' ? null : mode;
+  a.automation_override = dbValue;
+  renderChatMode();
+  // Clear any stale draft so the new mode takes effect cleanly.
+  const patch = { automation_override: dbValue };
+  if (a.suggested_reply) { patch.suggested_reply = ''; a.suggested_reply = ''; }
+  try {
+    await api('patch_agent', { id: a.id, fields: patch });
+    const label = mode === '' ? 'using global' : mode;
+    toast('This chat: ' + label);
+    renderList();
+  } catch (e) {
+    a.automation_override = prev; renderChatMode();
+    toast('Could not save chat mode');
+  }
+}
+
 // ── Conversation list ─────────────────────────────────────────────────
 function getWaNum(a) {
   if (a.wa_url && a.wa_url.startsWith('https://wa.me/')) return a.wa_url.replace('https://wa.me/', '').replace(/\D/g, '');
@@ -835,7 +908,12 @@ function renderList() {
     const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
 
     let pill = '';
-    if (a.automation_override === 'paused') pill = '<span class="pill pill-paused">Paused</span>';
+    const ov = a.automation_override;
+    if (ov === 'paused') pill = '<span class="pill pill-paused">Paused</span>';
+    else if (ov === 'off' || ov === 'draft' || ov === 'hybrid' || ov === 'autopilot') {
+      const label = ov === 'autopilot' ? 'Auto' : (ov[0].toUpperCase() + ov.slice(1));
+      pill = `<span class="pill pill-pinned" title="Maya mode pinned for this chat">${label}</span>`;
+    }
     else if (hasDraft) pill = '<span class="pill pill-draft">Draft</span>';
     else if (m?.direction === 'inbound') {
       const ageH = ts ? (Date.now() - new Date(ts).getTime()) / 3.6e6 : 0;
@@ -879,6 +957,7 @@ function openConv(id) {
   document.getElementById('thAvatar').textContent = initials(a.name, a.agency);
   document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
   document.getElementById('thSub').textContent = '+' + (a.wa_num || '') + (a.agency ? ' · ' + a.agency : '');
+  renderChatMode();
   // Prefer Maya's pending draft; else restore a saved local draft.
   document.getElementById('replyBox').value = (a.suggested_reply || '') || localStorage.getItem('maya_draft_' + id) || '';
   autoGrow(document.getElementById('replyBox'));
@@ -1343,8 +1422,14 @@ function onReplyInput() {
   else localStorage.removeItem('maya_draft_' + state.activeId);
 }
 function pauseMayaAfterManual(a) {
-  a.suggested_reply = ''; a.automation_override = 'paused';
-  api('patch_agent', { id: a.id, fields: { suggested_reply: '', automation_override: 'paused' } }).catch(() => {});
+  // If the user has explicitly pinned this chat to a mode (off / draft / hybrid
+  // / autopilot), respect that — a manual send shouldn't silently un-pin it.
+  // Still clear any pending Maya draft so it doesn't auto-send underneath them.
+  const pinned = a.automation_override && a.automation_override !== 'paused';
+  const patch = { suggested_reply: '' };
+  a.suggested_reply = '';
+  if (!pinned) { a.automation_override = 'paused'; patch.automation_override = 'paused'; }
+  api('patch_agent', { id: a.id, fields: patch }).catch(() => {});
   renderBanner(a);
 }
 function lastInboundMs(a) {
