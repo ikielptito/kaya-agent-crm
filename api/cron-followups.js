@@ -627,6 +627,36 @@ function buildPortfolioContextFromDb(projects) {
 //   v1 — single-paragraph fallback before slot templates existed
 // We prefer v3 → v2 → v1 per category, and the intro-vs-alert decision
 // happens per-agent so introduction state is correct even across rollouts.
+// Improvement → emoji tag for visual scanning at the bullet level.
+const REASON_EMOJI = {
+  new:            '🆕',
+  now_available:  '🟢',
+  window_earlier: '📅',
+  price_drop:     '💰',
+};
+// Lower number = higher priority (renders first). Newly added properties
+// matter most; price drops are nice but rarely time-sensitive.
+const REASON_PRIORITY = {
+  new:            0,
+  now_available:  1,
+  window_earlier: 2,
+  price_drop:     3,
+};
+// Trim the "with Dedicated Workspace" tail that some listings carry, to keep
+// each bullet legible inside Meta's 240-char per-variable budget once we
+// inline a tracking URL.
+function shortUnitType(t) {
+  return (t || '').split(/\s+with\s+/i)[0].trim();
+}
+// Build a per-property tracked URL — agent stays in the portal, lands on the
+// modal for the specific listing. Falls back to the main tracked URL when
+// the property has no slug (very old custom rows pre-slug, defensive).
+function propPortalUrl(slug, ref, agentId, base) {
+  const safeSlug = String(slug || '').trim();
+  if (!safeSlug) return `${base}?ref=${ref}&aid=${agentId}`;
+  return `${base}?property=${encodeURIComponent(safeSlug)}&ref=${ref}&aid=${agentId}`;
+}
+
 const ALERT_INTRO_V3     = 'samba_availability_intro_v3';
 const ALERT_TEMPLATE_V3  = 'samba_availability_alert_v3';
 const DIGEST_TEMPLATE_V3 = 'samba_availability_digest_v3';
@@ -744,15 +774,18 @@ export async function runAvailabilityNotifications(ctx) {
   if (previewMode) {
     const sample = eligible.find(a => a.is_test) || eligible[0];
     const sampleName = sample ? firstNameOf(sample.name) : 'Era';
-    const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${sample?.id || 'preview'}`;
+    const ref = isMonday ? 'wa_digest' : 'wa_alert';
+    const previewAid = sample?.id || 'preview';
+    const trackedUrl = `${PORTAL_BASE}?ref=${ref}&aid=${previewAid}`;
+    const perPropUrl = (slug) => propPortalUrl(slug, ref, previewAid, PORTAL_BASE);
     const useName = isMonday ? digestName : regularName;
     const tmpl = templatesMap[useName];
     const useSlots = (tmpl?.placeholderCount || 0) > 3;
     let params;
     if (useSlots) {
       params = isMonday
-        ? composeDigestParamsV2(sampleName, digest.properties, trackedUrl)
-        : composeAlertParamsV2(sampleName, improvements.items, trackedUrl);
+        ? composeDigestParamsV2(sampleName, digest.properties, trackedUrl, perPropUrl)
+        : composeAlertParamsV2(sampleName, improvements.items, trackedUrl, perPropUrl);
     } else {
       params = [sampleName, isMonday ? digestBody : alertBody, trackedUrl];
     }
@@ -787,7 +820,9 @@ export async function runAvailabilityNotifications(ctx) {
     }
 
     const firstName = firstNameOf(agent.name);
-    const trackedUrl = `${PORTAL_BASE}?ref=${isMonday ? 'wa_digest' : 'wa_alert'}&aid=${agent.id}`;
+    const ref = isMonday ? 'wa_digest' : 'wa_alert';
+    const trackedUrl = `${PORTAL_BASE}?ref=${ref}&aid=${agent.id}`;
+    const perPropUrl = (slug) => propPortalUrl(slug, ref, agent.id, PORTAL_BASE);
     // Per-agent template choice: digest on Mondays, intro on first-ever
     // availability send (non-Monday only), regular alert otherwise.
     const isFirstSend = !isMonday && !introducedSet.has(agent.id);
@@ -797,8 +832,8 @@ export async function runAvailabilityNotifications(ctx) {
     let params;
     if (useSlots) {
       params = isMonday
-        ? composeDigestParamsV2(firstName, digest.properties, trackedUrl)
-        : composeAlertParamsV2(firstName, improvements.items, trackedUrl);
+        ? composeDigestParamsV2(firstName, digest.properties, trackedUrl, perPropUrl)
+        : composeAlertParamsV2(firstName, improvements.items, trackedUrl, perPropUrl);
     } else {
       params = [firstName, isMonday ? digestBody : alertBody, trackedUrl];
     }
@@ -949,28 +984,31 @@ function diffImprovements(prev, properties) {
     const prior = prev[p.id];
     const meta = propMeta(p);
     if (!prior) {
-      items.push({ propId: p.id, name: p.name, reason: 'new', summary: `New: ${p.name}${meta ? ` (${meta})` : ''}${p.monthly ? ' — ' + p.monthly + '/mo' : ''}` });
+      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'new', summary: `New: ${p.name}${meta ? ` (${meta})` : ''}${p.monthly ? ' — ' + p.monthly + '/mo' : ''}` });
       continue;
     }
     if (!prior.availableToday && p.availability?.availableToday) {
-      items.push({ propId: p.id, name: p.name, reason: 'now_available', summary: `${p.name}${meta ? ` (${meta})` : ''} just opened — ${p.monthly || 'ask Era'}/mo` });
+      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'now_available', summary: `${p.name}${meta ? ` (${meta})` : ''} just opened — ${p.monthly || 'ask Era'}/mo` });
       continue;
     }
     if (p.availability?.nextLongWindowFrom && prior.nextLongWindowFrom) {
       const delta = daysBetween(prior.nextLongWindowFrom, p.availability.nextLongWindowFrom);
       if (delta >= LONG_WINDOW_MOVE_THRESHOLD_DAYS) {
-        items.push({ propId: p.id, name: p.name, reason: 'window_earlier',
+        items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'window_earlier',
           summary: `${p.name}${meta ? ` (${meta})` : ''} available from ${formatShortDate(p.availability.nextLongWindowFrom)} (was ${formatShortDate(prior.nextLongWindowFrom)})` });
         continue;
       }
     }
     if (prior.monthly && p.monthly && parseRate(p.monthly) < parseRate(prior.monthly)) {
-      items.push({ propId: p.id, name: p.name, reason: 'price_drop',
+      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'price_drop',
         summary: `${p.name}${meta ? ` (${meta})` : ''} price dropped to ${p.monthly}/mo (was ${prior.monthly})` });
     }
   }
-  // Digest order is already building-grouped (Hostex by catalog order, customs
-  // alphabetical), and we iterate in that order — so items stay grouped too.
+  // Sort by urgency: newly added listings first, then just-opened, then
+  // window-moved-earlier, then price drops. Within the same priority bucket
+  // the catalog order is preserved (sort is stable) — so building groups
+  // (Hostex first by display_order, customs alphabetical) still cluster.
+  items.sort((a, b) => (REASON_PRIORITY[a.reason] ?? 99) - (REASON_PRIORITY[b.reason] ?? 99));
   return { isFirstRun: false, items };
 }
 
@@ -1007,39 +1045,53 @@ function composeDigestBody(properties) {
 }
 
 // ── v2 (slot-based: one variable per bullet line) ───────────────────
-// Returns [firstName, slot1, slot2, slot3, overflow, url] — 6 params total
-function composeAlertParamsV2(firstName, improvements, url) {
+// Returns [firstName, slot1, slot2, slot3, overflow, url] — 6 params total.
+// Each bullet now leads with a reason-emoji and ends with a tracked
+// per-property URL so the agent taps straight into that listing's portal
+// modal (no scanning the full catalog after they tap through).
+function composeAlertParamsV2(firstName, improvements, mainUrl, perPropUrl) {
   const params = [firstName];
   for (let i = 0; i < ALERT_V2_SLOTS; i++) {
     if (i < improvements.length) {
       const imp = improvements[i];
-      params.push(clipToBudget(boldName(imp.summary, imp.name), 240));
+      params.push(formatBulletLine(imp.summary, imp.name, imp.reason, perPropUrl && perPropUrl(imp.slug)));
     } else {
       params.push(EMPTY_SLOT);
     }
   }
   const more = improvements.length - ALERT_V2_SLOTS;
   params.push(more > 0 ? `+ ${more} more on the portal` : EMPTY_SLOT);
-  params.push(url);
+  params.push(mainUrl);
   return params;
 }
 
 // Returns [firstName, avail1..4, soon1..3, url] — 9 params total
-function composeDigestParamsV2(firstName, properties, url) {
+function composeDigestParamsV2(firstName, properties, mainUrl, perPropUrl) {
   const { availableNow, openingSoon } = bucketDigestProperties(properties);
   const params = [firstName];
   for (let i = 0; i < DIGEST_AVAIL_SLOTS; i++) {
     params.push(i < availableNow.length
-      ? clipToBudget(formatAvailableLine(availableNow[i]), 240)
+      ? clipToBudget(appendUrl(formatAvailableLine(availableNow[i]), perPropUrl && perPropUrl(availableNow[i].slug)), 240)
       : EMPTY_SLOT);
   }
   for (let i = 0; i < DIGEST_SOON_SLOTS; i++) {
     params.push(i < openingSoon.length
-      ? clipToBudget(formatOpeningLine(openingSoon[i]), 240)
+      ? clipToBudget(appendUrl(formatOpeningLine(openingSoon[i]), perPropUrl && perPropUrl(openingSoon[i].slug)), 240)
       : EMPTY_SLOT);
   }
-  params.push(url);
+  params.push(mainUrl);
   return params;
+}
+
+// Reason-emoji + bolded property name + summary + inline tracked URL.
+function formatBulletLine(summary, name, reason, url) {
+  const emoji = REASON_EMOJI[reason] || '•';
+  const body = boldName(summary, name);
+  const tail = url ? ` → ${url}` : '';
+  return clipToBudget(`${emoji} ${body}${tail}`, 240);
+}
+function appendUrl(line, url) {
+  return url ? `${line} → ${url}` : line;
 }
 
 // ── shared formatting helpers ───────────────────────────────────────
@@ -1053,9 +1105,12 @@ function bucketDigestProperties(properties) {
   return { availableNow, openingSoon };
 }
 
-// "1BR Apartment · Tumbak Bayuh, Pererenan" — whichever parts exist
+// "1BR Apartment · Tumbak Bayuh, Pererenan" — whichever parts exist.
+// The unit-type tail ("with Dedicated Workspace") gets stripped so each
+// bullet stays under the 240-char per-variable budget after we inline a
+// tracked URL.
 function propMeta(p) {
-  return [p.unitType, p.tag].filter(Boolean).join(' · ');
+  return [shortUnitType(p.unitType), p.tag].filter(Boolean).join(' · ');
 }
 
 function formatAvailableLine(p) {
