@@ -81,14 +81,18 @@ export default async function handler(req, res) {
   };
 
   try {
-    // Check global automation switch first — if it's off, suspend all follow-ups
+    // Global automation switch — when it's "off", suspend Maya's reactive
+    // follow-ups (overnight-draft regen, campaign sequences, anything that
+    // calls Claude). The Samba availability broadcast is NOT a Maya follow-up
+    // — it's a scheduled WhatsApp template send that uses zero LLM tokens —
+    // so it still runs. Decoupling here means an operator can keep Maya
+    // silent on inbounds while agents keep getting availability updates.
+    let mayaOff = false;
     try {
       const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
       const sRow = (await sRes.json())?.[0];
-      if (sRow?.value?.mode === 'off') {
-        return res.status(200).json({ ran_at: new Date().toISOString(), suspended: true, reason: 'automation mode is off' });
-      }
-    } catch (e) { /* default: proceed */ }
+      mayaOff = sRow?.value?.mode === 'off';
+    } catch (e) { /* default: proceed as if mayaOff = false */ }
 
     // Fetch all agents who have a wa_num AND have at least one project tracked
     const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null`, { headers: sbHeaders });
@@ -134,6 +138,15 @@ export default async function handler(req, res) {
     const campaignsMap = await loadCampaignsMap(SUPABASE_URL, sbHeaders);
     // Load all approved WhatsApp templates so we can find the body text + language for sends
     const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
+
+    // ─────────────────────────────────────────────────────────────────────
+    // MAYA FOLLOW-UPS — every Claude-dependent block from here through the
+    // campaign-sequence section below is gated by `mayaOff`. When the
+    // operator has the global automation switch off, we still want the Samba
+    // availability broadcast (further down) to fire — it's a scheduled
+    // template send, not a Maya reply — but we suspend everything that
+    // would otherwise run a Claude prompt for an inbound or a follow-up.
+    if (!mayaOff) {
 
     // ── PENDING DRAFTS FROM OFF-HOURS — regenerate fresh + send at 9am WITA ─
     // When an inbound arrives between 9pm-9am WITA, the webhook generates a draft
@@ -364,11 +377,15 @@ export default async function handler(req, res) {
       }
     }
 
+    } // end if (!mayaOff) — Maya follow-ups gate
+
     // ── SAMBA AVAILABILITY NOTIFICATIONS ─────────────────────────────
+    // Runs regardless of `mayaOff` — this is a scheduled WhatsApp
+    // template broadcast, not a Maya reply, so the global Maya switch
+    // doesn't apply. Owns its own kill switch (settings.samba_availability
+    // .enabled) for operators who do want to silence it independently.
     // Sends daily event alerts and Monday weekly digests via templates
-    // already approved on the WhatsApp Business account. Owns its own
-    // settings flags so it can ship dark and be flipped on per-cohort
-    // without touching the existing follow-up logic.
+    // already approved on the WhatsApp Business account.
     // Preview mode: cron URL came with ?preview=1 (used by the manual-
     // broadcast UI in the analytics dashboard). Composes the message and
     // returns the rendered body + recipient count, but skips the Meta send,
