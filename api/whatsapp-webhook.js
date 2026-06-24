@@ -474,6 +474,42 @@ export default async function handler(req, res) {
       patch.campaign_engagement = stopResult.value;
     }
 
+    // OPT-OUT DETECTION — intercept stop/unsubscribe before Maya sees the message.
+    // Sets samba_alerts_opt_out, marks samba engagement as 'unsubscribed', sends
+    // a brief confirmation, and short-circuits (no Claude call).
+    const OPT_OUT_RE = /^(stop|unsubscribe|please stop|remove me|don'?t contact|opt out|berhenti)$/i;
+    if (text && OPT_OUT_RE.test(text.trim())) {
+      patch.samba_alerts_opt_out = true;
+      const eng = { ...(agent.campaign_engagement || {}) };
+      if (eng.samba) {
+        eng.samba = { ...eng.samba, status: 'unsubscribed', status_updated_at: timestamp };
+      }
+      patch.campaign_engagement = eng;
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+
+      const confirmText = 'Noted — you\'ve been removed from availability updates. If you ever want to re-subscribe, just let me know.';
+      if (WA_TOKEN && WA_PHONE_ID) {
+        await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
+        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText);
+      }
+
+      // Audit trail in maya_updates
+      await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({
+          agent_id: agent.id,
+          field: 'samba_alerts_opt_out',
+          new_value: 'true',
+          reason: 'Agent sent opt-out keyword',
+          evidence: text.trim().slice(0, 200),
+          by_maya: false,
+          created_at: new Date().toISOString(),
+        })
+      }).catch(e => console.warn('maya_updates opt-out log failed:', e.message));
+
+      return res.status(200).end();
+    }
+
     // PAUSED — Ikiel is handling this thread, Maya stays silent. Just log + mark unread.
     if (mode === 'paused') {
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
@@ -757,7 +793,7 @@ async function applyCrmUpdates(url, headers, agent, updates, evidenceQuote) {
     }
     const parts = u.field.split('.');
     if (parts.length === 1) {
-      patch[parts[0]] = u.value;
+      patch[parts[0]] = value;
     } else {
       const root = parts[0];
       // Initialise patch[root] from agent[root] on FIRST touch only.
@@ -1018,6 +1054,18 @@ Trigger → fields to update:
     projects.<Name>.next_followup_at = null
 
 Be conservative — only update when the language is unambiguous.
+
+ENGAGEMENT TIER — classify the agent's engagement level based on the conversation history and this message. Set via crm_updates when the tier changes:
+
+  engagement_tier values:
+  - "hot"   — actively looking for a client, asking specific availability/pricing, requesting brochures, scheduling visits
+  - "warm"  — responsive and interested but not actively pushing (acknowledges info, asks casual questions, says "will keep in mind")
+  - "cold"  — minimal engagement, one-word replies only, long gaps between messages, or explicitly disinterested without fully declining
+
+Update "engagement_tier" whenever you see a clear signal. Example crm_update:
+  { "field": "engagement_tier", "value": "hot", "reason": "agent requesting specific availability for a client" }
+
+Do NOT downgrade from "hot" to "warm" on a single quiet message — only downgrade if the pattern is sustained. Do NOT set a tier on the very first message from a brand-new agent (wait for at least one substantive exchange).
 
 For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
 - For "right now" → use the literal string "__NOW__"

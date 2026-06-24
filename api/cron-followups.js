@@ -954,6 +954,7 @@ async function loadIntroducedSet(url, headers) {
 // exclude. test_agents_only restricts to is_test=true for staged rollout.
 function isAvailabilityEligible(agent, config) {
   if (!agent.wa_num) return false;
+  if (agent.samba_alerts_opt_out) return false;
   if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
   if (config.test_agents_only && !agent.is_test) return false;
   const samba = agent.campaign_engagement?.samba;

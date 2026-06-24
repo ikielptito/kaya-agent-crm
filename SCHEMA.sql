@@ -134,6 +134,9 @@ alter table wa_messages add column if not exists reply_to text;
   -- wa_message_id of the message this one quotes (reply context), either
   -- direction. The inbox renders a quoted preview above the bubble.
 
+alter table agents add column if not exists engagement_tier text;
+  -- hot | warm | cold — set by Maya via crm_updates based on conversation signals
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (
