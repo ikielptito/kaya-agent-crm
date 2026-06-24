@@ -99,7 +99,9 @@ function buildAvailabilityContext(digest) {
     const longw = a.nextLongWindowFrom
       ? `open 30+ day window from ${a.nextLongWindowFrom} (${a.longWindowDays} days open)`
       : 'no 30+ day window in horizon';
-    const contact = p.waContactName ? ` | enquire with: ${p.waContactName}${p.waNumber ? ' (+' + p.waNumber + ')' : ''}` : '';
+    const contactName = p.waContactName || 'Era';
+    const contactNum = p.waNumber || '6281246357778';
+    const contact = ` | enquire with: ${contactName} (+${contactNum})`;
     return `- ${p.name} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}${contact}`;
   });
   return `SAMBA LIVE AVAILABILITY (as of ${asOf} WITA, ${digest.horizonDays || 180}-day horizon — this is real calendar data):
