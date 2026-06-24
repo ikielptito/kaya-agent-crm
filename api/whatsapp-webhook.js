@@ -99,12 +99,15 @@ function buildAvailabilityContext(digest) {
     const longw = a.nextLongWindowFrom
       ? `open 30+ day window from ${a.nextLongWindowFrom} (${a.longWindowDays} days open)`
       : 'no 30+ day window in horizon';
-    return `- ${p.name} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}`;
+    const contact = p.waContactName ? ` | enquire with: ${p.waContactName}${p.waNumber ? ' (+' + p.waNumber + ')' : ''}` : '';
+    return `- ${p.name} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}${contact}`;
   });
   return `SAMBA LIVE AVAILABILITY (as of ${asOf} WITA, ${digest.horizonDays || 180}-day horizon — this is real calendar data):
 ${lines.join('\n')}
 
 Today's date is ${today} (Bali/WITA). Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
+
+Each property has an "enquire with" contact (name + WhatsApp number). When an agent asks who to contact for a viewing, visit, or booking, share the contact name and number for the specific property they asked about. If they didn't specify a property, ask which one.
 
 For a SPECIFIC DATE RANGE the agent names (e.g. "free March 10-20?", "anything in February?", "available next month for my client?"), do NOT estimate from the summary above. Instead return action "need_availability" with an "availability_query" object: { "slug": "<property slug from the list above>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" }. The system will check the live calendar and immediately re-prompt you with the result, then you reply to the agent. Resolve relative dates ("this weekend", "next month", "end of Feb") against today's date above. check_out is the guest's departure day (exclusive), so a 10-night stay from the 5th has check_out on the 15th. If the agent names a property that is not in the list, do not invent a slug — ask which property or escalate.`;
 }
