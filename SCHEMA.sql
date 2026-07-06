@@ -137,6 +137,12 @@ alter table wa_messages add column if not exists reply_to text;
 alter table agents add column if not exists engagement_tier text;
   -- hot | warm | cold — set by Maya via crm_updates based on conversation signals
 
+alter table agents add column if not exists contact_frequency text;
+  -- null/'normal' = full cadence | 'weekly' = Monday digest only |
+  -- 'monthly' = one digest per month | 'paused' = no broadcasts.
+  -- Set by Maya when an agent asks for fewer messages without unsubscribing;
+  -- respected by cron-followups' availability send loop. (Added 2026-07-06)
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (

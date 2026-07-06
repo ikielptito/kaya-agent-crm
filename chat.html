@@ -227,6 +227,19 @@
     border-radius: 7px; color: var(--wa-green-dark); text-decoration: none; font-weight: 500; font-size: 13.5px; margin-bottom: 3px; }
   .bubble audio, .bubble video { max-width: 240px; display: block; margin-bottom: 3px; }
   .bubble-missing { display: inline-block; color: var(--wa-ink-2); font-style: italic; font-size: 13.5px; padding: 2px 0; }
+  /* Contact card bubble */
+  .contact-card { display: block; background: rgba(0,0,0,.045); border-radius: 10px; padding: 10px 12px; margin: 2px 0 4px; }
+  .cc-name { display: block; font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .cc-btn { display: inline-block; background: #fff; border: 1px solid rgba(0,0,0,.1); border-radius: 999px;
+    padding: 4px 11px; margin: 0 6px 4px 0; font-size: 12px; font-weight: 600; color: #0a7a5c;
+    text-decoration: none; cursor: pointer; font-family: inherit; }
+  .cc-none { display: block; font-size: 11.5px; font-style: italic; color: var(--wa-ink-2); }
+  /* Outbound source badge: maya / you / auto */
+  .src-tag { display: inline-block; font-size: 8.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    padding: 1px 5px; border-radius: 6px; margin-right: 5px; vertical-align: 1px;
+    background: rgba(0,0,0,.08); color: var(--wa-ink-2); }
+  .src-tag.you { background: #d7f0e3; color: #0a7a5c; }
+  .src-tag.maya { background: #e8e2f5; color: #6b4fb3; }
   .bubble-tag { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--wa-accent);
     text-transform: uppercase; margin-bottom: 2px; }
 
@@ -1100,10 +1113,24 @@ function renderBubble(m) {
   const caption = (m.content || '').replace(/^\[(?:Image|Document:[^\]]*|Voice note|Video|Sticker|Location[^\]]*|Contact card[^\]]*)\]\s*/, '').replace(/^"|"$/g, '');
   const bodyText = m.media_type ? caption : (m.content || '');
   const edited = m.edited_at ? ' <span style="font-size:10px;color:#8a9499">(edited)</span>' : '';
-  let inner = media + esc(bodyText).replace(/\n/g, '<br>');
-  if (!media && !bodyText.trim()) {
-    inner = `<span class="bubble-missing">📎 Media message — not saved (sent before media support)</span>`;
+  // Contact cards (incl. legacy rows logged before numbers were captured)
+  const ccm = (m.content || '').match(/^\[Contact card:\s*([^\]]+)\]/);
+  let inner;
+  if (ccm) {
+    inner = renderContactCard(ccm[1]) + (caption.trim() ? esc(caption).replace(/\n/g, '<br>') : '');
+  } else {
+    inner = media + esc(bodyText).replace(/\n/g, '<br>');
+    if (!media && !bodyText.trim()) {
+      inner = `<span class="bubble-missing">📎 Media message — not saved (sent before media support)</span>`;
+    }
   }
+  // Who sent an outbound message: Maya (autoresponder), you (manual from this
+  // inbox, tagged from 6 Jul 2026), or the broadcast cron.
+  const srcTag = isOut
+    ? (m.source === 'manual' ? '<span class="src-tag you">you</span>'
+      : m.source === 'cron' ? '<span class="src-tag auto">auto</span>'
+      : '<span class="src-tag maya">maya</span>')
+    : '';
   const reaction = m.reaction ? `<span class="bubble-reaction">${esc(m.reaction)}</span>` : '';
   const ticks = statusTicks(m, isOut);
   // Translation line for inbound messages (shown when a non-target translation is cached).
@@ -1112,7 +1139,22 @@ function renderBubble(m) {
   if (xl && !xl.same && xl.translated) {
     xlateHtml = `<span class="xlate"><span class="xlate-tag">🌐 ${esc(xl.detected || 'translated')}</span>${esc(xl.translated).replace(/\n/g, '<br>')}</span>`;
   }
-  return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}">${quoteHtml}${inner}${xlateHtml}${edited}<span class="bubble-time">${t}${ticks}</span>${reaction}</div>`;
+  return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}">${quoteHtml}${inner}${xlateHtml}${edited}<span class="bubble-time">${srcTag}${t}${ticks}</span>${reaction}</div>`;
+}
+
+// "[Contact card: Name — +628…, +628… | Name2 …]" → tappable card. Legacy
+// rows (before 6 Jul 2026) only stored the name; show that plainly.
+function renderContactCard(label) {
+  return label.split(' | ').map(entry => {
+    const [nm, numsRaw] = entry.split(' — ');
+    const nums = (numsRaw || '').match(/\d{9,15}/g) || [];
+    const btns = nums.map(n =>
+      `<a class="cc-btn" href="https://wa.me/${n}" target="_blank" rel="noopener">💬 +${n}</a>
+       <button class="cc-btn" onclick="navigator.clipboard.writeText('+${n}').then(()=>toast('Number copied'))">⧉ Copy</button>`).join('');
+    return `<span class="contact-card"><span class="cc-name">👤 ${esc(nm.trim())}</span>${
+      btns || '<span class="cc-none">number not captured (sent before contact support — ask them to resend)</span>'
+    }</span>`;
+  }).join('');
 }
 
 const MEDIA_LABELS = { image: 'Photo', sticker: 'Sticker', video: 'Video', audio: 'Voice note', document: 'Document', location: 'Location', contact: 'Contact card' };
@@ -1265,8 +1307,8 @@ async function onFilePicked(input, kind) {
     if (!up.publicUrl) throw new Error(up.error || 'upload failed');
     const waNum = getWaNum(a);
     const payload = kind === 'image'
-      ? { action: 'image', waNum, imageUrl: up.publicUrl, agentId: a.id }
-      : { action: 'document', waNum, docUrl: up.publicUrl, docFilename: file.name, agentId: a.id };
+      ? { action: 'image', waNum, imageUrl: up.publicUrl, agentId: a.id, source: 'manual' }
+      : { action: 'document', waNum, docUrl: up.publicUrl, docFilename: file.name, agentId: a.id, source: 'manual' };
     const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const res = await r.json(); if (!res.success) throw new Error(res.error || 'send failed');
     pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Sent');
@@ -1375,7 +1417,7 @@ async function sendTemplate(i) {
   closeModal();
   try {
     const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'template', waNum: getWaNum(a), templateName: t.name, templateLanguage: t.language, templateParams: params, templateBodyText: bodyText, agentId: a.id }) });
+      body: JSON.stringify({ action: 'template', waNum: getWaNum(a), templateName: t.name, templateLanguage: t.language, templateParams: params, templateBodyText: bodyText, agentId: a.id, source: 'manual' }) });
     const res = await r.json(); if (!res.success) throw new Error(res.error || 'failed');
     pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Template sent');
   } catch (e) { toast('Template failed: ' + e.message); }
@@ -1597,7 +1639,7 @@ async function send() {
   try {
     const r = await fetch('/api/whatsapp-send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id, ...(replyTo ? { replyTo } : {}) }),
+      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id, source: 'manual', ...(replyTo ? { replyTo } : {}) }),
     });
     const res = await r.json();
     if (!res.success) throw new Error(res.error || 'send failed');

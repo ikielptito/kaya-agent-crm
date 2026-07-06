@@ -586,6 +586,9 @@ export default async function handler(req, res) {
     if (Array.isArray(aiResult.crm_updates) && aiResult.crm_updates.length > 0) {
       await applyCrmUpdates(SUPABASE_URL, sbHeaders, agent, aiResult.crm_updates, text);
     }
+    if (Array.isArray(aiResult.crm_actions) && aiResult.crm_actions.length > 0) {
+      await applyCrmActions(SUPABASE_URL, sbHeaders, agent, aiResult.crm_actions, text);
+    }
 
     if (mode === 'draft') {
       patch.suggested_reply = aiResult.reply || '';
@@ -718,9 +721,19 @@ function extractInboundContent(msg) {
     return out;
   }
   if (msg.contacts && Array.isArray(msg.contacts)) {
-    const names = msg.contacts.map(c => c.name?.formatted_name || 'contact').join(', ');
-    out.dbContent = `[Contact card: ${names}]`;
-    out.textForClaude = `[Agent shared a contact card: ${names}.]`;
+    // Keep the phone numbers — before this fix only the name was stored and
+    // the number was unrecoverable (see ERINA/Hikam, 3 Jul 2026).
+    const cards = msg.contacts.map(c => {
+      const nm = c.name?.formatted_name || 'contact';
+      const phones = (c.phones || [])
+        .map(p => String(p.wa_id || p.phone || '').replace(/[^\d]/g, ''))
+        .filter(Boolean);
+      return { nm, phones };
+    });
+    const label = cards.map(c => c.nm + (c.phones.length ? ' — +' + c.phones.join(', +') : ' (no number)')).join(' | ');
+    out.mediaType = 'contacts';
+    out.dbContent = `[Contact card: ${label}]`;
+    out.textForClaude = `[Agent shared a WhatsApp contact card: ${label}. If they want this person added to updates or contacted instead of them, use the create_agent action with the exact number shown.]`;
     return out;
   }
   if (msg.reaction) {
@@ -833,6 +846,60 @@ async function applyCrmUpdates(url, headers, agent, updates, evidenceQuote) {
       method: 'POST', headers,
       body: JSON.stringify(log)
     }).catch(e => console.warn('maya_updates log failed:', e.message));
+  }
+}
+
+// Structural CRM actions from Maya (vs field updates). Currently only
+// create_agent: an agent referred a teammate (usually via a WhatsApp contact
+// card) who should start receiving availability updates.
+async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
+  for (const a of actions) {
+    if (a.type !== 'create_agent') continue;
+    const waNum = String(a.wa_num || '').replace(/[^\d]/g, '');
+    const name = String(a.name || '').trim().slice(0, 80);
+    // Guardrails: plausible international number, non-empty name, no invented digits
+    if (!name || waNum.length < 9 || waNum.length > 15) continue;
+    try {
+      // Dedupe by number — if the person already exists, don't create a twin.
+      const exists = await fetch(`${url}/rest/v1/agents?wa_num=eq.${waNum}&select=id,name`, { headers }).then(r => r.json());
+      if (Array.isArray(exists) && exists.length > 0) {
+        await fetch(`${url}/rest/v1/maya_updates`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            agent_id: agent.id, field: 'create_agent',
+            new_value: `SKIPPED (exists as #${exists[0].id} ${exists[0].name}): ${name} +${waNum}`,
+            reason: a.reason || 'referral', evidence: String(evidenceQuote || '').slice(0, 500),
+            by_maya: true, created_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        continue;
+      }
+      const ins = await fetch(`${url}/rest/v1/agents`, {
+        method: 'POST',
+        headers: { ...headers, Prefer: 'return=representation' },
+        body: JSON.stringify({
+          name,
+          wa_num: waNum,
+          wa_url: `https://wa.me/${waNum}`,
+          agency: agent.agency || null,
+          notes: `Referred by ${agent.name || 'agent #' + agent.id} (WhatsApp contact card) on ${new Date().toISOString().slice(0, 10)}.`,
+          campaign_engagement: { samba: { status: 'enrolled', source: 'referral', referred_by: agent.id } },
+        }),
+      });
+      const created = (await ins.json().catch(() => null)) || [];
+      const newId = Array.isArray(created) && created[0] ? created[0].id : null;
+      await fetch(`${url}/rest/v1/maya_updates`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          agent_id: agent.id, field: 'create_agent',
+          new_value: `Created agent${newId ? ' #' + newId : ''}: ${name} +${waNum}`,
+          reason: a.reason || 'referral', evidence: String(evidenceQuote || '').slice(0, 500),
+          by_maya: true, created_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+    } catch (e) {
+      console.warn('applyCrmActions create_agent failed:', e.message);
+    }
   }
 }
 
@@ -1072,6 +1139,17 @@ Update "engagement_tier" whenever you see a clear signal. Example crm_update:
 
 Do NOT downgrade from "hot" to "warm" on a single quiet message — only downgrade if the pattern is sustained. Do NOT set a tier on the very first message from a brand-new agent (wait for at least one substantive exchange).
 
+CONTACT FREQUENCY — when an agent asks to hear from us LESS OFTEN but does not fully unsubscribe ("too many messages", "just the weekly one is fine", "only message me monthly", "stop spamming but keep me posted", threats to block unless we slow down), set contact_frequency via crm_updates:
+  - "weekly"  — they only get the Monday digest, no per-event alerts (default choice when they just say "less")
+  - "monthly" — one digest a month at most
+  - "normal"  — restore full frequency (only when they explicitly ask for more again)
+Example: { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
+Acknowledge the change in your reply ("Understood — I'll only send the weekly summary from now on."). Do NOT set samba opt-out for these agents; frequency reduction is exactly so we don't lose them entirely.
+
+TEAM HANDOFF / NEW CONTACTS — when the agent shares a WhatsApp contact card (you'll see "[Agent shared a WhatsApp contact card: Name — +628…]") or types a teammate's name + number and asks us to contact that person / add them to updates, use crm_actions to create the new contact:
+  { "type": "create_agent", "name": "<person's name>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "referred by this agent" }
+Rules: only create when there is an explicit number; never invent numbers; if the card came without a number, ask them to resend or type it. If the agent says the NEW person should be contacted INSTEAD of them, also set contact_frequency = "paused" on the current agent via crm_updates and say you've switched over. Confirm in your reply that the teammate has been added.
+
 For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
 - For "right now" → use the literal string "__NOW__"
 - For "3 days from now" → use the literal string "__NOW+3D__"
@@ -1088,6 +1166,9 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "send_photo": null | one of [${Object.keys(rentalPhotos).join(', ') || '(no rental hero photos available)'}],
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
+  ],
+  "crm_actions": [
+    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent" }
   ]
 }
 Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
@@ -1096,7 +1177,8 @@ ${isHybrid
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
 Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific KAYA sales project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
 Set "send_photo" when the agent asks to SEE a Samba rental ("can you send a photo of HAUS Canggu", "what does Villa Saturno look like", "show me LaneHAUS"). Pick the slug of the specific property they asked about — exact match required. The system will send the property's hero photo inline. ALSO mention in your text reply that the photo is for [property name] and that the full set is in the portal. If multiple units are in a property group (e.g. Tropicana has 7 units), prefer the first unit's slug (e.g. tropicana_a4). If no specific property was asked about, set send_photo to null.
-Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
+Set "crm_updates" to an empty array if no clear pipeline signals are present.
+Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 
   // Conversation turns for this reply. A date-range availability check appends
   // an assistant turn + the calendar result, then re-prompts once (max 2 calls).
@@ -1140,6 +1222,7 @@ Set "crm_updates" to an empty array if no clear pipeline signals are present.`;
         send_doc: parsed.send_doc || null,
         send_photo: parsed.send_photo || null,
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
+        crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
         llm_calls: llmCalls,
       };
     }

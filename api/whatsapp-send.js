@@ -78,6 +78,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     caption,
     agentId, campaignId,
     replyTo,            // wa_message_id this send quotes (reply context), optional
+    source,             // 'manual' when a human sends from the chat inbox; defaults to 'api'
   } = body;
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
@@ -149,7 +150,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         content: logContent,
         wa_message_id: waMessageId,
         timestamp: new Date().toISOString(),
-        source: 'api',
+        source: source === 'manual' ? 'manual' : 'api',
         campaign_id: campaignId || null,
         reply_to: replyTo || null,
         status: 'sent'

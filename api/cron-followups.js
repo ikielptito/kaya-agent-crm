@@ -810,6 +810,17 @@ export async function runAvailabilityNotifications(ctx) {
   for (const agent of eligible) {
     if (agent.samba_alerts_opt_out) { summary.skipped_opt_out++; continue; }
 
+    // Reduced-frequency preference — set by Maya when an agent asks for fewer
+    // messages without unsubscribing. 'weekly' = Monday digest only,
+    // 'monthly' = at most one digest per ~4 weeks, 'paused' = nothing.
+    const freq = String(agent.contact_frequency || '').toLowerCase();
+    if (freq === 'paused') { summary.skipped_freq_cap++; continue; }
+    if (!isMonday && (freq === 'weekly' || freq === 'monthly')) { summary.skipped_freq_cap++; continue; }
+    if (isMonday && freq === 'monthly' && agent.last_availability_alert_at) {
+      const daysSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 8.64e7;
+      if (daysSince < 27) { summary.skipped_freq_cap++; continue; }
+    }
+
     // Frequency cap (event alerts only — digest is once weekly so cap is moot)
     if (!isMonday && agent.last_availability_alert_at) {
       const hoursSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 3.6e6;
