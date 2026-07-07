@@ -436,7 +436,45 @@ export default async function handler(req, res) {
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
 
-    if (!agent) return res.status(200).end(); // unknown sender — logged, nothing else
+    if (!agent) {
+      // Unknown sender = a brand-new agent's very first message. This used to
+      // be a dead end (message logged with no agent_id, so invisible in the
+      // inbox, and no reply). Instead: create a lead record so the thread
+      // appears in the inbox, attach the message we just stored, and — when
+      // Maya auto-replies are on — send a one-time capability intro so new
+      // agents immediately learn what she can do.
+      try {
+        const firstDateStr = new Date(timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        const createRes = await fetch(`${SUPABASE_URL}/rest/v1/agents`, {
+          method: 'POST', headers: { ...sbHeaders, Prefer: 'return=representation' },
+          body: JSON.stringify({
+            name: '+' + fromNum, wa_num: fromNum,
+            unread_count: 1, last_inbound_at: timestamp,
+            conversation_summary: `[${firstDateStr}] New contact (self-introduced via WhatsApp): ${(text || dbContent || '').slice(0, 120)}`,
+            conversation_history: { first_contact: firstDateStr, last_contact: firstDateStr, total_messages: 1 },
+          }),
+        });
+        const newAgent = (await createRes.json().catch(() => null))?.[0];
+        if (newAgent?.id) {
+          if (waMessageId) {
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, {
+              method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ agent_id: newAgent.id }),
+            }).catch(() => {});
+          }
+          let welcomeMode = 'draft';
+          try {
+            const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
+            welcomeMode = (await sRes.json())?.[0]?.value?.mode || 'draft';
+          } catch (e) { /* stay conservative: no auto-welcome */ }
+          if ((welcomeMode === 'autopilot' || welcomeMode === 'hybrid') && isWithinOperationalHours()) {
+            const welcome = "Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty. I can send project info and brochures, check live villa availability for your clients, and walk you through commissions — 5% on KAYA sales, 10% on Samba monthly rentals (already built into the portal price you quote). Ikiel sees every message and jumps in personally when needed. What can I help you with?";
+            await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
+            await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome);
+          }
+        }
+      } catch (e) { console.warn('new-agent welcome failed:', e.message); }
+      return res.status(200).end();
+    }
 
     // Update conversation summary, history, inbox state
     const dateStr = new Date(timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });

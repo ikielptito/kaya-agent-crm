@@ -6,7 +6,7 @@
 <title>Maya</title>
 
 <!-- PWA / iOS homescreen -->
-<meta name="theme-color" content="#008069">
+<meta name="theme-color" content="#B8613F">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -16,21 +16,23 @@
 <link rel="icon" href="/maya-icon.svg">
 
 <style>
+  /* Samba warm palette — WhatsApp ergonomics, Samba brand. Variable names
+     keep the wa- prefix so every existing rule picks up the reskin. */
   :root {
-    --wa-green: #008069;        /* header / brand */
-    --wa-green-dark: #017561;
-    --wa-accent: #00a884;       /* send button / active */
-    --wa-tick: #53bdeb;
-    --wa-bg: #efeae2;           /* chat wallpaper */
+    --wa-green: #B8613F;        /* header / brand (Samba terracotta) */
+    --wa-green-dark: #A85737;
+    --wa-accent: #C46E4B;       /* send button / active */
+    --wa-tick: #53bdeb;         /* read ticks stay blue — universal convention */
+    --wa-bg: #F5F1EB;           /* chat wallpaper */
     --wa-panel: #ffffff;
-    --wa-panel-2: #f0f2f5;      /* list header / composer bar */
-    --wa-out: #d9fdd3;          /* outgoing bubble */
+    --wa-panel-2: #FAF8F5;      /* list header / composer bar */
+    --wa-out: #F6E7DE;          /* outgoing bubble (warm peach) */
     --wa-in: #ffffff;           /* incoming bubble */
-    --wa-ink: #111b21;
-    --wa-ink-2: #667781;
-    --wa-rule: #e9edef;
-    --wa-unread: #25d366;
-    --wa-shadow: 0 1px 1px rgba(11,20,26,0.13);
+    --wa-ink: #1C1917;
+    --wa-ink-2: #7a7268;
+    --wa-rule: #F1ECE7;
+    --wa-unread: #C46E4B;
+    --wa-shadow: 0 1px 1px rgba(28,25,23,0.12);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
@@ -137,7 +139,11 @@
     touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,0.06);
   }
   .chat-mode-seg button.on { background: var(--wa-green); color: #fff; }
-  .chat-mode-seg button.on-default { background: #6b7c87; color: #fff; }
+  .chat-mode-seg button.on-default { background: #857b6f; color: #fff; }
+  /* Plain-words explanation of the selected per-chat mode — the segmented
+     buttons alone don't tell a new user what Draft/Hybrid/Auto mean. */
+  .chat-mode-hint { background: var(--wa-panel-2); border-bottom: 1px solid var(--wa-rule);
+    font-size: 11px; color: var(--wa-ink-2); padding: 0 14px 7px; line-height: 1.4; }
 
   /* Search */
   .search-wrap { padding: 8px 12px; background: var(--wa-panel); border-bottom: 1px solid var(--wa-rule); }
@@ -234,12 +240,27 @@
     padding: 4px 11px; margin: 0 6px 4px 0; font-size: 12px; font-weight: 600; color: #0a7a5c;
     text-decoration: none; cursor: pointer; font-family: inherit; }
   .cc-none { display: block; font-size: 11.5px; font-style: italic; color: var(--wa-ink-2); }
-  /* Outbound source badge: maya / you / auto */
-  .src-tag { display: inline-block; font-size: 8.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
-    padding: 1px 5px; border-radius: 6px; margin-right: 5px; vertical-align: 1px;
+  /* Outbound authorship badge: who actually wrote this — Maya (AI), you,
+     or the broadcast cron. Sized to be legible, not decorative. */
+  .src-tag { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
+    padding: 2px 7px; border-radius: 7px; margin-right: 6px; vertical-align: 1px;
     background: rgba(0,0,0,.08); color: var(--wa-ink-2); }
-  .src-tag.you { background: #d7f0e3; color: #0a7a5c; }
+  .src-tag.you { background: #dcefe2; color: #1e6b46; }
   .src-tag.maya { background: #e8e2f5; color: #6b4fb3; }
+  /* Maya typing indicator — shown while an auto/hybrid reply is being generated */
+  .bubble.typing { display: inline-flex; align-items: center; gap: 8px; color: var(--wa-ink-2); font-size: 13px; }
+  .tdots { display: inline-flex; gap: 3px; }
+  .tdots i { width: 6px; height: 6px; border-radius: 50%; background: #6b4fb3; opacity: .35; animation: tdot 1.2s infinite; }
+  .tdots i:nth-child(2) { animation-delay: .2s; }
+  .tdots i:nth-child(3) { animation-delay: .4s; }
+  @keyframes tdot { 0%,60%,100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+  /* Conversation-list skeleton rows */
+  .skel-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
+  .skel-av { width: 49px; height: 49px; border-radius: 50%; flex-shrink: 0; }
+  .skel-l1 { height: 13px; border-radius: 6px; width: 45%; margin-bottom: 7px; }
+  .skel-l2 { height: 11px; border-radius: 6px; width: 75%; }
+  .skel-av, .skel-l1, .skel-l2 { background: linear-gradient(100deg, #ece7e0 40%, #f7f4ef 50%, #ece7e0 60%); background-size: 200% 100%; animation: skel 1.4s linear infinite; }
+  @keyframes skel { to { background-position: -200% 0; } }
   .bubble-tag { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--wa-accent);
     text-transform: uppercase; margin-bottom: 2px; }
 
@@ -458,6 +479,7 @@
   <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="••••" maxlength="12">
   <div class="gate-err" id="pinErr"></div>
   <button onclick="checkPin()">Unlock</button>
+  <p style="font-size:11.5px;color:#ffffff99;margin:0">Forgot it? Ask Ikiel — the passcode isn't recoverable here.</p>
 </div>
 
 <!-- ── APP ──────────────────────────────────────────────── -->
@@ -485,7 +507,11 @@
       <input id="searchInput" type="text" placeholder="Search" oninput="state.query=this.value; renderList()">
     </div>
     <div class="conv-list" id="convList">
-      <div class="empty">Loading conversations…</div>
+      <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
+      <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
+      <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
+      <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
+      <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
     </div>
   </div>
 
@@ -516,6 +542,7 @@
           <button data-cmode="autopilot"  onclick="setChatMode('autopilot')" title="Maya replies automatically with no review">Auto</button>
         </div>
       </div>
+      <div class="chat-mode-hint" id="chatModeHint"></div>
       <div class="thread-search" id="threadSearch" style="display:none">
         <input id="threadSearchInput" type="text" placeholder="Search in conversation" oninput="runThreadSearch(this.value)">
         <span id="threadSearchCount"></span>
@@ -589,6 +616,7 @@ const state = {
   atBottom: true,
   translations: {},    // wa_message_id -> { translated, same, detected }
   translateOn: false,  // per-conversation auto-translate
+  mayaPending: {},     // agent_id -> deadline ts while a Maya auto-reply is expected
 };
 
 // ── PIN gate ──────────────────────────────────────────────────────────
@@ -757,6 +785,9 @@ async function refreshAll(manual) {
         }
       });
       state.msgMap = map;
+      // A conversation whose newest message is outbound has been answered —
+      // stop showing "Maya is replying" for it.
+      Object.keys(map).forEach(id => { if (map[id].direction !== 'inbound') delete state.mayaPending[id]; });
       // Detect inbound messages that arrived since the last poll. Skip the
       // very first run so we don't "announce" the whole backlog on load.
       if (state.primed) {
@@ -773,6 +804,13 @@ async function refreshAll(manual) {
 
     if (newInboundAgents.length) {
       playPing();
+      // If Maya will auto-handle the new message, show a typing indicator
+      // until her reply lands in a poll (or the 90s window lapses).
+      newInboundAgents.forEach(id => {
+        const a = state.agents.find(x => x.id === id);
+        const eff = effectiveMode(a);
+        if (eff === 'autopilot' || eff === 'hybrid') state.mayaPending[id] = Date.now() + 90000;
+      });
       // If the open thread is one of them, pull the new message in immediately.
       if (state.activeId && newInboundAgents.includes(state.activeId)) refreshThread(true);
     }
@@ -823,6 +861,8 @@ function renderMode() {
   document.getElementById('modeHint').textContent = MODE_HINTS[state.mode] || '';
   const dot = document.getElementById('modeDot');
   dot.classList.toggle('live', state.mode === 'autopilot' || state.mode === 'hybrid');
+  // The per-chat hint may read "Following global setting — …", so it tracks this.
+  if (state.activeId) renderChatMode();
 }
 async function setMode(mode) {
   if (mode === 'autopilot' && state.mode !== 'autopilot') {
@@ -856,6 +896,20 @@ function renderChatMode() {
     b.classList.toggle('on', match && cur !== '');
     b.classList.toggle('on-default', match && cur === '');
   });
+  const hintEl = document.getElementById('chatModeHint');
+  if (hintEl) {
+    hintEl.textContent = raw === 'paused'
+      ? 'Maya is paused here after a manual takeover — pick any mode to resume her.'
+      : (cur === '' ? 'Following global setting — ' : '') + (MODE_HINTS[cur || state.mode] || '');
+  }
+}
+
+// What Maya will actually do in this chat: the per-chat override wins,
+// otherwise the global mode applies. 'paused' silences her either way.
+function effectiveMode(a) {
+  if (!a) return state.mode;
+  if (a.automation_override === 'paused') return 'paused';
+  return a.automation_override || state.mode;
 }
 
 async function setChatMode(mode) {
@@ -1056,6 +1110,9 @@ async function refreshThread(scroll) {
     }
     rows.push(renderBubble(m));
   });
+  if (state.mayaPending[id] && Date.now() < state.mayaPending[id]) {
+    rows.push('<div class="bubble in typing"><span class="tdots"><i></i><i></i><i></i></span>Maya is replying…</div>');
+  }
   body.innerHTML = rows.join('');
   if (state.search.q) applySearchHighlights();
   if (scroll || nearBottom) { body.scrollTop = body.scrollHeight; state.atBottom = true; }
@@ -1127,9 +1184,9 @@ function renderBubble(m) {
   // Who sent an outbound message: Maya (autoresponder), you (manual from this
   // inbox, tagged from 6 Jul 2026), or the broadcast cron.
   const srcTag = isOut
-    ? (m.source === 'manual' ? '<span class="src-tag you">you</span>'
-      : m.source === 'cron' ? '<span class="src-tag auto">auto</span>'
-      : '<span class="src-tag maya">maya</span>')
+    ? (m.source === 'manual' ? '<span class="src-tag you">You</span>'
+      : m.source === 'cron' ? '<span class="src-tag auto">Auto</span>'
+      : '<span class="src-tag maya">Maya · AI</span>')
     : '';
   const reaction = m.reaction ? `<span class="bubble-reaction">${esc(m.reaction)}</span>` : '';
   const ticks = statusTicks(m, isOut);
