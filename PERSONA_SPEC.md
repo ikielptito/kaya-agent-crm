@@ -515,3 +515,26 @@ The webhook falls back to the hardcoded `lib/kb.js` `PORTFOLIO_CONTEXT` if the p
 ---
 
 *End of v1.0. Maya is live (pending deploy).*
+
+## First-contact welcome (system behavior, added Jul 2026)
+
+When an unknown number messages the business line for the first time, the
+webhook (not Claude) creates a lead record and — only when the global
+automation mode is `autopilot` or `hybrid`, and within operating hours —
+sends a fixed one-time intro:
+
+> Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty.
+> I can send project info and brochures, check live villa availability for
+> your clients, and walk you through commissions — 5% on KAYA sales, 10% on
+> Samba monthly rentals (already built into the portal price you quote).
+> Ikiel sees every message and jumps in personally when needed. What can I
+> help you with?
+
+Rationale: new agents previously received silence (unknown senders were
+logged but never answered), and the #1 onboarding gap was that agents didn't
+know what Maya could do. The message is deterministic (no LLM cost), states
+capabilities, pre-empts the most-misunderstood fact (Samba 10% is included in
+the portal price), and sets the expectation that a human supervises.
+
+Maya sees this welcome in the conversation summary as a normal "Maya:" line,
+so she won't re-introduce herself afterwards.
