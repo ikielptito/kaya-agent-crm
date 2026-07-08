@@ -356,7 +356,7 @@ export default async function handler(req, res) {
                 const a = p.availability || {};
                 const nowState = a.availableToday ? 'available now' : 'occupied now';
                 const next = a.nextAvailableFrom ? `next free ${a.nextAvailableFrom}` : 'no free day in horizon';
-                const longw = a.nextLongWindowFrom ? `30+ day window from ${a.nextLongWindowFrom}` : 'no 30+ day window';
+                const longw = a.nextLongWindowFrom ? `long-term stay window from ${a.nextLongWindowFrom}` : 'no long-term stay window';
                 return `- ${p.name} — ${nowState}; ${next}; ${longw}`;
               });
               availabilityCtx = `SAMBA LIVE AVAILABILITY (real calendar data):\n${lines.join('\n')}\n\nUse this to answer availability questions directly. For a specific date range you cannot resolve from this summary, say you'll confirm the exact dates and check the portal calendar.`;

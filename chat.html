@@ -45,32 +45,6 @@
   body { height: 100dvh; overflow: hidden; }
   button { font-family: inherit; cursor: pointer; }
 
-  /* ── PIN gate ─────────────────────────────────────────── */
-  .gate {
-    position: fixed; inset: 0; z-index: 100;
-    background: var(--wa-green);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 22px; padding: 24px;
-  }
-  .gate-logo {
-    width: 84px; height: 84px; border-radius: 22px; background: #ffffff22;
-    display: flex; align-items: center; justify-content: center;
-    border: 1px solid #ffffff33;
-  }
-  .gate-logo svg { width: 50px; height: 50px; }
-  .gate h1 { color: #fff; font-weight: 500; font-size: 22px; margin: 0; letter-spacing: 0.02em; }
-  .gate p { color: #ffffffbb; font-size: 13px; margin: -10px 0 0; }
-  .gate input {
-    width: 220px; text-align: center; font-size: 26px; letter-spacing: 0.4em;
-    padding: 12px; border: none; border-radius: 12px; outline: none;
-    background: #ffffff; color: var(--wa-ink);
-  }
-  .gate button {
-    width: 220px; padding: 12px; border: none; border-radius: 12px;
-    background: var(--wa-accent); color: #fff; font-size: 15px; font-weight: 600;
-  }
-  .gate-err { color: #ffd9d9; font-size: 12px; min-height: 14px; margin: -10px 0 0; }
-
   /* ── App shell ────────────────────────────────────────── */
   #app { display: none; height: 100dvh; }
   #app.ready { display: flex; }
@@ -254,6 +228,14 @@
   .tdots i:nth-child(2) { animation-delay: .2s; }
   .tdots i:nth-child(3) { animation-delay: .4s; }
   @keyframes tdot { 0%,60%,100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+  /* Offline banner + archived conversations */
+  .offline-banner { display: none; background: #8a6d1f; color: #fff; font-size: 12px; font-weight: 600;
+    text-align: center; padding: 6px 12px; }
+  body.is-offline .offline-banner { display: block; }
+  .arch-toggle { padding: 12px 16px; font-size: 12px; font-weight: 700; letter-spacing: .04em;
+    color: var(--wa-ink-2); cursor: pointer; border-top: 1px solid var(--wa-rule); text-transform: uppercase; }
+  .arch-toggle:hover { background: var(--wa-panel-2); }
+  .conv.archived { opacity: .6; }
   /* Conversation-list skeleton rows */
   .skel-row { display: flex; align-items: center; gap: 12px; padding: 10px 14px; }
   .skel-av { width: 49px; height: 49px; border-radius: 50%; flex-shrink: 0; }
@@ -469,23 +451,11 @@
 </head>
 <body>
 
-<!-- ── PIN GATE ─────────────────────────────────────────── -->
-<div class="gate" id="gate">
-  <div class="gate-logo">
-    <svg viewBox="0 0 24 24" fill="#fff"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2zm0 18a8 8 0 0 1-4.1-1.1l-.3-.2-2.8.8.8-2.8-.2-.3A8 8 0 1 1 12 20z"/><path d="M8.5 7.3c-.2-.5-.4-.5-.6-.5h-.5c-.2 0-.5.1-.7.3-.3.3-.9.9-.9 2.1s.9 2.5 1 2.6c.1.2 1.8 2.9 4.5 4 .6.2 1.1.4 1.5.5.6.2 1.2.2 1.6.1.5-.1 1.5-.6 1.7-1.2.2-.6.2-1.1.1-1.2-.1-.1-.2-.2-.5-.3l-1.6-.8c-.2-.1-.4-.1-.5.1l-.7.9c-.1.1-.2.2-.5.1-.2-.1-.9-.4-1.8-1.2-.7-.6-1.1-1.3-1.3-1.5-.1-.2 0-.3.1-.5l.4-.4c.1-.1.1-.3.2-.4 0-.2 0-.3 0-.4l-.7-1.7z"/></svg>
-  </div>
-  <h1>Maya</h1>
-  <p>Enter your passcode</p>
-  <input id="pinInput" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="••••" maxlength="12">
-  <div class="gate-err" id="pinErr"></div>
-  <button onclick="checkPin()">Unlock</button>
-  <p style="font-size:11.5px;color:#ffffff99;margin:0">Forgot it? Ask Ikiel — the passcode isn't recoverable here.</p>
-</div>
-
 <!-- ── APP ──────────────────────────────────────────────── -->
 <div id="app">
   <!-- Conversation list -->
   <div class="pane-list">
+    <div class="offline-banner">You’re offline — showing the last loaded conversations</div>
     <div class="list-head">
       <div class="list-head-top">
         <div class="list-title">Maya</div>
@@ -529,6 +499,7 @@
           <div class="thread-head-name" id="thName"></div>
           <div class="thread-head-sub" id="thSub"></div>
         </div>
+        <button class="refresh-btn" id="archBtn" onclick="toggleArchive()" title="Archive chat">🗄</button>
         <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English">🌐</button>
         <button class="refresh-btn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
       </div>
@@ -582,10 +553,6 @@
 // CORS or extra backend. Designed to be saved to a phone homescreen.
 // ════════════════════════════════════════════════════════════════════
 
-// ⚠️  CHANGE THIS PIN. It's a client-side gate over an obscure URL, not
-// real auth — it just stops casual access from anyone who finds the link.
-const APP_PIN = '2468';
-
 // Web Push VAPID public key — safe to expose (it's the public half). Must
 // match VAPID_PUBLIC_KEY set in Vercel env (paired with VAPID_PRIVATE_KEY).
 const VAPID_PUBLIC_KEY = 'BAJHYG9hY_LVOBoN4ypJ9U7Tu7kVdKObimwLttgUgmzCDCvuQDaePApNhMZilKzOoN31_5Mgjo6t-sFz7wCl75Q';
@@ -617,25 +584,37 @@ const state = {
   translations: {},    // wa_message_id -> { translated, same, detected }
   translateOn: false,  // per-conversation auto-translate
   mayaPending: {},     // agent_id -> deadline ts while a Maya auto-reply is expected
+  archived: new Set(JSON.parse(localStorage.getItem('maya_archived') || '[]')),
+  showArchived: false,
 };
 
-// ── PIN gate ──────────────────────────────────────────────────────────
-function checkPin() {
-  const v = document.getElementById('pinInput').value.trim();
-  if (v === APP_PIN) {
-    localStorage.setItem('maya_pin_ok', '1');
-    unlock();
-  } else {
-    document.getElementById('pinErr').textContent = 'Wrong passcode';
-    document.getElementById('pinInput').value = '';
-  }
+// ── Archiving (device-local — this is a single-operator inbox) ────────
+function saveArchived() {
+  try { localStorage.setItem('maya_archived', JSON.stringify([...state.archived])); } catch (_) {}
 }
+function toggleArchive() {
+  const id = state.activeId; if (!id) return;
+  if (state.archived.has(id)) { state.archived.delete(id); toast('Moved back to inbox'); updateArchBtn(); }
+  else { state.archived.add(id); toast('Archived — see “Archived” at the bottom of the list'); closeConv(); }
+  saveArchived(); renderList();
+}
+function updateArchBtn() {
+  const b = document.getElementById('archBtn'); if (!b) return;
+  const on = state.activeId && state.archived.has(state.activeId);
+  b.textContent = on ? '📥' : '🗄';
+  b.title = on ? 'Unarchive chat' : 'Archive chat';
+}
+
+// ── Offline indicator ─────────────────────────────────────────────────
+function updateOnline() { document.body.classList.toggle('is-offline', !navigator.onLine); }
+window.addEventListener('online', updateOnline);
+window.addEventListener('offline', updateOnline);
+updateOnline();
+
 function unlock() {
-  document.getElementById('gate').style.display = 'none';
   document.getElementById('app').classList.add('ready');
   init();
 }
-document.getElementById('pinInput').addEventListener('keydown', e => { if (e.key === 'Enter') checkPin(); });
 
 // ── API helpers ───────────────────────────────────────────────────────
 async function api(action, payload) {
@@ -981,7 +960,19 @@ function renderList() {
     return;
   }
 
-  el.innerHTML = list.map(a => {
+  // Archived chats collapse under a toggle at the bottom (search bypasses it).
+  const inbox = q ? list : list.filter(a => !state.archived.has(a.id));
+  const archd = q ? [] : list.filter(a => state.archived.has(a.id));
+  let html = inbox.map(convRow).join('');
+  if (archd.length) {
+    html += `<div class="arch-toggle" onclick="state.showArchived=!state.showArchived;renderList()">Archived (${archd.length}) ${state.showArchived ? '▴' : '▾'}</div>`;
+    if (state.showArchived) html += archd.map(convRow).join('');
+  }
+  if (!html) html = `<div class="empty">No conversations yet.<br>Inbound agent messages will appear here.</div>`;
+  el.innerHTML = html;
+}
+
+function convRow(a) {
     const m = state.msgMap[a.id];
     const ts = m?.lastTimestamp || a.last_inbound_at;
     const time = ts ? timeAgo(new Date(ts)) : '';
@@ -1002,7 +993,7 @@ function renderList() {
       pill = ageH > 2 ? '<span class="pill pill-needs">Needs you</span>' : '<span class="pill pill-wait">Waiting</span>';
     }
 
-    return `<div class="conv ${a.id === state.activeId ? 'active' : ''}" onclick="openConv(${a.id})">
+    return `<div class="conv ${a.id === state.activeId ? 'active' : ''}${state.archived.has(a.id) ? ' archived' : ''}" onclick="openConv(${a.id})">
       <div class="avatar">${esc(initials(a.name, a.agency))}</div>
       <div class="conv-mid">
         <div class="conv-name">${esc(a.name || a.agency || '+' + (a.wa_num || ''))}</div>
@@ -1013,7 +1004,6 @@ function renderList() {
         <div class="conv-badges">${pill}${unread ? `<span class="unread-pill">${unread}</span>` : ''}</div>
       </div>
     </div>`;
-  }).join('');
 }
 
 // ── Thread ────────────────────────────────────────────────────────────
@@ -1035,6 +1025,7 @@ function openConv(id) {
   state.threadLastRead = localStorage.getItem('maya_read_' + id) || null;
   state.translateOn = localStorage.getItem('maya_xlate_' + id) === '1';
   updateTranslateBtn();
+  updateArchBtn();
 
   document.getElementById('thAvatar').textContent = initials(a.name, a.agency);
   document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
@@ -1749,8 +1740,7 @@ document.getElementById('replyBox').addEventListener('keydown', e => {
 });
 
 // ── Boot ──────────────────────────────────────────────────────────────
-if (localStorage.getItem('maya_pin_ok') === '1') unlock();
-else document.getElementById('pinInput').focus();
+unlock();
 </script>
 </body>
 </html>

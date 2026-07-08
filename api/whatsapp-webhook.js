@@ -97,8 +97,8 @@ function buildAvailabilityContext(digest) {
     const nowState = a.availableToday ? 'available now' : 'occupied now';
     const next = a.nextAvailableFrom ? `next free from ${a.nextAvailableFrom}` : 'no free day in horizon';
     const longw = a.nextLongWindowFrom
-      ? `open 30+ day window from ${a.nextLongWindowFrom} (${a.longWindowDays} days open)`
-      : 'no 30+ day window in horizon';
+      ? `long-term stay window from ${a.nextLongWindowFrom} (${a.longWindowDays} days open)`
+      : 'no long-term stay window in horizon';
     const contactName = p.waContactName || 'Era';
     const contactNum = p.waNumber || '6281246357778';
     const contact = ` | enquire with: ${contactName} (+${contactNum})`;
@@ -326,6 +326,15 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') return res.status(405).end();
+
+  // Optional hardening: when WEBHOOK_SHARED_SECRET is set, inbound POSTs must
+  // carry ?token=<secret> (configure the webhook URL in Meta Business Manager
+  // as .../api/whatsapp-webhook?token=...). Unset = no check, so deploys stay
+  // backward compatible until the env var + Meta URL are updated together.
+  const WEBHOOK_SECRET = process.env.WEBHOOK_SHARED_SECRET;
+  if (WEBHOOK_SECRET && req.query?.token !== WEBHOOK_SECRET) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
 
   try {
     const body = req.body;
@@ -612,7 +621,18 @@ export default async function handler(req, res) {
         if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
       } catch (e) { /* non-fatal */ }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, text, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext);
+    // Vision: when the agent sent an image, fetch its bytes so Maya can
+    // actually look at it (listing screenshots, property photos, documents
+    // photographed by agents). Falls back to the "couldn't open it" prompt.
+    let inboundText = text, inboundImage = null;
+    if (mediaType === 'image' && mediaId) {
+      inboundImage = await fetchWaMediaBase64(mediaId, WA_TOKEN).catch(() => null);
+      if (inboundImage) {
+        inboundText = (extracted.caption ? `Caption from the agent: "${extracted.caption}". ` : '')
+          + '[The agent sent the attached image — look at it and respond helpfully. If it shows a property, listing screenshot, or document, address its content directly; if it is unrelated small talk (memes, greetings), respond naturally and briefly.]';
+      }
+    }
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext, inboundImage);
 
     // Increment today's spend by the estimated cost of the Claude call(s). A
     // date-range availability lookup costs one extra Claude turn, so charge per
@@ -711,9 +731,12 @@ function extractInboundContent(msg) {
   if (msg.image) {
     out.mediaType = 'image';
     out.mediaId = msg.image.id || null;
+    out.caption = msg.image.caption || '';
     const cap = msg.image.caption ? ` "${msg.image.caption}"` : '';
     out.dbContent = `[Image]${cap}`;
-    out.textForClaude = msg.image.caption || '[Agent sent an image — say briefly that you cannot view images yet and offer to have Ikiel review it.]';
+    // Fallback prompt — used only if the image bytes can't be fetched; when
+    // they can, the webhook swaps in a vision prompt with the image attached.
+    out.textForClaude = msg.image.caption || '[Agent sent an image — say briefly that you could not open it and offer to have Ikiel review it.]';
     return out;
   }
   if (msg.document) {
@@ -730,7 +753,7 @@ function extractInboundContent(msg) {
     out.mediaType = 'audio';
     out.mediaId = a.id || null;
     out.dbContent = '[Voice note]';
-    out.textForClaude = '[Agent sent a voice note. Say briefly that you cannot process voice notes yet and ask them to send the question as text, or offer to have Ikiel call them back.]';
+    out.textForClaude = '[Agent sent a voice note. Say briefly that you cannot listen to voice notes yet and ask them to send the question as text, or offer to have Ikiel listen and reply — if they seem to prefer that, use action "escalate" so Ikiel is notified.]';
     return out;
   }
   if (msg.video) {
@@ -976,6 +999,24 @@ async function logOutbound(url, headers, agentId, waNum, content) {
   }
 }
 
+// Fetch a WhatsApp media object as base64 for Claude vision. Returns
+// { mime, data } or null (unsupported type, too large, or fetch failure) —
+// callers fall back to the text-only "couldn't open it" prompt.
+async function fetchWaMediaBase64(mediaId, token) {
+  const MAX_BYTES = 4.5 * 1024 * 1024; // Claude rejects images >5MB base64
+  const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!metaRes.ok) return null;
+  const meta = await metaRes.json();
+  const mime = meta.mime_type || '';
+  if (!meta.url || !/^image\/(jpeg|png|webp|gif)$/.test(mime)) return null;
+  if (meta.file_size && meta.file_size > MAX_BYTES) return null;
+  const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!binRes.ok) return null;
+  const buf = Buffer.from(await binRes.arrayBuffer());
+  if (buf.length > MAX_BYTES) return null;
+  return { mime, data: buf.toString('base64') };
+}
+
 async function sendText(phoneId, token, to, text) {
   return fetch(`${GRAPH}/${phoneId}/messages`, {
     method: 'POST',
@@ -1066,7 +1107,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '') {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '', inboundImage = null) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -1220,7 +1261,12 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 
   // Conversation turns for this reply. A date-range availability check appends
   // an assistant turn + the calendar result, then re-prompts once (max 2 calls).
-  const messages = [{ role: 'user', content: `The agent just sent: "${inbound}"` }];
+  // When the agent sent an image, it rides along as a vision block.
+  const firstTurn = inboundImage
+    ? [{ type: 'image', source: { type: 'base64', media_type: inboundImage.mime, data: inboundImage.data } },
+       { type: 'text', text: `The agent just sent: "${inbound}"` }]
+    : `The agent just sent: "${inbound}"`;
+  const messages = [{ role: 'user', content: firstTurn }];
   let llmCalls = 0;
   const MAX_LLM_CALLS = 2;
 

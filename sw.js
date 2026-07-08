@@ -3,8 +3,38 @@
 // api/whatsapp-webhook.js when an agent messages the Maya WhatsApp number)
 // and routes notification taps back into the installed app.
 
-self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+// App shell cache — the inbox opens instantly and works offline with the
+// last-loaded shell. Network-first so deploys are picked up immediately;
+// the cache only serves when the network is down.
+const SHELL_CACHE = 'maya-shell-v1';
+const SHELL_URLS = ['/chat.html', '/manifest.webmanifest', '/maya-icon.svg'];
+
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(SHELL_CACHE).then(c => c.addAll(SHELL_URLS)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => e.waitUntil((async () => {
+  const keys = await caches.keys();
+  await Promise.all(keys.filter(k => k.startsWith('maya-shell-') && k !== SHELL_CACHE).map(k => caches.delete(k)));
+  await self.clients.claim();
+})()));
+
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
+  const isShell = e.request.mode === 'navigate' || SHELL_URLS.includes(url.pathname);
+  if (!isShell) return;
+  e.respondWith((async () => {
+    try {
+      const res = await fetch(e.request);
+      const cache = await caches.open(SHELL_CACHE);
+      cache.put(e.request.mode === 'navigate' ? '/chat.html' : e.request, res.clone());
+      return res;
+    } catch (_) {
+      return (await caches.match(e.request.mode === 'navigate' ? '/chat.html' : e.request)) || Response.error();
+    }
+  })());
+});
 
 self.addEventListener('push', event => {
   let data = {};

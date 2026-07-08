@@ -16,6 +16,7 @@
 
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
+import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -400,6 +401,37 @@ export default async function handler(req, res) {
       previewMode,
     });
 
+    // ── ESCALATION SLA ───────────────────────────────────────────────
+    // Conversations Ikiel took over (paused) where the agent's last message
+    // is still unread hours later get a daily Telegram reminder digest, so
+    // an escalated chat can't silently rot. One reminder per inbound message
+    // (keyed by last_inbound_at in settings.sla_reminders).
+    let slaReminded = 0;
+    if (!previewMode) {
+      try {
+        const SLA_HOURS = 3;
+        const reminded = (await loadSetting(SUPABASE_URL, sbHeaders, 'sla_reminders')) || {};
+        const stale = agents.filter(a =>
+          !a.is_test &&
+          a.automation_override === 'paused' &&
+          (a.unread_count || 0) > 0 &&
+          a.last_inbound_at &&
+          (now - new Date(a.last_inbound_at)) > SLA_HOURS * 3600 * 1000 &&
+          reminded[a.id] !== a.last_inbound_at
+        );
+        if (stale.length && telegramEnabled()) {
+          const lines = stale.map(a => {
+            const hrs = Math.round((now - new Date(a.last_inbound_at)) / 3600000);
+            return `• <b>${(a.name || 'Unknown').replace(/[<>&]/g, '')}</b> — waiting ${hrs}h (Maya paused, ${a.unread_count} unread)`;
+          });
+          await postToTelegram(`⏰ <b>Escalated chats waiting on you</b>\n\n${lines.join('\n')}\n\n<i>Open the Maya inbox to reply, or tap Resume on the original alert.</i>`);
+          stale.forEach(a => { reminded[a.id] = a.last_inbound_at; });
+          await saveSetting(SUPABASE_URL, sbHeaders, 'sla_reminders', reminded);
+          slaReminded = stale.length;
+        }
+      } catch (e) { console.warn('sla reminder failed:', e.message); }
+    }
+
     // Write back the accumulated daily spend
     if (sent > 0) {
       await persistTodaySpend(SUPABASE_URL, sbHeaders, todaySpend);
@@ -412,6 +444,7 @@ export default async function handler(req, res) {
       listing_sent: sent, listing_stalled: stalled, skipped,
       sequence_sent: sequenceSent, sequence_completed: sequenceCompleted,
       pruned_wa_messages: pruned,
+      sla_reminded: slaReminded,
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       results
