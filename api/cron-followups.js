@@ -707,7 +707,7 @@ const MAX_ALERT_BULLETS = 5;
 const MAX_DIGEST_BULLETS = 8;
 const TEMPLATE_BODY_BUDGET = 700;     // safety margin under Meta's 1024
 const EMPTY_SLOT = '—';               // pad for unused bullet slots (Meta rejects "")
-const PORTAL_BASE = 'https://sambarentals.vercel.app';
+const PORTAL_BASE = 'https://sambarentals.com';
 
 export async function runAvailabilityNotifications(ctx) {
   const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results, previewMode } = ctx;

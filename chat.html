@@ -441,6 +441,8 @@
   .bcast-card { background: #fff; border: 1px solid var(--wa-rule); border-left: 3px solid #6b4fb3;
     border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
   .bcast-msg { background: var(--wa-out); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; margin: 6px 0; font-size: 13.5px; }
+  .bcast-tpl-btn { display: block; margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.08);
+    color: #6b4fb3; font-weight: 600; font-size: 12.5px; word-break: break-all; }
   .bcast-meta { color: var(--wa-ink-2); font-size: 12px; margin-bottom: 6px; line-height: 1.4; }
   .bcast-actions { display: flex; gap: 8px; margin-top: 8px; }
   .bcast-actions .go { flex: 1; background: #6b4fb3; color: #fff; border: none; border-radius: 8px;
@@ -1405,10 +1407,10 @@ function openEmoji() {
 function insertEmoji(e) { const box = document.getElementById('replyBox'); box.value += e; box.focus(); onReplyInput(); }
 
 const QUICK_REPLIES = [
-  { label: 'Send portal link', body: 'You can browse all available properties in real time, download photos, and share listings here: https://sambarentals.vercel.app' },
+  { label: 'Send portal link', body: 'You can browse all available properties in real time, download photos, and share listings here: https://sambarentals.com' },
   { label: 'Explain commission', body: 'The 10% agent commission is already included in the portal price — quote it to your client as-is and earn 10%. Prefer 20%? Quote portal price + 10%; the extra comes from the client.' },
   { label: 'Coordinate a visit', body: 'Happy to coordinate a visit — let me have Ikiel reach out directly to find a time that works for you and the property.' },
-  { label: 'Direct to photos', body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.vercel.app' },
+  { label: 'Direct to photos', body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.com' },
   { label: 'Closing thanks', body: 'Thanks for reaching out — let me know if anything else comes up.' },
   { label: 'Listing agreement', body: 'Ikiel will follow up with the listing agreement directly. Let me know if you have questions on the terms in the meantime.' },
 ];
@@ -1897,7 +1899,7 @@ function renderBroadcastCard(m, i) {
   const getting = isTpl ? all : inW;
   return `<div class="bcast-card">
     <b>📣 ${esc(b.label || 'Broadcast')} — awaiting your confirmation</b>
-    <div class="bcast-msg">${esc(b.message)}</div>
+    <div class="bcast-msg">${esc(b.message)}${isTpl && b.template.button ? `<span class="bcast-tpl-btn">🔗 ${esc(b.template.button.text)} → ${esc(b.template.button.url)}</span>` : ''}</div>
     ${isTpl ? `<div class="bcast-meta">✅ Approved template <b>${esc(b.template.name)}</b> — delivers to all ${all.length} recipients, no 24h-window limit. [first name] is personalized per agent.</div>` : ''}
     <div class="bcast-meta">To: ${esc(getting.slice(0, 10).map(r => r.name).join(', '))}${getting.length > 10 ? ` +${getting.length - 10} more` : ''}</div>
     ${!isTpl && outW.length ? `<div class="bcast-meta">⏱ ${outW.length} outside the 24h window will be skipped: ${esc(outW.slice(0, 6).map(r => r.name).join(', '))}${outW.length > 6 ? '…' : ''}</div>` : ''}

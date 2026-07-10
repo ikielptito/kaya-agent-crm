@@ -59,7 +59,7 @@ let _rentalsCache = null;
 let _rentalsCacheAt = 0;
 
 // Live availability digest from the Samba portal (warm-container cache, 5 min).
-const PORTAL_BASE = 'https://sambarentals.vercel.app';
+const PORTAL_BASE = 'https://sambarentals.com';
 let _digestCache = null;
 let _digestCacheAt = 0;
 const DIGEST_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -164,7 +164,7 @@ async function loadRentals(supabaseUrl, sbHeaders) {
 function buildRentalsContext(rentals) {
   if (!rentals || rentals.length === 0) {
     return `SAMBA REALTY RENTAL PORTFOLIO:
-Samba Realty manages a portfolio of monthly rental properties across Canggu, Pererenan, and Seminyak. Agent commission is 10%. Live availability is at sambarentals.vercel.app. For specific properties or live calendars, refer agents to the portal.`;
+Samba Realty manages a portfolio of monthly rental properties across Canggu, Pererenan, and Seminyak. Agent commission is 10%. Live availability is at sambarentals.com. For specific properties or live calendars, refer agents to the portal.`;
   }
   const blocks = rentals.map((p, i) => {
     // Samba rentals are long-term — quote monthly IDR only. Nightly fields exist
@@ -201,7 +201,7 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
 3. If an agent asks about a property and a field isn't in the DB, say "Let me check with Ikiel and come back to you" rather than guessing.
 4. If asked for PHOTOS → share the property's photos_url (Google Drive). If asked for LOCATION → share the property's maps_url (Google Maps). If neither is in the data, say you'll get it from Ikiel.
 5. Property types are exactly what's listed (Apartment / Townhouse / Villa). HAUS Canggu units are 1BR APARTMENTS, not villas. Tropicana Valley units are 1BR APARTMENTS with private pools, not houses.
-6. For live booking calendar availability, direct agents to the portal: sambarentals.vercel.app
+6. For live booking calendar availability, direct agents to the portal: sambarentals.com
 7. COMMISSION STRUCTURE (zero ambiguity): the 10% is ALREADY INCLUDED in the portal price. Agent quotes the portal price to their client; the agent's 10% comes out of what we collect. If the agent wants 20%, they may quote portal price + 10% to their client (the extra 10% comes from the client, not from us). Never say "commission is paid on top" or "you can earn 10% in addition to the price" — those phrasings break the deal structure.`;
 }
 
@@ -1157,7 +1157,7 @@ If they said yes to kaya_intro: send a concise overview of all active KAYA SALES
 
 If they said yes to samba_intro: send a concise overview of all SAMBA RENTAL property groups (HAUS Canggu, LaneHAUS, Villa Saturno, Tropicana Valley) — one short line each (location, type, headline rate). Then in a SECOND short paragraph, surface the agent portal:
 
-  "All availability, listing photos, and rental details are live at https://sambarentals.vercel.app — agents can download photos to share with clients directly, see real-time calendar availability, and use the WhatsApp shortcut to send the listing straight to a client. Happy to answer questions about any specific property too."
+  "All availability, listing photos, and rental details are live at https://sambarentals.com — agents can download photos to share with clients directly, see real-time calendar availability, and use the WhatsApp shortcut to send the listing straight to a client. Happy to answer questions about any specific property too."
 
 Always include the portal link with that explanation on the FIRST Samba response after samba_intro. On subsequent Samba responses you don't need to repeat the explanation — just refer to "the portal" if relevant.
 
@@ -1173,7 +1173,7 @@ ${campaignContext.context}${campaignContext.purpose ? `\nCampaign purpose: ${cam
 You can attach a project brochure PDF for KAYA SALES projects only. Available brochure keys: ${brochureKeys}.
 
 IMPORTANT — SAMBA RENTALS HAVE NO PDF BROCHURES.
-For Samba rental properties (HAUS Canggu, LaneHAUS rental units, Villa Saturno, Tropicana Valley monthly rentals) there are NO PDF brochures to send. All photos, availability calendars, and listing details live in the portal at https://sambarentals.vercel.app.
+For Samba rental properties (HAUS Canggu, LaneHAUS rental units, Villa Saturno, Tropicana Valley monthly rentals) there are NO PDF brochures to send. All photos, availability calendars, and listing details live in the portal at https://sambarentals.com.
 - If an agent asks for rental photos, the brochure, or "info to share with a client," direct them to the portal — agents can download photos there directly.
 - Never offer to send a rental brochure. Never list "which property would you like a brochure for" for Samba rentals.
 - For KAYA sales projects (Clay House, Sabit House, Palem Kembar, Tropical Townhouses-as-sales, LaneHAUS-as-sales), PDF brochures DO exist and can be attached via send_doc.

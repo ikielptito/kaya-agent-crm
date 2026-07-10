@@ -30,13 +30,39 @@ export default async function handler(req, res) {
       }
     }
 
+    if (req.method === 'POST' && req.body?.action === 'delete') {
+      const { name } = req.body;
+      if (!name) return res.status(400).json({ error: 'name required' });
+      const dr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': 'Bearer ' + TOKEN }
+      });
+      const deleted = await dr.json();
+      if (!dr.ok) return res.status(dr.status).json({ error: deleted.error?.message || 'template delete failed', details: deleted });
+      return res.status(200).json({ success: true, name });
+    }
+
     if (req.method === 'POST' && req.body?.action === 'create') {
-      const { name, body, example, category, language } = req.body;
+      const { name, body, example, category, language, button } = req.body;
       if (!name || !body) return res.status(400).json({ error: 'name and body required' });
       if (!/^[a-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'name must be lowercase letters, digits, underscores' });
-      const component = { type: 'BODY', text: body };
+      const bodyComponent = { type: 'BODY', text: body };
       // Meta requires example values for every {{n}} placeholder.
-      if (Array.isArray(example) && example.length) component.example = { body_text: [example] };
+      if (Array.isArray(example) && example.length) bodyComponent.example = { body_text: [example] };
+      const components = [bodyComponent];
+      // Optional dynamic URL button: fixed urlBase + {{1}} suffix (the listing
+      // slug supplied per-send). exampleUrl is the full sample URL Meta reviews.
+      if (button && button.urlBase) {
+        components.push({
+          type: 'BUTTONS',
+          buttons: [{
+            type: 'URL',
+            text: button.text || 'View listing',
+            url: button.urlBase + '{{1}}',
+            example: [button.exampleUrl || (button.urlBase + 'example')]
+          }]
+        });
+      }
       const cr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
@@ -44,7 +70,7 @@ export default async function handler(req, res) {
           name,
           language: language || 'en',
           category: category || 'MARKETING',
-          components: [component]
+          components
         })
       });
       const created = await cr.json();
