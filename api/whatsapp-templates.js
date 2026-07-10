@@ -1,7 +1,7 @@
 // Fetch the list of approved WhatsApp Business templates from Meta.
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
-import { createCarouselDigest } from '../lib/wa-carousel.js';
+import { createCarouselDigest, listingCarouselCards, buildCarouselComponents } from '../lib/wa-carousel.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -42,6 +42,34 @@ export default async function handler(req, res) {
       const deleted = await dr.json();
       if (!dr.ok) return res.status(dr.status).json({ error: deleted.error?.message || 'template delete failed', details: deleted });
       return res.status(200).json({ success: true, name });
+    }
+
+    if (req.method === 'POST' && req.body?.action === 'send_test') {
+      // Fire a real template to one number for visual verification. kind:
+      // 'carousel' → the 6-card weekly digest; 'template' → a body+button
+      // strategic template (params + optional button slug).
+      const { waNum, kind, firstName, templateName, params, buttonSlug } = req.body;
+      const to = String(waNum || '').replace(/\D/g, '');
+      if (!to) return res.status(400).json({ error: 'waNum required' });
+      const GRAPH19 = 'https://graph.facebook.com/v19.0';
+      let template;
+      if (kind === 'carousel') {
+        const cards = await listingCarouselCards();
+        if (!cards) return res.status(400).json({ error: 'not enough portal listings with cover photos for a full carousel' });
+        template = { name: 'samba_weekly_carousel_v1', language: { code: 'en' }, components: buildCarouselComponents(firstName || 'there', cards) };
+      } else {
+        const comps = [{ type: 'body', parameters: (params || []).map(p => ({ type: 'text', text: String(p) })) }];
+        if (buttonSlug) comps.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: buttonSlug }] });
+        template = { name: templateName, language: { code: 'en' }, components: comps };
+      }
+      const sr = await fetch(`${GRAPH19}/${PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template })
+      });
+      const sd = await sr.json();
+      if (!sr.ok) return res.status(sr.status).json({ error: sd?.error?.message || 'send failed', details: sd?.error });
+      return res.status(200).json({ success: true, to, kind: kind || 'template', messageId: sd.messages?.[0]?.id });
     }
 
     if (req.method === 'POST' && req.body?.action === 'create_carousel') {
