@@ -1889,16 +1889,21 @@ function renderBroadcastCard(m, i) {
   if (b.status === 'cancelled') {
     return `<div class="bcast-card" style="opacity:.6">✕ Broadcast cancelled — nothing was sent.</div>`;
   }
-  const inW = (b.recipients || []).filter(r => r.in_window);
-  const outW = (b.recipients || []).filter(r => !r.in_window);
+  const all = b.recipients || [];
+  const inW = all.filter(r => r.in_window);
+  const outW = all.filter(r => !r.in_window);
+  // Template broadcasts deliver to everyone; free-text only inside the 24h window.
+  const isTpl = !!b.template;
+  const getting = isTpl ? all : inW;
   return `<div class="bcast-card">
     <b>📣 ${esc(b.label || 'Broadcast')} — awaiting your confirmation</b>
     <div class="bcast-msg">${esc(b.message)}</div>
-    <div class="bcast-meta">To: ${esc(inW.slice(0, 10).map(r => r.name).join(', '))}${inW.length > 10 ? ` +${inW.length - 10} more` : ''}</div>
-    ${outW.length ? `<div class="bcast-meta">⏱ ${outW.length} outside the 24h window will be skipped: ${esc(outW.slice(0, 6).map(r => r.name).join(', '))}${outW.length > 6 ? '…' : ''}</div>` : ''}
+    ${isTpl ? `<div class="bcast-meta">✅ Approved template <b>${esc(b.template.name)}</b> — delivers to all ${all.length} recipients, no 24h-window limit. [first name] is personalized per agent.</div>` : ''}
+    <div class="bcast-meta">To: ${esc(getting.slice(0, 10).map(r => r.name).join(', '))}${getting.length > 10 ? ` +${getting.length - 10} more` : ''}</div>
+    ${!isTpl && outW.length ? `<div class="bcast-meta">⏱ ${outW.length} outside the 24h window will be skipped: ${esc(outW.slice(0, 6).map(r => r.name).join(', '))}${outW.length > 6 ? '…' : ''}</div>` : ''}
     ${(b.excluded || []).length ? `<div class="bcast-meta">Excluded: ${esc(b.excluded.slice(0, 5).map(x => `${x.name} (${x.reason})`).join(', '))}</div>` : ''}
     <div class="bcast-actions">
-      <button class="go" onclick="confirmBroadcast(${i})">Send to ${inW.length} agent${inW.length === 1 ? '' : 's'}</button>
+      <button class="go" onclick="confirmBroadcast(${i})">Send to ${getting.length} agent${getting.length === 1 ? '' : 's'}</button>
       <button class="no" onclick="cancelBroadcast(${i})">Cancel</button>
     </div>
   </div>`;
@@ -1949,8 +1954,8 @@ async function confirmBroadcast(i) {
   const m = state.assist.history[i];
   const b = m && m.broadcast;
   if (!b || b.status !== 'pending') return;
-  const n = (b.recipients || []).filter(r => r.in_window).length;
-  if (!confirm(`Send this message to ${n} agent${n === 1 ? '' : 's'} on WhatsApp now?`)) return;
+  const n = b.template ? (b.recipients || []).length : (b.recipients || []).filter(r => r.in_window).length;
+  if (!confirm(`Send this ${b.template ? 'template ' : ''}message to ${n} agent${n === 1 ? '' : 's'} on WhatsApp now?`)) return;
   toast('Sending broadcast…');
   try {
     const data = await api('execute_broadcast', { draftId: b.draft_id });

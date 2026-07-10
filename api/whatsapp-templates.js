@@ -1,4 +1,6 @@
-// Fetch the list of approved WhatsApp Business templates from Meta
+// Fetch the list of approved WhatsApp Business templates from Meta.
+// POST with { action: 'create', name, body, example } submits a new
+// template for Meta review (used for the strategic broadcast templates).
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
@@ -26,6 +28,28 @@ export default async function handler(req, res) {
       if (!wabaId) {
         return res.status(500).json({ error: 'Could not determine WABA ID', details: phoneData });
       }
+    }
+
+    if (req.method === 'POST' && req.body?.action === 'create') {
+      const { name, body, example, category, language } = req.body;
+      if (!name || !body) return res.status(400).json({ error: 'name and body required' });
+      if (!/^[a-z0-9_]+$/.test(name)) return res.status(400).json({ error: 'name must be lowercase letters, digits, underscores' });
+      const component = { type: 'BODY', text: body };
+      // Meta requires example values for every {{n}} placeholder.
+      if (Array.isArray(example) && example.length) component.example = { body_text: [example] };
+      const cr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          language: language || 'en',
+          category: category || 'MARKETING',
+          components: [component]
+        })
+      });
+      const created = await cr.json();
+      if (!cr.ok) return res.status(cr.status).json({ error: created.error?.message || 'template create failed', details: created });
+      return res.status(200).json({ success: true, id: created.id, status: created.status, name });
     }
 
     const r = await fetch(
