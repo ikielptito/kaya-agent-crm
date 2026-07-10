@@ -1,6 +1,8 @@
 // Fetch the list of approved WhatsApp Business templates from Meta.
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
+import { createCarouselDigest } from '../lib/wa-carousel.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
@@ -40,6 +42,19 @@ export default async function handler(req, res) {
       const deleted = await dr.json();
       if (!dr.ok) return res.status(dr.status).json({ error: deleted.error?.message || 'template delete failed', details: deleted });
       return res.status(200).json({ success: true, name });
+    }
+
+    if (req.method === 'POST' && req.body?.action === 'create_carousel') {
+      // Submit the weekly carousel digest template (Resumable Upload for the
+      // example image handled server-side). sampleImageUrl seeds the example.
+      const { name, sampleImageUrl } = req.body;
+      if (!name || !sampleImageUrl) return res.status(400).json({ error: 'name and sampleImageUrl required' });
+      try {
+        const out = await createCarouselDigest({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, sampleImageUrl });
+        return res.status(200).json({ success: true, ...out });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
     }
 
     if (req.method === 'POST' && req.body?.action === 'edit') {
