@@ -2,6 +2,11 @@
   "functions": {
     "api/supabase.js": { "maxDuration": 60 }
   },
+  "routes": [
+    { "src": "^/(lib|dev)(/.*)?$", "status": 404 },
+    { "src": "^/(SCHEMA\\.sql|PERSONA_SPEC\\.md|README\\.md)$", "status": 404 },
+    { "handle": "filesystem" }
+  ],
   "crons": [
     {
       "path": "/api/cron-followups",
