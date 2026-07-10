@@ -100,6 +100,14 @@ export default async function handler(req, res) {
           }]
         });
       }
+      // Optional quick-reply buttons: array of label strings. Tapping one sends
+      // an inbound button event the webhook maps to a preference change.
+      if (Array.isArray(req.body.quickReplies) && req.body.quickReplies.length) {
+        components.push({
+          type: 'BUTTONS',
+          buttons: req.body.quickReplies.slice(0, 3).map(text => ({ type: 'QUICK_REPLY', text }))
+        });
+      }
       const cr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },

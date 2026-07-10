@@ -562,6 +562,40 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
+    // PREFERENCE BUTTONS — one-tap cadence control from a template quick-reply.
+    // Maps the button payload straight to contact_frequency so agents self-serve
+    // fewer messages instead of blocking. Acks + short-circuits (no Claude call).
+    const PREF_MAP = {
+      PREF_WEEKLY:  { freq: 'weekly',  ack: 'Perfect — I\'ll send just the weekly availability summary from now on. Reply anytime if you want more.' },
+      PREF_MONTHLY: { freq: 'monthly', ack: 'Done — I\'ll keep it to a monthly summary. Reply anytime to change that.' },
+      PREF_PAUSE:   { freq: 'paused',  ack: 'No problem — I\'ve paused availability updates. Just message me whenever you\'d like them back on.' },
+    };
+    // Match the explicit payload first; fall back to the visible label, since a
+    // template quick-reply defaults its payload to the button text unless the
+    // sender overrides it.
+    const btnLabel = (extracted.textForClaude || '').toLowerCase();
+    const pref = (extracted.buttonPayload && PREF_MAP[extracted.buttonPayload])
+      || (extracted.buttonPayload && (/week/.test(btnLabel) ? PREF_MAP.PREF_WEEKLY
+        : /month/.test(btnLabel) ? PREF_MAP.PREF_MONTHLY
+        : /pause|less|fewer/.test(btnLabel) ? PREF_MAP.PREF_PAUSE : null));
+    if (pref) {
+      patch.contact_frequency = pref.freq;
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      if (WA_TOKEN && WA_PHONE_ID) {
+        await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, pref.ack);
+        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, pref.ack);
+      }
+      await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({
+          agent_id: agent.id, field: 'contact_frequency', new_value: pref.freq,
+          reason: 'Agent tapped a preference button', evidence: extracted.buttonPayload,
+          by_maya: false, created_at: new Date().toISOString(),
+        })
+      }).catch(e => console.warn('maya_updates preference log failed:', e.message));
+      return res.status(200).end();
+    }
+
     // PAUSED — Ikiel is handling this thread, Maya stays silent. Just log + mark unread.
     if (mode === 'paused') {
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
@@ -801,6 +835,16 @@ function extractInboundContent(msg) {
     out.reactionTarget = msg.reaction.message_id;
     out.reactionEmoji = msg.reaction.emoji || '';
     out.dbContent = `[Reacted ${msg.reaction.emoji || '(removed)'}]`;
+    return out;
+  }
+  // Quick-reply button tap (from a template) or interactive button reply. The
+  // payload drives one-tap preference changes; text is the visible label.
+  if (msg.button || msg.interactive?.button_reply) {
+    const payload = msg.button?.payload || msg.interactive?.button_reply?.id || '';
+    const label = msg.button?.text || msg.interactive?.button_reply?.title || payload;
+    out.buttonPayload = payload;
+    out.textForClaude = label;
+    out.dbContent = `[Tapped: ${label}]`;
     return out;
   }
   out.dbContent = `[Unknown message type: ${msg.type}]`;
