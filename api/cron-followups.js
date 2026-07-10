@@ -702,6 +702,19 @@ const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
 const ALERT_FREQUENCY_HOURS = 20;
+// Minimum genuine improvements for an event alert to interrupt agents; anything
+// below rolls into the Monday digest. Raising this is the single biggest lever
+// on volume + relevance.
+const HIGH_SIGNAL_MIN = 2;
+// Tier-based cadence for event alerts (the Monday digest still goes to everyone
+// except paused). Engaged agents get the full stream; disengaged ones only see
+// the weekly anchor, which is where most of the 12.6-msg/month cut comes from.
+const TIER_EVENT_ALERTS = {
+  champion: true, active: true, new: true,   // fully informed
+  warm: true,                                // throttled harder (see hours below)
+  dormant: false,                            // weekly digest only
+};
+const TIER_ALERT_HOURS = { warm: 72 };       // warm: at most ~1 alert / 3 days
 const LONG_WINDOW_MOVE_THRESHOLD_DAYS = 7;
 const MAX_ALERT_BULLETS = 5;
 const MAX_DIGEST_BULLETS = 8;
@@ -783,11 +796,15 @@ export async function runAvailabilityNotifications(ctx) {
     return summary;
   }
 
-  // Event-alert day with no changes → save snapshot, send nothing.
-  if (!isMonday && improvements.items.length === 0) {
+  // High-signal bar: an event alert must carry at least HIGH_SIGNAL_MIN genuine
+  // improvements. Sparse single-item days roll into the Monday digest instead of
+  // interrupting everyone — this both cuts noise and removes the old "• —" empty
+  // bullet padding (which only appeared when there were fewer items than slots).
+  if (!isMonday && improvements.items.length < HIGH_SIGNAL_MIN) {
     await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
     summary.ran = true;
     summary.skipped_no_changes = 1;
+    summary.below_signal_bar = improvements.items.length;
     return summary;
   }
 
@@ -854,10 +871,18 @@ export async function runAvailabilityNotifications(ctx) {
       if (daysSince < 27) { summary.skipped_freq_cap++; continue; }
     }
 
-    // Frequency cap (event alerts only — digest is once weekly so cap is moot)
+    // Tier-based cadence (event alerts only; the Monday digest still reaches
+    // every non-paused agent). Disengaged tiers are muted from the daily stream
+    // so we stop blasting the 95 dormant agents who never reply.
+    const tier = String(agent.engagement_tier || 'active').toLowerCase();
+    if (!isMonday && TIER_EVENT_ALERTS[tier] === false) { summary.skipped_tier_cap = (summary.skipped_tier_cap || 0) + 1; continue; }
+
+    // Frequency cap (event alerts only — digest is once weekly so cap is moot).
+    // Cap widens for less-engaged tiers so they get fewer interruptions.
     if (!isMonday && agent.last_availability_alert_at) {
+      const capHours = TIER_ALERT_HOURS[tier] || ALERT_FREQUENCY_HOURS;
       const hoursSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 3.6e6;
-      if (hoursSince < ALERT_FREQUENCY_HOURS) {
+      if (hoursSince < capHours) {
         summary.skipped_freq_cap++;
         continue;
       }
