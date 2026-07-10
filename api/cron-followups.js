@@ -17,6 +17,7 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
+import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -697,6 +698,7 @@ const ALERT_TEMPLATE_V2  = 'samba_availability_alert_v2';
 const DIGEST_TEMPLATE_V2 = 'samba_availability_digest_v2';
 const ALERT_TEMPLATE_V1  = 'samba_availability_alert';
 const DIGEST_TEMPLATE_V1 = 'samba_availability_digest';
+const CAROUSEL_DIGEST = 'samba_weekly_carousel_v1';   // visual Monday digest
 const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro'];
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
@@ -812,6 +814,19 @@ export async function runAvailabilityNotifications(ctx) {
   const eligible = agents.filter(a => isAvailabilityEligible(a, config));
   summary.recipients = eligible.length;
 
+  // ── Weekly visual carousel digest (opt-in until proven) ─────────
+  // On Mondays, if the carousel template is APPROVED, the feature flag is on,
+  // and there are enough available villas with cover images, send the swipeable
+  // carousel instead of the text digest. Any shortfall → text digest fallback,
+  // so this can never break the Monday send.
+  let carouselCards = null;
+  if (isMonday && config.carousel_enabled && templatesMap[CAROUSEL_DIGEST]) {
+    try {
+      carouselCards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT);
+    } catch (_) { carouselCards = null; }
+    summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text (not enough villas w/ images)';
+  }
+
   // ── Compose payload ─────────────────────────────────────────────
   // v1 = single body var (paragraph), v2 = one var per bullet slot (real list)
   const alertBody = composeAlertBody(improvements.items);
@@ -915,6 +930,13 @@ export async function runAvailabilityNotifications(ctx) {
     // rejections (parameter format, language mismatch, unapproved name, etc.)
     let metaErr = null;
     let waMessageId = null;
+    // Carousel digest (Mondays, when prepared) uses per-card components + its
+    // own template name; everything else sends the body-only text template.
+    const sendCarousel = isMonday && carouselCards;
+    const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
+    const sendComponents = sendCarousel
+      ? buildCarouselComponents(firstName, carouselCards)
+      : [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }];
     try {
       const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {
         method: 'POST',
@@ -922,8 +944,8 @@ export async function runAvailabilityNotifications(ctx) {
         body: JSON.stringify({
           messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
           template: {
-            name: tmpl.name, language: { code: tmpl.language || 'en' },
-            components: [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }],
+            name: sendName, language: { code: (sendCarousel ? 'en' : (tmpl.language || 'en')) },
+            components: sendComponents,
           },
         }),
       });
@@ -946,10 +968,15 @@ export async function runAvailabilityNotifications(ctx) {
     // Log the full rendered template body so the CRM inbox shows what the
     // agent actually received on WhatsApp. The wa_messages.content column
     // is plain text with no size limit, so no truncation needed.
-    let renderedPreview = tmpl.body || '';
-    params.forEach((p, i) => {
-      renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
-    });
+    let renderedPreview;
+    if (sendCarousel) {
+      renderedPreview = `[Weekly availability carousel] ${carouselCards.map(c => c.name).join(', ')}`;
+    } else {
+      renderedPreview = tmpl.body || '';
+      params.forEach((p, i) => {
+        renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
+      });
+    }
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
