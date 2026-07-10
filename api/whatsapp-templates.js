@@ -42,6 +42,28 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, name });
     }
 
+    if (req.method === 'POST' && req.body?.action === 'edit') {
+      // Edit an APPROVED template's body in place. Meta keeps serving the
+      // current version until the edit is re-approved, so this is safe to run
+      // live. Requires the template id — look it up by name.
+      const { name, body, example, language } = req.body;
+      if (!name || !body) return res.status(400).json({ error: 'name and body required' });
+      const lookup = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=id,name,language&name=${encodeURIComponent(name)}&limit=20`, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+      const found = (await lookup.json())?.data || [];
+      const target = found.find(t => !language || t.language === language) || found[0];
+      if (!target?.id) return res.status(404).json({ error: `template "${name}" not found` });
+      const bodyComponent = { type: 'BODY', text: body };
+      if (Array.isArray(example) && example.length) bodyComponent.example = { body_text: [example] };
+      const er = await fetch(`https://graph.facebook.com/v19.0/${target.id}`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ components: [bodyComponent] })
+      });
+      const edited = await er.json();
+      if (!er.ok) return res.status(er.status).json({ error: edited.error?.message || 'template edit failed', details: edited });
+      return res.status(200).json({ success: true, id: target.id, name });
+    }
+
     if (req.method === 'POST' && req.body?.action === 'create') {
       const { name, body, example, category, language, button } = req.body;
       if (!name || !body) return res.status(400).json({ error: 'name and body required' });
@@ -79,7 +101,7 @@ export default async function handler(req, res) {
     }
 
     const r = await fetch(
-      `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=name,status,category,language,components&limit=100`,
+      `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=name,status,category,language,components,quality_score&limit=100`,
       { headers: { 'Authorization': 'Bearer ' + TOKEN } }
     );
     const data = await r.json();
@@ -101,6 +123,9 @@ export default async function handler(req, res) {
         language: t.language,
         body: bodyText,
         placeholderCount,
+        // Meta's health signal for the template: GREEN (high) / YELLOW / RED,
+        // driven by agent blocks + reports. RED risks the template being paused.
+        quality: t.quality_score?.score || null,
         components: t.components
       };
     });

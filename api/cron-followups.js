@@ -931,6 +931,10 @@ export async function runAvailabilityNotifications(ctx) {
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
         source: 'cron', category,
+        // Store Meta's message id + a 'sent' baseline so the webhook status
+        // handler can match delivered/read events to these rows. Without
+        // wa_message_id, every cron send was invisible to delivery tracking.
+        wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
     await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
