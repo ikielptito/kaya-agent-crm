@@ -1,4 +1,5 @@
 import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import webpush from 'web-push';
 
 export default async function handler(req, res) {
@@ -483,6 +484,14 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         body: JSON.stringify({ key: 'push_subscriptions', value: next })
       });
       return res.status(200).json({ success: true, count: next.length });
+
+    } else if (action === 'assistant') {
+      // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
+      return await handleAssistant(req, res, { SUPABASE_URL, headers });
+
+    } else if (action === 'execute_broadcast') {
+      // User confirmed a pending assistant broadcast draft — deterministic send
+      return await handleExecuteBroadcast(req, res, { SUPABASE_URL, headers });
 
     } else if (action === 'remove_push_subscription') {
       const endpoint = payload?.endpoint;

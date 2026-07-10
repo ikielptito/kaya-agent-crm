@@ -433,6 +433,26 @@
   }
   .win-banner button { background: #fff; border: 1px solid #ffcd5a; color: #7a5b00; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
 
+  /* ── Maya Assistant (boss console) ────────────────────── */
+  .conv.assistant-row .avatar { background: linear-gradient(135deg, #6b4fb3, #9b6fd3); font-size: 21px; }
+  .pill-boss { background: #e8e2f5; color: #6b4fb3; }
+  .act-chip { display: inline-block; background: #efe9fa; color: #6b4fb3; font-size: 10.5px; font-weight: 600;
+    border-radius: 9px; padding: 3px 9px; margin: 0 4px 4px 0; }
+  .bcast-card { background: #fff; border: 1px solid var(--wa-rule); border-left: 3px solid #6b4fb3;
+    border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
+  .bcast-msg { background: var(--wa-out); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; margin: 6px 0; font-size: 13.5px; }
+  .bcast-meta { color: var(--wa-ink-2); font-size: 12px; margin-bottom: 6px; line-height: 1.4; }
+  .bcast-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .bcast-actions .go { flex: 1; background: #6b4fb3; color: #fff; border: none; border-radius: 8px;
+    padding: 11px; font-weight: 600; font-size: 14px; cursor: pointer; }
+  .bcast-actions .no { background: #fff; border: 1px solid var(--wa-rule); border-radius: 8px;
+    padding: 11px 14px; font-size: 14px; color: var(--wa-ink-2); cursor: pointer; }
+  .bcast-done { font-weight: 600; color: #1e6b46; }
+  .sugg-wrap { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .sugg { background: #fff; border: 1px solid var(--wa-rule); border-radius: 12px; padding: 10px 14px;
+    font-size: 13.5px; color: var(--wa-ink); text-align: left; cursor: pointer; }
+  .sugg:active { background: var(--wa-panel-2); }
+
   /* ── Responsive: single-pane on phones ────────────────── */
   @media (max-width: 759px) {
     .pane-list { max-width: none; }
@@ -501,7 +521,7 @@
         </div>
         <button class="refresh-btn" id="archBtn" onclick="toggleArchive()" title="Archive chat">🗄</button>
         <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English">🌐</button>
-        <button class="refresh-btn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
+        <button class="refresh-btn" id="threadSearchBtn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
       </div>
       <div class="chat-mode-bar" id="chatModeBar">
         <span class="chat-mode-label">Maya here</span>
@@ -586,7 +606,13 @@ const state = {
   mayaPending: {},     // agent_id -> deadline ts while a Maya auto-reply is expected
   archived: new Set(JSON.parse(localStorage.getItem('maya_archived') || '[]')),
   showArchived: false,
+  assist: { history: [], busy: false },   // Maya Assistant (boss console) thread
 };
+try { state.assist.history = JSON.parse(localStorage.getItem('maya_assistant_history') || '[]'); } catch (_) {}
+
+// The pinned boss-console pseudo-conversation. Not an agent — most
+// agent-thread code must ignore it (guards check activeId === ASSIST_ID).
+const ASSIST_ID = 'assistant';
 
 // ── Archiving (device-local — this is a single-operator inbox) ────────
 function saveArchived() {
@@ -955,15 +981,18 @@ function renderList() {
     return `${a.name || ''} ${a.agency || ''} ${a.wa_num || ''} ${m?.lastContent || ''}`.toLowerCase().includes(q);
   }) : convs;
 
+  // The assistant console is pinned above the agent inbox (searchable by name).
+  const assistRow = (!q || 'maya assistant boss console'.includes(q)) ? assistantRow() : '';
+
   if (list.length === 0) {
-    el.innerHTML = `<div class="empty">${q ? 'No conversations match “' + esc(q) + '”' : 'No conversations yet.<br>Inbound agent messages will appear here.'}</div>`;
+    el.innerHTML = assistRow + `<div class="empty">${q ? 'No conversations match “' + esc(q) + '”' : 'No conversations yet.<br>Inbound agent messages will appear here.'}</div>`;
     return;
   }
 
   // Archived chats collapse under a toggle at the bottom (search bypasses it).
   const inbox = q ? list : list.filter(a => !state.archived.has(a.id));
   const archd = q ? [] : list.filter(a => state.archived.has(a.id));
-  let html = inbox.map(convRow).join('');
+  let html = assistRow + inbox.map(convRow).join('');
   if (archd.length) {
     html += `<div class="arch-toggle" onclick="state.showArchived=!state.showArchived;renderList()">Archived (${archd.length}) ${state.showArchived ? '▴' : '▾'}</div>`;
     if (state.showArchived) html += archd.map(convRow).join('');
@@ -1012,6 +1041,7 @@ function openConv(id) {
   document.getElementById('app').classList.add('show-thread');
   document.getElementById('threadEmpty').style.display = 'none';
   document.getElementById('threadView').style.display = 'flex';
+  setAssistantChrome(false);
 
   const a = state.agents.find(x => x.id === id);
   if (!a) return;
@@ -1072,7 +1102,7 @@ function renderBanner(a) {
 
 async function refreshThread(scroll) {
   const id = state.activeId;
-  if (!id) return;
+  if (!id || id === ASSIST_ID) return;   // assistant thread renders locally
   let msgs;
   try {
     msgs = await api('get_messages', { agentId: id });
@@ -1677,6 +1707,7 @@ async function suggest() {
 // ── Send ──────────────────────────────────────────────────────────────
 async function send() {
   const id = state.activeId; if (!id) return;
+  if (id === ASSIST_ID) return sendAssistant();
   const a = state.agents.find(x => x.id === id); if (!a) return;
   const box = document.getElementById('replyBox');
   const msg = box.value.trim();
@@ -1738,6 +1769,215 @@ document.getElementById('replyBox').addEventListener('keydown', e => {
   const touch = window.matchMedia('(pointer: coarse)').matches;
   if (e.key === 'Enter' && !e.shiftKey && !touch) { e.preventDefault(); send(); }
 });
+
+// ════════════════════════════════════════════════════════════════════
+// Maya Assistant — the pinned boss console. You chat with Maya herself;
+// she answers CRM questions and runs actions via /api/supabase action
+// 'assistant' (tool loop in lib/assistant.js). Broadcasts come back as
+// pending drafts and only go out when you tap the confirm card.
+// ════════════════════════════════════════════════════════════════════
+
+const ASSIST_SUGGESTIONS = [
+  'Which agents are the most active and responsive lately?',
+  'Which agents have not heard about Villa Saturno yet?',
+  'Draft a broadcast telling agents about a price drop on one of the villas',
+  'Who in the inbox needs my attention right now?',
+];
+
+function saveAssistHistory() {
+  try {
+    if (state.assist.history.length > 60) state.assist.history = state.assist.history.slice(-60);
+    localStorage.setItem('maya_assistant_history', JSON.stringify(state.assist.history));
+  } catch (_) {}
+}
+
+function stripMd(s) { return (s || '').replace(/\*\*/g, ''); }
+function mdLite(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>'); }
+
+function assistantRow() {
+  const h = state.assist.history;
+  const last = h[h.length - 1];
+  const snip = state.assist.busy ? 'Maya is working…'
+    : last ? (last.role === 'user' ? 'You: ' : '') + stripMd(last.content).slice(0, 60)
+    : 'Ask me anything, or tell me to message the agents';
+  const time = last?.ts ? timeAgo(new Date(last.ts)) : '';
+  return `<div class="conv assistant-row ${state.activeId === ASSIST_ID ? 'active' : ''}" onclick="openAssistant()">
+    <div class="avatar">✦</div>
+    <div class="conv-mid">
+      <div class="conv-name">Maya — Assistant</div>
+      <div class="conv-snip">${esc(snip)}</div>
+    </div>
+    <div class="conv-right">
+      <span class="conv-time">${time}</span>
+      <div class="conv-badges"><span class="pill pill-boss">Boss</span></div>
+    </div>
+  </div>`;
+}
+
+// Hide agent-only chrome (mode picker, archive/translate/search) while the
+// assistant thread is open; openConv() restores it.
+function setAssistantChrome(on) {
+  ['chatModeBar', 'chatModeHint', 'archBtn', 'translateBtn', 'threadSearchBtn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = on ? 'none' : '';
+  });
+  document.getElementById('thAvatar').style.background = on ? 'linear-gradient(135deg,#6b4fb3,#9b6fd3)' : '';
+}
+
+function openAssistant() {
+  state.activeId = ASSIST_ID;
+  document.getElementById('app').classList.add('show-thread');
+  document.getElementById('threadEmpty').style.display = 'none';
+  document.getElementById('threadView').style.display = 'flex';
+  state.replyTarget = null; renderReplyChip();
+  document.getElementById('threadSearch').style.display = 'none';
+  document.getElementById('emojiPop').style.display = 'none';
+  document.getElementById('qrPop').style.display = 'none';
+  setAssistantChrome(true);
+  document.getElementById('thAvatar').textContent = '✦';
+  document.getElementById('thName').textContent = 'Maya — Assistant';
+  document.getElementById('thSub').textContent = 'Private console — agents never see this';
+  document.getElementById('threadBanner').innerHTML = '';
+  document.getElementById('replyBox').value = localStorage.getItem('maya_draft_' + ASSIST_ID) || '';
+  autoGrow(document.getElementById('replyBox'));
+  renderAssistantThread(true);
+  renderList();
+}
+
+function renderAssistantThread(scroll) {
+  if (state.activeId !== ASSIST_ID) return;
+  const body = document.getElementById('threadBody');
+  const h = state.assist.history;
+  const rows = [];
+  if (!h.length) {
+    rows.push(`<div class="bubble in">Hi Ikiel -- this is our private line. Ask me about the agents, or tell me what to do in the CRM and I'll handle it. Broadcasts always wait for your confirmation before anything goes out.
+      <div class="sugg-wrap">${ASSIST_SUGGESTIONS.map((s, i) => `<button class="sugg" onclick="useSuggestion(${i})">${esc(s)}</button>`).join('')}</div></div>`);
+  }
+  let lastDay = '';
+  h.forEach((m, i) => {
+    const d = new Date(m.ts || Date.now());
+    const day = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (day !== lastDay) { rows.push(`<div class="day-sep">${daySep(d)}</div>`); lastDay = day; }
+    const t = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    if (m.role === 'user') {
+      rows.push(`<div class="bubble out">${mdLite(m.content)}<span class="bubble-time">${t}</span></div>`);
+    } else {
+      const act = (m.activity || []).map(a => `<span class="act-chip">${esc(a)}</span>`).join('');
+      rows.push(`<div class="bubble in">${act ? `<div style="margin-bottom:5px">${act}</div>` : ''}${mdLite(m.content)}${renderBroadcastCard(m, i)}<span class="bubble-time">${t}</span></div>`);
+    }
+  });
+  if (state.assist.busy) {
+    rows.push('<div class="bubble in typing"><span class="tdots"><i></i><i></i><i></i></span>Maya is working…</div>');
+  }
+  body.innerHTML = rows.join('');
+  if (scroll) { body.scrollTop = body.scrollHeight; state.atBottom = true; }
+  updateScrollFab();
+}
+
+function useSuggestion(i) {
+  const box = document.getElementById('replyBox');
+  box.value = ASSIST_SUGGESTIONS[i] || '';
+  onReplyInput(); box.focus();
+}
+
+function renderBroadcastCard(m, i) {
+  const b = m.broadcast;
+  if (!b) return '';
+  if (b.status === 'sent') {
+    return `<div class="bcast-card"><span class="bcast-done">✓ Broadcast sent to ${b.sent_count || 0} agent(s)</span>${b.skipped_count ? `<div class="bcast-meta">${b.skipped_count} skipped (outside the 24h window)</div>` : ''}</div>`;
+  }
+  if (b.status === 'cancelled') {
+    return `<div class="bcast-card" style="opacity:.6">✕ Broadcast cancelled — nothing was sent.</div>`;
+  }
+  const inW = (b.recipients || []).filter(r => r.in_window);
+  const outW = (b.recipients || []).filter(r => !r.in_window);
+  return `<div class="bcast-card">
+    <b>📣 ${esc(b.label || 'Broadcast')} — awaiting your confirmation</b>
+    <div class="bcast-msg">${esc(b.message)}</div>
+    <div class="bcast-meta">To: ${esc(inW.slice(0, 10).map(r => r.name).join(', '))}${inW.length > 10 ? ` +${inW.length - 10} more` : ''}</div>
+    ${outW.length ? `<div class="bcast-meta">⏱ ${outW.length} outside the 24h window will be skipped: ${esc(outW.slice(0, 6).map(r => r.name).join(', '))}${outW.length > 6 ? '…' : ''}</div>` : ''}
+    ${(b.excluded || []).length ? `<div class="bcast-meta">Excluded: ${esc(b.excluded.slice(0, 5).map(x => `${x.name} (${x.reason})`).join(', '))}</div>` : ''}
+    <div class="bcast-actions">
+      <button class="go" onclick="confirmBroadcast(${i})">Send to ${inW.length} agent${inW.length === 1 ? '' : 's'}</button>
+      <button class="no" onclick="cancelBroadcast(${i})">Cancel</button>
+    </div>
+  </div>`;
+}
+
+async function sendAssistant() {
+  if (state.assist.busy) return;
+  const box = document.getElementById('replyBox');
+  const msg = box.value.trim();
+  if (!msg) return;
+  box.value = ''; autoGrow(box);
+  localStorage.removeItem('maya_draft_' + ASSIST_ID);
+  state.assist.history.push({ role: 'user', content: msg, ts: new Date().toISOString() });
+  saveAssistHistory();
+  state.assist.busy = true;
+  renderAssistantThread(true); renderList();
+  try {
+    const apiMsgs = state.assist.history.slice(-24).map(m => ({ role: m.role, content: stripCardText(m) }));
+    const data = await api('assistant', { messages: apiMsgs });
+    if (!data || data.error) throw new Error(data?.error || 'no response');
+    state.assist.history.push({
+      role: 'assistant', content: data.reply || '(no reply)', ts: new Date().toISOString(),
+      activity: data.activity || [],
+      broadcast: data.pending_broadcast ? { ...data.pending_broadcast, status: 'pending' } : null,
+    });
+  } catch (e) {
+    state.assist.history.push({ role: 'assistant', content: 'Something went wrong: ' + e.message + ' -- try again.', ts: new Date().toISOString() });
+  }
+  state.assist.busy = false;
+  saveAssistHistory();
+  renderAssistantThread(true); renderList();
+}
+
+// What we replay to the API as history — append broadcast outcome so Maya
+// knows in later turns whether a draft was actually sent or cancelled.
+function stripCardText(m) {
+  let c = m.content || '';
+  if (m.broadcast) {
+    const st = m.broadcast.status;
+    c += st === 'sent' ? `\n[broadcast "${m.broadcast.label}" was confirmed and sent to ${m.broadcast.sent_count || 0} agents]`
+      : st === 'cancelled' ? `\n[broadcast "${m.broadcast.label}" was cancelled by the user — nothing sent]`
+      : `\n[broadcast "${m.broadcast.label}" is still pending user confirmation]`;
+  }
+  return c;
+}
+
+async function confirmBroadcast(i) {
+  const m = state.assist.history[i];
+  const b = m && m.broadcast;
+  if (!b || b.status !== 'pending') return;
+  const n = (b.recipients || []).filter(r => r.in_window).length;
+  if (!confirm(`Send this message to ${n} agent${n === 1 ? '' : 's'} on WhatsApp now?`)) return;
+  toast('Sending broadcast…');
+  try {
+    const data = await api('execute_broadcast', { draftId: b.draft_id });
+    if (!data || data.error) throw new Error(data?.error || 'failed');
+    b.status = 'sent'; b.sent_count = data.sent; b.skipped_count = data.skipped;
+    let summary = `Broadcast "${b.label}" delivered to ${data.sent} agent(s).`;
+    if (data.skipped) summary += ` ${data.skipped} skipped (outside the 24h window).`;
+    if (data.failed) summary += ` ${data.failed} failed.`;
+    state.assist.history.push({ role: 'assistant', content: summary, ts: new Date().toISOString() });
+    saveAssistHistory();
+    renderAssistantThread(true);
+    toast('Broadcast sent ✓');
+  } catch (e) {
+    toast('Broadcast failed: ' + e.message);
+  }
+}
+
+function cancelBroadcast(i) {
+  const m = state.assist.history[i];
+  if (!m || !m.broadcast || m.broadcast.status !== 'pending') return;
+  m.broadcast.status = 'cancelled';
+  saveAssistHistory();
+  renderAssistantThread();
+  // Clear the server-side pending draft so a stale confirm can't fire later.
+  api('set_settings', { key: 'assistant_pending_broadcast', value: null }).catch(() => {});
+  toast('Cancelled — nothing sent');
+}
 
 // ── Boot ──────────────────────────────────────────────────────────────
 unlock();
