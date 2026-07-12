@@ -503,6 +503,63 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
       });
       return res.status(200).json({ success: true, count: next.length });
 
+    } else if (action === 'analytics') {
+      // Powers the console's Analytics view: the agent-level funnel
+      // (enrolled → messaged → read → replied → clicked → enquired), per-format
+      // read rates, tier split, channels, opt-out, and a hot/cold agent list.
+      const days = Math.min(Math.max(payload?.days || 30, 1), 90);
+      const since = new Date(Date.now() - days * 86400000).toISOString();
+      const [outRows, inRows, agRows, statsRow] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.outbound&select=agent_id,status,category,template_name&limit=20000`, { headers }).then(r => r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.inbound&select=agent_id,timestamp&limit=20000`, { headers }).then(r => r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,engagement_tier,samba_alerts_opt_out,contact_frequency,last_inbound_at,is_test,campaign_engagement`, { headers }).then(r => r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.agent_portal_stats&select=value`, { headers }).then(r => r.json()),
+      ]);
+      const out = Array.isArray(outRows) ? outRows : [];
+      const inb = Array.isArray(inRows) ? inRows : [];
+      const ags = Array.isArray(agRows) ? agRows : [];
+      const portal = statsRow?.[0]?.value || { agents: {}, channels: {} };
+      const pStats = portal.agents || {};
+
+      const enrolled = ags.filter(a => !a.is_test && a.campaign_engagement && a.campaign_engagement.samba);
+      const enrolledIds = new Set(enrolled.map(a => a.id));
+      const nameOf = {}; ags.forEach(a => { nameOf[a.id] = a.name || a.agency || `#${a.id}`; });
+
+      // Agent-level funnel (restricted to enrolled agents)
+      const messaged = new Set(), readSet = new Set(), replied = new Set();
+      out.forEach(m => { if (enrolledIds.has(m.agent_id)) { messaged.add(m.agent_id); if (m.status === 'read') readSet.add(m.agent_id); } });
+      inb.forEach(m => { if (enrolledIds.has(m.agent_id)) replied.add(m.agent_id); });
+      const clicked = Object.entries(pStats).filter(([id, v]) => v.clicks > 0 && enrolledIds.has(Number(id))).map(([id]) => Number(id));
+      const enquired = Object.entries(pStats).filter(([id, v]) => v.enquiries > 0 && enrolledIds.has(Number(id))).map(([id]) => Number(id));
+
+      // Per-format read rate
+      const fmt = {};
+      out.forEach(m => { const k = m.template_name || m.category || 'free-text'; const f = fmt[k] || (fmt[k] = { sent: 0, tracked: 0, read: 0 }); f.sent++; if (m.status) { f.tracked++; if (m.status === 'read') f.read++; } });
+      const by_format = Object.entries(fmt).sort((a, b) => b[1].sent - a[1].sent)
+        .map(([k, v]) => ({ format: k, sent: v.sent, tracked: v.tracked, read_rate: v.tracked ? Math.round(v.read / v.tracked * 100) : null }));
+
+      const tiers = {}; let optedOut = 0;
+      enrolled.forEach(a => { const t = a.engagement_tier || 'unset'; tiers[t] = (tiers[t] || 0) + 1; if (a.samba_alerts_opt_out) optedOut++; });
+
+      // Hot/cold: enrolled agents ranked by engagement (reply recency + clicks)
+      const agentRows = enrolled.map(a => {
+        const p = pStats[a.id] || {};
+        const daysSinceReply = a.last_inbound_at ? Math.floor((Date.now() - new Date(a.last_inbound_at).getTime()) / 86400000) : null;
+        return { id: a.id, name: nameOf[a.id], tier: a.engagement_tier || 'unset', last_reply_days: daysSinceReply, clicks: p.clicks || 0, enquiries: p.enquiries || 0, read: readSet.has(a.id) };
+      }).sort((x, y) => (y.clicks + y.enquiries * 3) - (x.clicks + x.enquiries * 3) || ((x.last_reply_days ?? 999) - (y.last_reply_days ?? 999)));
+
+      return res.status(200).json({
+        window_days: days,
+        funnel: { enrolled: enrolled.length, messaged: messaged.size, read: readSet.size, replied: replied.size, clicked: clicked.length, enquired: enquired.length },
+        by_format,
+        tiers,
+        opt_out: { count: optedOut, rate: enrolled.length ? +(optedOut / enrolled.length * 100).toFixed(1) : 0 },
+        channels: portal.channels || {},
+        portal_updated_at: portal.updated_at || null,
+        top_agents: agentRows.slice(0, 25),
+        outbound_total: out.length,
+      });
+
     } else if (action === 'assistant') {
       // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
       return await handleAssistant(req, res, { SUPABASE_URL, headers });
