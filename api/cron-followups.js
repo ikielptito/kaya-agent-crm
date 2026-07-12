@@ -84,6 +84,17 @@ export default async function handler(req, res) {
     'Prefer': 'return=minimal'
   };
 
+  // ?sync=analytics runs only the portal analytics pull (per-agent funnel +
+  // channels into settings.agent_portal_stats) and returns — no sends.
+  if (req.query?.sync === 'analytics') {
+    try {
+      const out = await pullAgentAnalytics({ SUPABASE_URL, headers: sbHeaders });
+      return res.status(200).json({ portal_analytics: out });
+    } catch (e) {
+      return res.status(500).json({ error: 'analytics pull failed: ' + e.message });
+    }
+  }
+
   // ── Daily-report standalone hooks ────────────────────────────────────
   // ?report=preview composes Maya's briefing and returns it WITHOUT sending.
   // ?report=send composes AND delivers it, then returns — both before any
