@@ -836,7 +836,7 @@ export async function runAvailabilityNotifications(ctx) {
     try {
       carouselCards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT);
     } catch (_) { carouselCards = null; }
-    summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text (not enough villas w/ images)';
+    summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text (portal unreachable)';
   }
 
   // ── Compose payload ─────────────────────────────────────────────
