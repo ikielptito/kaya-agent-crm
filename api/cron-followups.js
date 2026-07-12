@@ -84,19 +84,19 @@ export default async function handler(req, res) {
     'Prefer': 'return=minimal'
   };
 
-  // ── Daily-report dry run ─────────────────────────────────────────────
-  // ?report=preview composes Maya's morning briefing and returns it WITHOUT
-  // sending anything — placed before all send logic so it has zero side
-  // effects (no availability alerts, no follow-ups).
-  if (req.query?.report === 'preview') {
+  // ── Daily-report standalone hooks ────────────────────────────────────
+  // ?report=preview composes Maya's briefing and returns it WITHOUT sending.
+  // ?report=send composes AND delivers it, then returns — both before any
+  // other send logic, so neither triggers availability alerts / follow-ups.
+  if (req.query?.report === 'preview' || req.query?.report === 'send') {
     try {
       const rep = await buildAndSendOwnerReport({
         SUPABASE_URL, headers: sbHeaders, TOKEN: WA_TOKEN, PHONE_ID: WA_PHONE_ID,
         ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY, OWNER_WA_NUM: process.env.OWNER_WA_NUM,
-      }, { preview: true });
+      }, { preview: req.query.report === 'preview' });
       return res.status(200).json({ owner_report: rep });
     } catch (e) {
-      return res.status(500).json({ error: 'report preview failed: ' + e.message });
+      return res.status(500).json({ error: 'report failed: ' + e.message });
     }
   }
 
