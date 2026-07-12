@@ -128,6 +128,7 @@ alter table wa_messages add column if not exists reaction text;
 
 -- ── DELIVERY STATUS + REPLY CONTEXT (added 2026-06-17) ──────────────
 alter table wa_messages add column if not exists status text;
+alter table wa_messages add column if not exists template_name text;  -- which template a send used (per-format read-rate analytics)
   -- outbound only: 'sent' | 'delivered' | 'read' | 'failed', advanced by the
   -- webhook's statuses handler. Drives ✓ / ✓✓ / blue ticks in the chat inbox.
 alter table wa_messages add column if not exists reply_to text;

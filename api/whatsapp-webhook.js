@@ -480,8 +480,8 @@ export default async function handler(req, res) {
           } catch (e) { /* stay conservative: no auto-welcome */ }
           if ((welcomeMode === 'autopilot' || welcomeMode === 'hybrid') && isWithinOperationalHours()) {
             const welcome = "Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty. I can send project info and brochures, check live villa availability for your clients, and walk you through commissions — 5% on KAYA sales, 10% on Samba monthly rentals (already built into the portal price you quote). Ikiel sees every message and jumps in personally when needed. What can I help you with?";
-            await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
-            await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome);
+            const welcomeMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
+            await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome, welcomeMid);
           }
         }
       } catch (e) { console.warn('new-agent welcome failed:', e.message); }
@@ -544,8 +544,8 @@ export default async function handler(req, res) {
 
       const confirmText = 'Noted — you\'ve been removed from availability updates. If you ever want to re-subscribe, just let me know.';
       if (WA_TOKEN && WA_PHONE_ID) {
-        await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
-        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText);
+        const confirmMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
+        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText, confirmMid);
       }
 
       // Audit trail in maya_updates
@@ -585,8 +585,8 @@ export default async function handler(req, res) {
       patch.contact_frequency = pref.freq;
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       if (WA_TOKEN && WA_PHONE_ID) {
-        await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, pref.ack);
-        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, pref.ack);
+        const prefMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, pref.ack);
+        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, pref.ack, prefMid);
       }
       await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
         method: 'POST', headers: sbHeaders,
@@ -708,8 +708,8 @@ export default async function handler(req, res) {
     }
 
     if (aiResult.reply && WA_TOKEN && WA_PHONE_ID) {
-      await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
-      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply);
+      const replyMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
+      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply, replyMid);
       // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
       forwardMayaReply(agent, aiResult.reply).catch(() => {});
 
@@ -1017,13 +1017,15 @@ async function patchAgent(url, headers, id, fields) {
   }).catch(e => console.warn('patchAgent failed:', e.message));
 }
 
-async function logOutbound(url, headers, agentId, waNum, content) {
+async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null) {
   const ts = new Date().toISOString();
   await fetch(`${url}/rest/v1/wa_messages`, {
     method: 'POST', headers,
     body: JSON.stringify({
       agent_id: agentId, wa_num: waNum, direction: 'outbound',
-      content, timestamp: ts, source: 'api'
+      content, timestamp: ts, source: 'api',
+      // Baseline status + the id so delivered/read events can be matched.
+      status: 'sent', wa_message_id: waMessageId
     })
   }).catch(e => console.warn('logOutbound failed:', e.message));
 
@@ -1064,12 +1066,19 @@ async function fetchWaMediaBase64(mediaId, token) {
   return { mime, data: buf.toString('base64') };
 }
 
+// Sends a free-text WhatsApp message and returns Meta's wa_message_id (or null)
+// so the caller can log it — without the id, delivery/read status can never be
+// matched back to the row by the statuses webhook handler.
 async function sendText(phoneId, token, to, text) {
-  return fetch(`${GRAPH}/${phoneId}/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } })
-  });
+  try {
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } })
+    });
+    const d = await r.json().catch(() => ({}));
+    return d?.messages?.[0]?.id || null;
+  } catch (e) { console.warn('sendText failed:', e.message); return null; }
 }
 
 // Mark an inbound message as read AND show a typing indicator. The typing

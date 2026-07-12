@@ -153,7 +153,8 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         source: source === 'manual' ? 'manual' : 'api',
         campaign_id: campaignId || null,
         reply_to: replyTo || null,
-        status: 'sent'
+        status: 'sent',
+        template_name: type === 'template' ? (templateName || null) : null
       })
     }).catch(e => console.warn('Failed to log outbound message:', e.message));
   }

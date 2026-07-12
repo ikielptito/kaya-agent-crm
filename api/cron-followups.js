@@ -994,7 +994,7 @@ export async function runAvailabilityNotifications(ctx) {
       body: JSON.stringify({
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
-        source: 'cron', category,
+        source: 'cron', category, template_name: sendName,
         // Store Meta's message id + a 'sent' baseline so the webhook status
         // handler can match delivered/read events to these rows. Without
         // wa_message_id, every cron send was invisible to delivery tracking.
