@@ -19,6 +19,7 @@ import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
 import { reconcileAllRentals } from '../lib/rental-sync.js';
+import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -82,6 +83,22 @@ export default async function handler(req, res) {
     'Content-Type': 'application/json',
     'Prefer': 'return=minimal'
   };
+
+  // ── Daily-report dry run ─────────────────────────────────────────────
+  // ?report=preview composes Maya's morning briefing and returns it WITHOUT
+  // sending anything — placed before all send logic so it has zero side
+  // effects (no availability alerts, no follow-ups).
+  if (req.query?.report === 'preview') {
+    try {
+      const rep = await buildAndSendOwnerReport({
+        SUPABASE_URL, headers: sbHeaders, TOKEN: WA_TOKEN, PHONE_ID: WA_PHONE_ID,
+        ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY, OWNER_WA_NUM: process.env.OWNER_WA_NUM,
+      }, { preview: true });
+      return res.status(200).json({ owner_report: rep });
+    } catch (e) {
+      return res.status(500).json({ error: 'report preview failed: ' + e.message });
+    }
+  }
 
   try {
     // Global automation switch — when it's "off", suspend Maya's reactive
@@ -449,6 +466,22 @@ export default async function handler(req, res) {
       await persistTodaySpend(SUPABASE_URL, sbHeaders, todaySpend);
     }
 
+    // ── DAILY MORNING REPORT to Ikiel (WhatsApp) ─────────────────────
+    // Maya writes a short briefing of the last 24h and sends it via the owner
+    // template. Best-effort — never blocks the cron response. (The dry-run
+    // path returns much earlier, before any sends.)
+    let ownerReport = null;
+    if (!previewMode) {
+      try {
+        ownerReport = await buildAndSendOwnerReport({
+          SUPABASE_URL, headers: sbHeaders,
+          TOKEN: WA_TOKEN, PHONE_ID: WA_PHONE_ID,
+          ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY,
+          OWNER_WA_NUM: process.env.OWNER_WA_NUM,
+        });
+      } catch (e) { ownerReport = { error: e.message }; }
+    }
+
     return res.status(200).json({
       ran_at: now.toISOString(),
       total_agents: agents.length,
@@ -460,6 +493,7 @@ export default async function handler(req, res) {
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       rentals_reconcile: rentalsReconcile,
+      owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
       results
     });
 
