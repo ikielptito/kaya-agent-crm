@@ -143,6 +143,12 @@ alter table agents add column if not exists contact_frequency text;
   -- Set by Maya when an agent asks for fewer messages without unsubscribing;
   -- respected by cron-followups' availability send loop. (Added 2026-07-06)
 
+-- ── PORTAL SYNC BADGE (added 2026-07-10) ────────────────────────────
+-- Manual marketing badge set in the portal admin console ("Price drop",
+-- "New", …). Synced from sambarentals.com via the listing-sync webhook;
+-- shown on portal cards and used by Maya's outbound messages.
+alter table rentals add column if not exists badge text;
+
 -- ── RENTALS TABLE (Samba Realty portfolio — separate from KAYA sales) ─
 
 create table if not exists rentals (

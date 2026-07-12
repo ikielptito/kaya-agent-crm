@@ -173,6 +173,9 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     const rate = p.monthly_rate_idr
       ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` + (p.yearly_rate_idr ? ` (or IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year)` : '')
       : 'rate TBC — say "let me check with Ikiel"';
+    // Manual marketing badge from the portal admin ("Price drop", "New") —
+    // a live selling point Maya should mention when pitching this villa.
+    const badge = p.badge ? ` [${String(p.badge).toUpperCase()}]` : '';
 
     const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
     const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
@@ -182,7 +185,7 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     const portalLink = p.portal_url ? `portal: ${p.portal_url}` : null;
     const links = [photoLink, mapsLink, portalLink].filter(Boolean).join(' · ');
     const lines = [
-      `${i + 1}. ${p.name.toUpperCase()}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
+      `${i + 1}. ${p.name.toUpperCase()}${badge}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
       p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
       `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
       occ || actualRev ? `   Performance: ${[occ, actualRev].filter(Boolean).join(', ')}` : null,

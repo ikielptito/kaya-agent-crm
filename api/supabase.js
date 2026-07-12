@@ -1,5 +1,6 @@
 import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
+import { syncRental } from '../lib/rental-sync.js';
 import webpush from 'web-push';
 
 export default async function handler(req, res) {
@@ -24,6 +25,23 @@ export default async function handler(req, res) {
   };
 
   const { action, payload } = req.body || {};
+
+  // ── Portal → CRM listing sync (event-driven) ─────────────────────────
+  // sambarentals.com fires this on every admin listing save (notifyCrmSync in
+  // the portal's api/listings.js): { slug, action: 'upsert'|'delete' } with a
+  // shared bearer secret. Handled before the action router because the payload
+  // shape is the portal's, not ours. Keeps rentals prices/badges in lockstep
+  // with what agents actually see — no drift window.
+  const syncSecret = process.env.LISTING_SYNC_SECRET;
+  if (syncSecret && req.headers.authorization === `Bearer ${syncSecret}`
+      && req.body?.slug && (action === 'upsert' || action === 'delete')) {
+    try {
+      const out = await syncRental({ SUPABASE_URL, headers }, req.body.slug, action);
+      return res.status(out.error ? 500 : 200).json(out);
+    } catch (e) {
+      return res.status(500).json({ error: 'rental sync failed: ' + e.message });
+    }
+  }
 
   try {
     let r;

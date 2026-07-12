@@ -18,6 +18,7 @@ import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
+import { reconcileAllRentals } from '../lib/rental-sync.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -402,6 +403,16 @@ export default async function handler(req, res) {
       previewMode,
     });
 
+    // ── RENTALS RECONCILE (daily safety net) ─────────────────────────
+    // The portal pushes every listing edit to us in real time (listing-sync
+    // webhook into api/supabase.js); this daily pass re-syncs everything in
+    // case a webhook was ever missed, so prices/badges can't silently drift.
+    let rentalsReconcile = null;
+    if (!previewMode) {
+      try { rentalsReconcile = await reconcileAllRentals({ SUPABASE_URL, headers: sbHeaders }); }
+      catch (e) { rentalsReconcile = { error: e.message }; }
+    }
+
     // ── ESCALATION SLA ───────────────────────────────────────────────
     // Conversations Ikiel took over (paused) where the agent's last message
     // is still unread hours later get a daily Telegram reminder digest, so
@@ -448,6 +459,7 @@ export default async function handler(req, res) {
       sla_reminded: slaReminded,
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
+      rentals_reconcile: rentalsReconcile,
       results
     });
 
