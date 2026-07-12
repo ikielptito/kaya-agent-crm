@@ -487,6 +487,38 @@ export default async function handler(req, res) {
       await persistTodaySpend(SUPABASE_URL, sbHeaders, todaySpend);
     }
 
+    // ── AUTO-RESUME STALE PAUSES ─────────────────────────────────────
+    // A manual reply pauses Maya on a thread with no auto-resume, so paused
+    // threads pile up (99 had accumulated by 12 Jul). Un-pause any thread with
+    // NO message in either direction for AUTO_RESUME_DAYS — active manual
+    // conversations (recent messages) stay paused; cold ones return to Maya.
+    let autoResumed = 0;
+    if (!previewMode) {
+      try {
+        const pausedRows = await (await fetch(`${SUPABASE_URL}/rest/v1/agents?automation_override=eq.paused&select=id,is_test`, { headers: sbHeaders })).json();
+        const ids = (Array.isArray(pausedRows) ? pausedRows : []).filter(a => !a.is_test).map(a => a.id);
+        if (ids.length) {
+          const cutoff = new Date(now.getTime() - AUTO_RESUME_DAYS * 86400000).toISOString();
+          const recentRows = await (await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=in.(${ids.join(',')})&timestamp=gte.${cutoff}&select=agent_id`, { headers: sbHeaders })).json();
+          const active = new Set((Array.isArray(recentRows) ? recentRows : []).map(m => m.agent_id));
+          const toResume = ids.filter(id => !active.has(id));
+          if (toResume.length) {
+            await fetch(`${SUPABASE_URL}/rest/v1/agents?id=in.(${toResume.join(',')})`, {
+              method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ automation_override: null })
+            });
+            await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify(toResume.map(id => ({
+                agent_id: id, field: 'automation_override', new_value: 'null (auto-resumed)',
+                reason: `No message either direction for ${AUTO_RESUME_DAYS}d — auto-resumed stale pause`, by_maya: true
+              })))
+            }).catch(() => {});
+            autoResumed = toResume.length;
+          }
+        }
+      } catch (e) { console.warn('auto-resume failed:', e.message); }
+    }
+
     // ── DAILY MORNING REPORT to Ikiel (WhatsApp) ─────────────────────
     // Maya writes a short briefing of the last 24h and sends it via the owner
     // template. Best-effort — never blocks the cron response. (The dry-run
@@ -515,6 +547,7 @@ export default async function handler(req, res) {
       availability: availabilityResult,
       rentals_reconcile: rentalsReconcile,
       portal_analytics: portalAnalytics,
+      auto_resumed_pauses: autoResumed,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
       results
     });
@@ -772,6 +805,9 @@ const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
 const ALERT_FREQUENCY_HOURS = 20;
+// A paused thread (manual takeover) with no message either direction for this
+// many days is considered cold and auto-resumed so Maya reclaims coverage.
+const AUTO_RESUME_DAYS = 7;
 // Minimum genuine improvements for an event alert to interrupt agents; anything
 // below rolls into the Monday digest. Raising this is the single biggest lever
 // on volume + relevance.
