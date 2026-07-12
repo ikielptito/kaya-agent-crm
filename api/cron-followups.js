@@ -18,7 +18,7 @@ import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
-import { reconcileAllRentals } from '../lib/rental-sync.js';
+import { reconcileAllRentals, pullAgentAnalytics } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
@@ -430,6 +430,16 @@ export default async function handler(req, res) {
       catch (e) { rentalsReconcile = { error: e.message }; }
     }
 
+    // ── PORTAL ANALYTICS PULL (daily) ────────────────────────────────
+    // Cache per-agent clicks/enquiries + channel totals from the portal into
+    // settings.agent_portal_stats so the funnel dashboard + report can join
+    // portal engagement with message read-rates in one query.
+    let portalAnalytics = null;
+    if (!previewMode) {
+      try { portalAnalytics = await pullAgentAnalytics({ SUPABASE_URL, headers: sbHeaders }); }
+      catch (e) { portalAnalytics = { error: e.message }; }
+    }
+
     // ── ESCALATION SLA ───────────────────────────────────────────────
     // Conversations Ikiel took over (paused) where the agent's last message
     // is still unread hours later get a daily Telegram reminder digest, so
@@ -493,6 +503,7 @@ export default async function handler(req, res) {
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       rentals_reconcile: rentalsReconcile,
+      portal_analytics: portalAnalytics,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
       results
     });
