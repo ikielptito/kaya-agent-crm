@@ -1,7 +1,7 @@
 // Fetch the list of approved WhatsApp Business templates from Meta.
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
-import { createCarouselDigest, listingCarouselCards, buildCarouselComponents } from '../lib/wa-carousel.js';
+import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, createMediaTemplate, heroImageForSlug } from '../lib/wa-carousel.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -44,6 +44,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, name });
     }
 
+    if (req.method === 'POST' && req.body?.action === 'create_media') {
+      // Single-image-header strategic template (large hero + body + button).
+      const { name, body, example, sampleImageUrl, buttonText } = req.body;
+      if (!name || !body || !sampleImageUrl) return res.status(400).json({ error: 'name, body, sampleImageUrl required' });
+      try {
+        const out = await createMediaTemplate({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, body, example, sampleImageUrl, buttonText });
+        return res.status(200).json({ success: true, ...out });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
+      }
+    }
+
     if (req.method === 'POST' && req.body?.action === 'send_test') {
       // Fire a real template to one number for visual verification. kind:
       // 'carousel' → the 6-card weekly digest; 'template' → a body+button
@@ -58,7 +70,14 @@ export default async function handler(req, res) {
         if (!cards) return res.status(400).json({ error: 'not enough portal listings with cover photos for a full carousel' });
         template = { name: 'samba_weekly_carousel_v1', language: { code: 'en' }, components: buildCarouselComponents(firstName || 'there', cards) };
       } else {
-        const comps = [{ type: 'body', parameters: (params || []).map(p => ({ type: 'text', text: String(p) })) }];
+        const comps = [];
+        // Image header — resolve the villa's portal cover from its slug (only
+        // for templates that actually declare an image header).
+        if (req.body.imageHeader && buttonSlug) {
+          const hero = await heroImageForSlug(buttonSlug);
+          if (hero) comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: hero } }] });
+        }
+        comps.push({ type: 'body', parameters: (params || []).map(p => ({ type: 'text', text: String(p) })) });
         if (buttonSlug) comps.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: buttonSlug }] });
         template = { name: templateName, language: { code: 'en' }, components: comps };
       }
