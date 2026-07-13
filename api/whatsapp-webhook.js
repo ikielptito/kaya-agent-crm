@@ -1,6 +1,7 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
+import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -1002,30 +1003,18 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
         }).catch(() => {});
         continue;
       }
-      // Mirror the proven-working new-agent insert (see the first-message path
-      // above): conversation_summary + conversation_history + unread_count are
-      // NOT-NULL on the base table, so referral inserts that omitted them were
-      // failing. Include them, then layer the referral extras on top.
-      const dayStr = new Date().toISOString().slice(0, 10);
-      const ins = await fetch(`${url}/rest/v1/agents`, {
-        method: 'POST',
-        headers: { ...headers, Prefer: 'return=representation' },
-        body: JSON.stringify({
-          name,
-          wa_num: waNum,
-          wa_url: `https://wa.me/${waNum}`,
-          agency: agent.agency || null,
-          unread_count: 0,
-          notes: `Referred by ${agent.name || 'agent #' + agent.id} on ${dayStr}.`,
-          conversation_summary: `[${dayStr}] Added by Maya — ${a.reason || 'referral'}. Number provided by ${agent.name || 'agent #' + agent.id}.`,
-          conversation_history: { first_contact: dayStr, last_contact: dayStr, total_messages: 0 },
-          campaign_engagement: { samba: { status: 'enrolled', source: 'referral', referred_by: agent.id } },
-        }),
+      // Reliable, self-healing insert (shared with the assistant console) — sets
+      // the full NOT-NULL baseline the proven first-message insert uses and
+      // self-heals any column the schema adds. Enrolls in Samba so the new
+      // contact starts receiving Maya's updates immediately.
+      const fields = baseAgentFields({
+        name, waNum, agency: agent.agency || null,
+        referrerId: agent.id, referrerName: agent.name || `agent #${agent.id}`,
+        source: 'referral', reason: a.reason || 'referral',
       });
-      const insText = await ins.text().catch(() => '');
-      if (!ins.ok) { console.warn('applyCrmActions create_agent insert failed:', insText.slice(0, 300)); }
-      const created = (() => { try { return JSON.parse(insText); } catch { return []; } })() || [];
-      const newId = Array.isArray(created) && created[0] ? created[0].id : null;
+      const createRes = await createAgentRow(url, headers, fields);
+      if (!createRes.ok) { console.warn('applyCrmActions create_agent insert failed:', createRes.error); }
+      const newId = createRes.row?.id || null;
       await fetch(`${url}/rest/v1/maya_updates`, {
         method: 'POST', headers,
         body: JSON.stringify({
@@ -1035,6 +1024,21 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
           by_maya: true, created_at: new Date().toISOString(),
         }),
       }).catch(() => {});
+      // Redirect case: the agent asked us to contact the NEW number INSTEAD of
+      // them. Opt the ORIGINAL out of rentals updates here, deterministically,
+      // so it can never be missed (independent of any crm_updates Maya emits).
+      if (a.replace === true || a.replace === 'true') {
+        await patchAgent(url, headers, agent.id, { samba_alerts_opt_out: true });
+        await fetch(`${url}/rest/v1/maya_updates`, {
+          method: 'POST', headers,
+          body: JSON.stringify({
+            agent_id: agent.id, field: 'samba_alerts_opt_out', new_value: 'true',
+            reason: `redirected future updates to ${name} +${waNum}`,
+            evidence: String(evidenceQuote || '').slice(0, 500),
+            by_maya: true, created_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+      }
     } catch (e) {
       console.warn('applyCrmActions create_agent failed:', e.message);
     }
@@ -1316,9 +1320,9 @@ CONTACT FREQUENCY — when an agent asks to hear from us LESS OFTEN but does not
 Example: { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
 Acknowledge the change in your reply ("Understood — I'll only send the weekly summary from now on."). Do NOT set samba opt-out for these agents; frequency reduction is exactly so we don't lose them entirely.
 
-TEAM HANDOFF / NEW CONTACTS — ALWAYS capture a new contact whenever the agent gives us ANY alternate WhatsApp number to use for future updates. This covers: (a) a shared WhatsApp contact card ("[Agent shared a WhatsApp contact card: Name — +628…]"), (b) a teammate's name + number to add to updates, and (c) a redirect — they tell us to contact a different number/colleague/department/division instead (e.g. "for monthly/rental please contact our long-term rental team on +62 822…", "message my colleague X on …", "send future updates to …"). In every one of these cases, use crm_actions to create the new contact so we can reach them directly:
-  { "type": "create_agent", "name": "<person or team name, e.g. 'Oniriq — Long Term Rentals'>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "redirect: agent asked us to contact this number for future updates" }
-Rules: only create when there is an explicit number in the message; never invent or guess digits; if a card came without a number, ask them to resend or type it. If the agent says the NEW number should be contacted INSTEAD of them, ALSO set samba_alerts_opt_out = true (or contact_frequency = "paused") on the current agent via crm_updates so we stop bouncing off them, and say you've switched future updates over to the new number. Confirm in your reply that the new contact has been added.
+TEAM HANDOFF / NEW CONTACTS — this is CRITICAL and MANDATORY. ALWAYS emit a create_agent crm_action whenever the agent gives us ANY alternate WhatsApp number to use for future contact. There is no exception: if a message contains a phone number and any hint that we should reach that number (a colleague, a department, "contact X instead", "send updates to Y", a shared contact card, "for rentals message …"), you MUST create the contact. This covers: (a) a shared WhatsApp contact card ("[Agent shared a WhatsApp contact card: Name — +628…]"), (b) a teammate's name + number to add to updates, and (c) a redirect — they tell us to contact a different number/colleague/department/division instead (e.g. "for monthly/rental please contact our long-term rental team on +62 822…", "message my colleague X on …", "send future updates to …"). Use crm_actions so we can reach them directly:
+  { "type": "create_agent", "name": "<person or team name, e.g. 'Oniriq — Long Term Rentals'>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "redirect: agent asked us to contact this number for future updates", "replace": true }
+Set "replace": true whenever the agent wants the NEW number contacted INSTEAD of them (a redirect / handoff) — the system will automatically stop sending this original contact rentals updates. Set "replace": false (or omit) only when they're ADDING a teammate alongside themselves (both should still hear from us). You do NOT also need a separate samba_alerts_opt_out crm_update for the redirect — "replace": true handles it. Rules: only create when there is an explicit number in the message; never invent or guess digits; if a card came without a number, ask them to resend or type it. Always confirm in your reply that the new contact has been added and (for a redirect) that you've switched future updates over to the new number.
 
 For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
 - For "right now" → use the literal string "__NOW__"
@@ -1338,7 +1342,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
   "crm_actions": [
-    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent" }
+    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "replace": false }
   ]
 }
 Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
