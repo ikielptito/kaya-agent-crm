@@ -3,6 +3,23 @@ import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import webpush from 'web-push';
 
+// Property listings (portal) → card objects for the console listing picker and
+// send-as-card flow. Each card: { slug, title, subtitle, image, url, badge }.
+const LISTINGS_PORTAL = 'https://sambarentals.com';
+function coverPhotoUrl(id) { return id ? `https://lh3.googleusercontent.com/d/${id}=w1600` : null; }
+async function fetchPortalCards() {
+  const r = await fetch(`${LISTINGS_PORTAL}/api/listings`);
+  let listings = await r.json();
+  if (!Array.isArray(listings)) listings = listings.listings || [];
+  return listings
+    .filter(l => l && l.slug && l.coverPhotoId && !l.isHidden)
+    .map(l => {
+      const rate = l.monthly ? `${l.monthly}/mo` : 'Monthly rental';
+      const subtitle = [rate, l.unitType, l.location].filter(Boolean).join(' · ');
+      return { slug: l.slug, title: l.name || l.slug, subtitle, image: coverPhotoUrl(l.coverPhotoId), url: `${LISTINGS_PORTAL}/?property=${l.slug}`, badge: l.badge || null };
+    });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -573,6 +590,58 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         top_agents: agentRows.slice(0, 25),
         outbound_total: out.length,
       });
+
+    } else if (action === 'list_listings') {
+      // Portal listings as card objects, for the console "Send listing" picker.
+      try {
+        const cards = await fetchPortalCards();
+        return res.status(200).json({ listings: cards });
+      } catch (e) {
+        return res.status(200).json({ listings: [], error: 'portal unreachable' });
+      }
+
+    } else if (action === 'send_listing_card') {
+      // Send one property to an agent as a rich card: a WhatsApp image (hero
+      // photo) + caption (name, detail, link), logged with a [[card]] marker so
+      // the console thread renders it as a card rather than a bare URL.
+      const WA_TOKEN = process.env.META_WA_TOKEN;
+      const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ ok: false, error: 'WhatsApp env not configured' });
+      const { agentId, slug } = payload || {};
+      if (!slug) return res.status(400).json({ ok: false, error: 'slug required' });
+
+      // Resolve the agent's number.
+      const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=id,wa_num,wa_url`, { headers });
+      const agent = (await aRes.json())?.[0];
+      const waNum = String(agent?.wa_num || (agent?.wa_url || '').replace(/\D/g, '')).replace(/\D/g, '');
+      if (!waNum) return res.status(400).json({ ok: false, error: 'agent has no WhatsApp number' });
+
+      // Resolve the card.
+      let cards = [];
+      try { cards = await fetchPortalCards(); } catch (e) { return res.status(502).json({ ok: false, error: 'portal unreachable' }); }
+      const card = cards.find(c => c.slug === slug);
+      if (!card) return res.status(404).json({ ok: false, error: 'listing not found' });
+      if (!card.image) return res.status(422).json({ ok: false, error: 'listing has no photo' });
+
+      // Send the hero image + caption via WhatsApp.
+      const captionLines = [`*${card.title}*`, card.subtitle, '', card.url].filter(v => v !== undefined && v !== null);
+      const caption = captionLines.join('\n');
+      const wr = await fetch(`https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'image', image: { link: card.image, caption } })
+      });
+      const wd = await wr.json().catch(() => ({}));
+      if (!wr.ok) return res.status(wr.status).json({ ok: false, error: wd?.error?.message || `WhatsApp HTTP ${wr.status}` });
+      const waMessageId = wd.messages?.[0]?.id || null;
+
+      // Log with a [[card]] marker so the console renders the card.
+      const marker = '[[card]]' + JSON.stringify({ title: card.title, subtitle: card.subtitle, image: card.image, url: card.url, badge: card.badge });
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: marker, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'manual', status: waMessageId ? 'sent' : null })
+      }).catch(() => {});
+
+      return res.status(200).json({ ok: true, waMessageId, card });
 
     } else if (action === 'resume_unanswered') {
       // Catch up on agents whose latest message is still unanswered — e.g. replies

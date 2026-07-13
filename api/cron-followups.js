@@ -1090,7 +1090,19 @@ export async function runAvailabilityNotifications(ctx) {
     // is plain text with no size limit, so no truncation needed.
     let renderedPreview;
     if (sendCarousel) {
-      renderedPreview = `[Weekly availability carousel] ${carouselCards.map(c => c.name).join(', ')}`;
+      // Rich marker so the console renders the actual swipeable carousel (with
+      // hero images + links), matching what the agent sees on WhatsApp. Any
+      // consumer that reads plain content still gets a readable "[[carousel]]…".
+      renderedPreview = '[[carousel]]' + JSON.stringify({
+        title: 'Weekly availability',
+        cards: carouselCards.map(c => ({
+          title: c.name,
+          subtitle: [c.detail, c.area].filter(Boolean).join(' · '),
+          image: c.imageUrl,
+          url: `https://sambarentals.com/?property=${c.slug}`,
+          badge: c.badge || null,
+        })),
+      });
     } else {
       renderedPreview = tmpl.body || '';
       params.forEach((p, i) => {

@@ -214,6 +214,34 @@
     padding: 4px 11px; margin: 0 6px 4px 0; font-size: 12px; font-weight: 600; color: #0a7a5c;
     text-decoration: none; cursor: pointer; font-family: inherit; }
   .cc-none { display: block; font-size: 11.5px; font-style: italic; color: var(--wa-ink-2); }
+  /* Listing cards + carousel — Maya sends a property as a rich card, or the
+     weekly availability carousel renders as swipeable cards (WhatsApp-style). */
+  .lc-carousel-title { font-size: 12px; font-weight: 700; color: var(--wa-ink-2); margin: 1px 0 6px; }
+  .lc-carousel { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch; padding-bottom: 5px; margin-bottom: 2px; }
+  .lc-carousel::-webkit-scrollbar { height: 5px; }
+  .lc-carousel::-webkit-scrollbar-thumb { background: rgba(0,0,0,.15); border-radius: 3px; }
+  .lc-carousel .lc-card { flex: 0 0 200px; scroll-snap-align: start; margin-bottom: 0; }
+  .lc-card { width: 240px; max-width: 100%; background: var(--wa-panel); border: 1px solid var(--wa-rule);
+    border-radius: 12px; overflow: hidden; margin-bottom: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.07); }
+  .lc-img { position: relative; width: 100%; aspect-ratio: 3 / 2; background: #e9e4de center/cover no-repeat; }
+  .lc-badge { position: absolute; top: 8px; left: 8px; background: var(--wa-accent); color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; }
+  .lc-body { padding: 9px 11px 11px; }
+  .lc-title { font-weight: 700; font-size: 14px; color: var(--wa-ink); line-height: 1.25; }
+  .lc-sub { font-size: 12.5px; color: var(--wa-ink-2); margin-top: 2px; }
+  .lc-btn { display: block; text-align: center; margin-top: 9px; background: var(--wa-accent); color: #fff;
+    text-decoration: none; font-weight: 700; font-size: 13px; padding: 8px; border-radius: 8px; }
+  .lc-btn:active { opacity: .85; }
+  /* Listing picker (attach sheet → Send listing) */
+  .lp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .lp-item { text-align: left; background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px;
+    overflow: hidden; cursor: pointer; padding: 0; font-family: inherit; }
+  .lp-item:active { transform: scale(.98); }
+  .lp-img { width: 100%; aspect-ratio: 3 / 2; background: #e9e4de center/cover no-repeat; }
+  .lp-meta { padding: 8px 10px 10px; }
+  .lp-name { font-weight: 700; font-size: 13.5px; color: var(--wa-ink); line-height: 1.2; }
+  .lp-sub { font-size: 12px; color: var(--wa-ink-2); margin-top: 2px; }
   /* Outbound authorship badge: who actually wrote this — Maya (AI), you,
      or the broadcast cron. Sized to be legible, not decorative. */
   .src-tag { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: .05em;
@@ -1109,7 +1137,9 @@ function convRow(a) {
     const time = ts ? timeAgo(new Date(ts)) : '';
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
     const unread = a.unread_count || 0;
-    const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + m.lastContent.slice(0, 60) : (a.agency || '');
+    const lastCard = parseCardMarker(m?.lastContent);
+    const lastText = lastCard ? (lastCard.type === 'carousel' ? '🏠 Property carousel' : '🏠 Property listing') : (m?.lastContent || '');
+    const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + lastText.slice(0, 60) : (a.agency || '');
 
     let pill = '';
     const ov = a.automation_override;
@@ -1259,8 +1289,38 @@ function currentAgentName() {
   return a ? (a.name || a.agency || 'Agent') : 'Agent';
 }
 function quoteSnippet(m) {
+  if (parseCardMarker(m.content)) return '🏠 Listing';
   if (m.media_type) return (MEDIA_LABELS[m.media_type] || 'Attachment');
   return (m.content || '').slice(0, 80);
+}
+
+// Rich listing cards / carousels. A property can be attached to a message as a
+// card; the content carries a compact marker — [[card]]{json} for one listing,
+// or [[carousel]]{"title":..,"cards":[{...}]} for several. Each card:
+// { title, subtitle, image, url, badge }. Falls back to plain text if unparseable.
+function parseCardMarker(content) {
+  if (typeof content !== 'string') return null;
+  const m = content.match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
+  if (!m) return null;
+  try { return { type: m[1], data: JSON.parse(m[2]) }; } catch (_) { return null; }
+}
+function listingCardHtml(c) {
+  if (!c) return '';
+  const img = c.image
+    ? `<div class="lc-img" style="background-image:url('${encodeURI(c.image)}')">${c.badge ? `<span class="lc-badge">${esc(c.badge)}</span>` : ''}</div>`
+    : '';
+  const title = c.title ? `<div class="lc-title">${esc(c.title)}</div>` : '';
+  const sub = c.subtitle ? `<div class="lc-sub">${esc(c.subtitle)}</div>` : '';
+  const btn = c.url ? `<a class="lc-btn" href="${esc(c.url)}" target="_blank" rel="noopener">View listing ›</a>` : '';
+  return `<div class="lc-card">${img}<div class="lc-body">${title}${sub}${btn}</div></div>`;
+}
+function renderCardMarker(marker) {
+  if (marker.type === 'carousel') {
+    const cards = Array.isArray(marker.data.cards) ? marker.data.cards : [];
+    const head = marker.data.title ? `<div class="lc-carousel-title">${esc(marker.data.title)}</div>` : '';
+    return head + `<div class="lc-carousel">${cards.map(listingCardHtml).join('')}</div>`;
+  }
+  return listingCardHtml(marker.data);
 }
 function statusTicks(m, isOut) {
   if (!isOut) return '';
@@ -1295,8 +1355,12 @@ function renderBubble(m) {
   const edited = m.edited_at ? ' <span style="font-size:10px;color:#8a9499">(edited)</span>' : '';
   // Contact cards (incl. legacy rows logged before numbers were captured)
   const ccm = (m.content || '').match(/^\[Contact card:\s*([^\]]+)\]/);
+  // Rich listing card / carousel marker
+  const cardMarker = parseCardMarker(m.content);
   let inner;
-  if (ccm) {
+  if (cardMarker) {
+    inner = renderCardMarker(cardMarker);
+  } else if (ccm) {
     inner = renderContactCard(ccm[1]) + (caption.trim() ? esc(caption).replace(/\n/g, '<br>') : '');
   } else {
     inner = media + esc(bodyText).replace(/\n/g, '<br>');
@@ -1465,6 +1529,7 @@ function toggleAttachSheet() {
     <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">📷</span> Take photo</button>
     <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">🖼</span> Photo library</button>
     <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">📄</span> Document</button>
+    <button class="sheet-item" onclick="closeSheet();openListingPicker()"><span class="ico">🏠</span> Send listing (card)</button>
     <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">✦</span> Maya draft a reply</button>
     <button class="sheet-item" onclick="closeSheet();openQuickReplies()"><span class="ico">⚡</span> Quick replies</button>
     <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">😀</span> Emoji</button>
@@ -1525,6 +1590,41 @@ function useQuickReply(i) {
   const q = QUICK_REPLIES[i]; if (!q) return;
   const box = document.getElementById('replyBox'); box.value = q.body;
   document.getElementById('qrPop').style.display = 'none'; box.focus(); onReplyInput();
+}
+
+// ── Send a property listing as a rich card ────────────────────────────
+let _listingCache = null;
+async function openListingPicker() {
+  const a = state.agents.find(x => x.id === state.activeId);
+  if (!a) { toast('Open a conversation first'); return; }
+  document.getElementById('modalHost').innerHTML =
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Send a listing</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="lpBody"><div class="empty">Loading listings…</div></div></div></div>`;
+  try {
+    if (!_listingCache) { const r = await api('list_listings', {}); _listingCache = (r && r.listings) || []; }
+    const items = _listingCache;
+    const host = document.getElementById('lpBody');
+    if (!host) return;
+    if (!items.length) { host.innerHTML = '<div class="empty">No listings with photos found.</div>'; return; }
+    host.innerHTML = `<div class="lp-grid">${items.map((c, i) => `
+      <button class="lp-item" onclick="sendListingCard(${i})">
+        <div class="lp-img" style="background-image:url('${encodeURI(c.image || '')}')"></div>
+        <div class="lp-meta"><div class="lp-name">${esc(c.title || '')}</div><div class="lp-sub">${esc(c.subtitle || '')}</div></div>
+      </button>`).join('')}</div>`;
+  } catch (e) {
+    const host = document.getElementById('lpBody'); if (host) host.innerHTML = '<div class="empty">Could not load listings.</div>';
+  }
+}
+async function sendListingCard(idx) {
+  const a = state.agents.find(x => x.id === state.activeId);
+  const card = _listingCache && _listingCache[idx];
+  if (!a || !card) return;
+  closeModal();
+  toast('Sending ' + (card.title || 'listing') + '…');
+  try {
+    const r = await api('send_listing_card', { agentId: a.id, slug: card.slug });
+    if (r && r.ok === false) throw new Error(r.error || 'send failed');
+    pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Listing sent');
+  } catch (e) { toast('Failed: ' + (e.message || 'send error')); }
 }
 
 // ── Template picker (24h window) ──────────────────────────────────────
