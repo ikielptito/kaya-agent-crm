@@ -534,6 +534,7 @@
     <div class="list-head">
       <div class="list-head-top">
         <div class="list-title">Maya</div>
+        <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)">↩</button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics">📊</button>
         <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
         <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
@@ -952,6 +953,27 @@ async function setMode(mode) {
   } catch (e) {
     state.mode = prev; renderMode();
     toast('Could not save mode');
+  }
+}
+
+// Resume: answer every agent whose latest message is still unanswered — e.g.
+// replies that landed while Maya was paused on the daily spend cap. Maya
+// regenerates each reply and sends it; respects the $2/day cap.
+async function resumeUnanswered() {
+  if (!confirm('Answer all agents still waiting for a reply?\n\nMaya will generate and SEND a reply to each agent whose latest message is unanswered (last 4 days). Respects the daily spend cap.')) return;
+  const btn = document.getElementById('resumeBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  toast('Maya is catching up…');
+  try {
+    const r = await api('resume_unanswered', {});
+    const sent = r?.resumed || 0;
+    const considered = r?.considered || 0;
+    toast(sent ? `Answered ${sent} of ${considered} waiting` : `Nobody waiting${considered ? ` (checked ${considered})` : ''}`);
+    refreshAll(true);
+  } catch (e) {
+    toast('Catch-up failed — try again');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↩'; }
   }
 }
 

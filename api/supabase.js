@@ -574,6 +574,99 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         outbound_total: out.length,
       });
 
+    } else if (action === 'resume_unanswered') {
+      // Answer agents whose latest message is still unanswered — e.g. replies
+      // that arrived while Maya was paused on the spend cap. For each, regenerate
+      // a fresh reply via suggest_reply (same Maya prompt) and send it, then
+      // clear unread. Respects the $2 daily spend cap and skips muted / opted-out
+      // agents and anyone we've already replied to. Triggered from the console.
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      const WA_TOKEN = process.env.META_WA_TOKEN;
+      const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!ANTHROPIC_KEY || !WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'Maya messaging env not configured' });
+
+      const CAP_USD = 2.00;
+      const maxAgents = Math.min(Number(payload?.limit) || 60, 120);
+      const sinceDays = Number(payload?.since_days) || 4;
+      const sinceIso = new Date(Date.now() - sinceDays * 86400000).toISOString();
+      const witaDay = new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
+
+      // Self-origin so we can reuse the suggest_reply action (same trick the cron uses).
+      const proto = req.headers['x-forwarded-proto'] || 'https';
+      const selfOrigin = req.headers.host ? `${proto}://${req.headers.host}` : null;
+      if (!selfOrigin) return res.status(500).json({ error: 'cannot resolve self origin' });
+
+      // Candidates: real agents with a recent inbound still unread.
+      const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?is_test=eq.false&unread_count=gt.0&last_inbound_at=gte.${sinceIso}&select=id,name,wa_num,wa_url,automation_override,samba_alerts_opt_out&order=last_inbound_at.desc&limit=${maxAgents}`, { headers });
+      let candidates = await aRes.json();
+      if (!Array.isArray(candidates)) candidates = [];
+
+      // Current spend today (shared daily_usage counter, WITA day).
+      const uRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+      const usage = (await uRes.json())?.[0]?.value || {};
+      let todaySpend = usage[witaDay] || 0;
+
+      const results = [];
+      for (const a of candidates) {
+        if (a.automation_override === 'paused' || a.automation_override === 'off') { results.push({ agent: a.name || a.id, skipped: 'muted' }); continue; }
+        if (a.samba_alerts_opt_out === true) { results.push({ agent: a.name || a.id, skipped: 'opted_out' }); continue; }
+        const waNum = String(a.wa_num || (a.wa_url || '').replace(/\D/g, '')).replace(/\D/g, '');
+        if (!waNum) { results.push({ agent: a.name || a.id, skipped: 'no_number' }); continue; }
+        if (todaySpend >= CAP_USD) { results.push({ agent: a.name || a.id, skipped: 'spend_cap' }); continue; }
+
+        // Only answer if the LAST message is inbound (i.e. still genuinely unanswered).
+        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&order=timestamp.desc&limit=1&select=direction`, { headers });
+        const last = (await lastRes.json())?.[0];
+        if (!last || last.direction !== 'inbound') {
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0 }) }).catch(() => {});
+          results.push({ agent: a.name || a.id, skipped: 'already_answered' });
+          continue;
+        }
+
+        // Generate a fresh reply with the canonical Maya prompt.
+        let reply = '', cost = 0.02;
+        try {
+          const sg = await fetch(`${selfOrigin}/api/supabase`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: a.id } })
+          });
+          if (sg.ok) { const d = await sg.json(); reply = (d?.reply || '').trim(); if (typeof d?.cost_usd === 'number') cost = d.cost_usd; }
+        } catch (e) { /* skip below */ }
+        if (!reply || reply.startsWith('[')) { results.push({ agent: a.name || a.id, skipped: 'no_reply' }); continue; }
+        todaySpend += cost;
+
+        // Send via WhatsApp.
+        const sr = await fetch(`https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`, {
+          method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: reply } })
+        });
+        const sd = await sr.json().catch(() => ({}));
+        if (!sr.ok) { results.push({ agent: a.name || a.id, error: sd?.error?.message || ('HTTP ' + sr.status) }); continue; }
+        const waMessageId = sd.messages?.[0]?.id || null;
+        await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+          method: 'POST', headers,
+          body: JSON.stringify({ agent_id: a.id, wa_num: waNum, direction: 'outbound', content: reply, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'catchup', status: waMessageId ? 'sent' : null })
+        }).catch(() => {});
+        await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0, suggested_reply: '' }) }).catch(() => {});
+        results.push({ agent: a.name || a.id, sent: true });
+      }
+
+      // Persist updated spend (mirror the webhook's daily_usage upsert).
+      usage[witaDay] = +todaySpend.toFixed(4);
+      const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+      Object.keys(usage).forEach(k => { if (k < cutoff) delete usage[k]; });
+      await fetch(`${SUPABASE_URL}/rest/v1/settings`, {
+        method: 'POST', headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key: 'daily_usage', value: usage })
+      }).catch(() => {});
+
+      return res.status(200).json({
+        resumed: results.filter(r => r.sent).length,
+        considered: candidates.length,
+        spend_today_usd: +todaySpend.toFixed(2),
+        results,
+      });
+
     } else if (action === 'assistant') {
       // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
       return await handleAssistant(req, res, { SUPABASE_URL, headers });
