@@ -1011,6 +1011,7 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
         name, waNum, agency: agent.agency || null,
         referrerId: agent.id, referrerName: agent.name || `agent #${agent.id}`,
         source: 'referral', reason: a.reason || 'referral',
+        serviceType: a.service_type || null,
       });
       const createRes = await createAgentRow(url, headers, fields);
       if (!createRes.ok) { console.warn('applyCrmActions create_agent insert failed:', createRes.error); }
@@ -1320,9 +1321,20 @@ CONTACT FREQUENCY — when an agent asks to hear from us LESS OFTEN but does not
 Example: { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
 Acknowledge the change in your reply ("Understood — I'll only send the weekly summary from now on."). Do NOT set samba opt-out for these agents; frequency reduction is exactly so we don't lose them entirely.
 
+SERVICE CLASSIFICATION — KAYA has two sides: Samba = monthly RENTALS, and KAYA Developments = leasehold/freehold property SALES. Agents differ in what they handle, and getting this right controls what we send them. Whenever an agent's message reveals which side they work, record it via crm_updates on the field "campaign_engagement.service_type":
+  - "rental"    — they only handle monthly rentals / stays
+  - "leasehold" — they only handle property SALES (leasehold/freehold); they do NOT do rentals
+  - "both"      — they handle both rentals and sales
+Example: { "field": "campaign_engagement.service_type", "value": "leasehold", "reason": "agent said they only do sales, not rentals" }
+CRITICAL — "leasehold" is NOT an opt-out. A leasehold-only agent STILL receives our leasehold/sales outreach; the system simply stops sending them rental availability alerts. So when an agent says something like "we only do leasehold/sales, not rentals" (often "…please contact [teammate] for rentals"), you MUST: (1) set campaign_engagement.service_type = "leasehold" on THIS agent via crm_updates, and (2) do NOT set samba_alerts_opt_out and do NOT set replace:true — they are staying with us for leasehold. Only classify when the agent makes it clear; if it's ambiguous, leave service_type unset.
+
 TEAM HANDOFF / NEW CONTACTS — this is CRITICAL and MANDATORY. ALWAYS emit a create_agent crm_action whenever the agent gives us ANY alternate WhatsApp number to use for future contact. There is no exception: if a message contains a phone number and any hint that we should reach that number (a colleague, a department, "contact X instead", "send updates to Y", a shared contact card, "for rentals message …"), you MUST create the contact. This covers: (a) a shared WhatsApp contact card ("[Agent shared a WhatsApp contact card: Name — +628…]"), (b) a teammate's name + number to add to updates, and (c) a redirect — they tell us to contact a different number/colleague/department/division instead (e.g. "for monthly/rental please contact our long-term rental team on +62 822…", "message my colleague X on …", "send future updates to …"). Use crm_actions so we can reach them directly:
-  { "type": "create_agent", "name": "<person or team name, e.g. 'Oniriq — Long Term Rentals'>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "redirect: agent asked us to contact this number for future updates", "replace": true }
-Set "replace": true whenever the agent wants the NEW number contacted INSTEAD of them (a redirect / handoff) — the system will automatically stop sending this original contact rentals updates. Set "replace": false (or omit) only when they're ADDING a teammate alongside themselves (both should still hear from us). You do NOT also need a separate samba_alerts_opt_out crm_update for the redirect — "replace": true handles it. Rules: only create when there is an explicit number in the message; never invent or guess digits; if a card came without a number, ask them to resend or type it. Always confirm in your reply that the new contact has been added and (for a redirect) that you've switched future updates over to the new number.
+  { "type": "create_agent", "name": "<person or team name, e.g. 'Oniriq — Long Term Rentals'>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "redirect: contact this number for rentals", "service_type": "rental", "replace": false }
+Set "service_type" on the NEW contact to what THEY handle — e.g. if the agent redirects rentals to a colleague, that colleague is "rental"; a sales colleague is "leasehold".
+Choosing "replace" — think about whether the ORIGINAL agent still wants to hear from us:
+- MOST COMMON (partial handoff, e.g. "we only do leasehold, contact X for rentals"): set "replace": false on the create_agent, AND set campaign_engagement.service_type = "leasehold" on the ORIGINAL agent via crm_updates. The original keeps getting leasehold outreach; the system stops their rental alerts. Do NOT opt them out.
+- RARE (total handoff — "don't contact me at all anymore, contact them instead"): set "replace": true — the system opts the original out of everything.
+Rules: only create when there is an explicit number in the message; never invent or guess digits; if a card came without a number, ask them to resend or type it. Always confirm in your reply that the new contact has been added and how you've routed future updates.
 
 For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
 - For "right now" → use the literal string "__NOW__"
@@ -1342,7 +1354,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
   "crm_actions": [
-    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "replace": false }
+    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "service_type": "rental", "replace": false }
   ]
 }
 Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".

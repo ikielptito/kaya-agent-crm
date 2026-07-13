@@ -550,8 +550,24 @@ export default async function handler(req, res) {
       } catch (e) { ownerReport = { error: e.message }; }
     }
 
+    // Safety-net: catch any numbers agents shared in the last few days that
+    // weren't auto-captured live, and add them to the CRM. Best-effort; the
+    // action dedupes so it can't create twins. (Full-history backfill is the
+    // 🧲 button in the console.)
+    let backfill = null;
+    if (!previewMode && selfOrigin) {
+      try {
+        const bf = await fetch(`${selfOrigin}/api/supabase`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'backfill_contacts', payload: { since_days: 3, limit: 40 } })
+        });
+        backfill = bf.ok ? await bf.json() : { error: `HTTP ${bf.status}` };
+      } catch (e) { backfill = { error: e.message }; }
+    }
+
     return res.status(200).json({
       ran_at: now.toISOString(),
+      contact_backfill: backfill ? { created: backfill.created, candidates: backfill.candidates } : null,
       total_agents: agents.length,
       drafts_sent: draftsSent,
       listing_sent: sent, listing_stalled: stalled, skipped,
@@ -1189,6 +1205,10 @@ function isAvailabilityEligible(agent, config) {
   if (agent.samba_alerts_opt_out) return false;
   if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
   if (config.test_agents_only && !agent.is_test) return false;
+  // Service classification: leasehold-only agents don't do rentals, so they are
+  // excluded from Samba (rental) availability alerts — but NOT opted out (they
+  // still get KAYA leasehold outreach). 'rental' and 'both' stay eligible.
+  if (agent.campaign_engagement?.service_type === 'leasehold') return false;
   const samba = agent.campaign_engagement?.samba;
   if (!samba) return false;
   // Treat any non-empty status as enrolled, except explicit terminal states

@@ -563,6 +563,7 @@
       <div class="list-head-top">
         <div class="list-title">Maya</div>
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)">↩</button>
+        <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats">🧲</button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics">📊</button>
         <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
         <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
@@ -1012,6 +1013,25 @@ async function resumeUnanswered() {
     toast('Catch-up failed — try again');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '↩'; }
+  }
+}
+
+// Scan past chat history for numbers agents shared and add the genuine
+// agent/partner contacts to the CRM (Maya classifies each; safe to re-run).
+async function backfillContacts() {
+  if (!confirm('Scan all past chats for numbers agents shared and add the real agent/partner contacts to the CRM?\n\nMaya reviews each number and skips clients / duplicates. Safe to run again.')) return;
+  const btn = document.getElementById('backfillBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  toast('Scanning chat history…');
+  try {
+    const r = await api('backfill_contacts', {});
+    const created = r?.created || 0, cand = r?.candidates || 0, skipped = r?.skipped || 0;
+    toast(created ? `Added ${created} new contact${created === 1 ? '' : 's'}${skipped ? `, skipped ${skipped}` : ''}` : (cand ? `No new contacts (reviewed ${cand})` : 'No new numbers found'));
+    refreshAll(true);
+  } catch (e) {
+    toast('Backfill failed — try again');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🧲'; }
   }
 }
 

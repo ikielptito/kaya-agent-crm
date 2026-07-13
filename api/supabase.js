@@ -1,6 +1,7 @@
 import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
+import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import webpush from 'web-push';
 
 // Property listings (portal) → card objects for the console listing picker and
@@ -18,6 +19,30 @@ async function fetchPortalCards() {
       const subtitle = [rate, l.unitType, l.location].filter(Boolean).join(' · ');
       return { slug: l.slug, title: l.name || l.slug, subtitle, image: coverPhotoUrl(l.coverPhotoId), url: `${LISTINGS_PORTAL}/?property=${l.slug}`, badge: l.badge || null };
     });
+}
+
+// Normalise a raw number string to an Indonesian mobile in 628… form, or null.
+// Filters out prices/landlines/garbage (must be a 62 8xx mobile, 10–15 digits).
+function normIndoMobile(raw) {
+  let d = String(raw || '').replace(/\D/g, '');
+  if (!d) return null;
+  if (d.startsWith('0')) d = '62' + d.slice(1);
+  else if (d.startsWith('8')) d = '62' + d;
+  else if (!d.startsWith('62')) return null;
+  if (d.length < 10 || d.length > 15) return null;
+  if (!d.startsWith('628')) return null; // Indonesian mobiles only
+  return d;
+}
+// Pull phone-shaped substrings out of a message body.
+function extractPhoneCandidates(text) {
+  const out = [];
+  const re = /(\+?\d[\d\s().\-]{7,20}\d)/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const digits = m[1].replace(/\D/g, '');
+    if (digits.length >= 9 && digits.length <= 15) out.push(m[1]);
+  }
+  return out;
 }
 
 export default async function handler(req, res) {
@@ -590,6 +615,89 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         top_agents: agentRows.slice(0, 25),
         outbound_total: out.length,
       });
+
+    } else if (action === 'backfill_contacts') {
+      // Scan past inbound chat history for phone numbers agents shared, and add
+      // the genuine agent/partner numbers to the CRM (Maya classifies each to
+      // skip clients / own numbers / noise). Dedupes by number, so it's safe to
+      // run repeatedly. Pass since_days to limit the window (the cron uses this
+      // as an ongoing safety-net; the console button omits it for full history).
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      const maxCandidates = Math.min(Number(payload?.limit) || 80, 120);
+      const sinceDays = Number(payload?.since_days) || 0;
+
+      // Existing agents: dedupe set + id→name + each agent's own number.
+      const agRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,wa_num,wa_url&limit=5000`, { headers });
+      const agents = (await agRes.json().catch(() => [])) || [];
+      const existingNums = new Set();
+      const nameById = {}, ownNumById = {};
+      for (const a of agents) {
+        nameById[a.id] = a.name || a.agency || `#${a.id}`;
+        const n = normIndoMobile(a.wa_num || (a.wa_url || '').replace(/\D/g, ''));
+        if (n) { existingNums.add(n); ownNumById[a.id] = n; }
+      }
+
+      // Inbound messages (optionally limited to a recent window).
+      let mq = `${SUPABASE_URL}/rest/v1/wa_messages?direction=eq.inbound&select=agent_id,content,timestamp&order=timestamp.desc&limit=5000`;
+      if (sinceDays > 0) mq += `&timestamp=gte.${new Date(Date.now() - sinceDays * 86400000).toISOString()}`;
+      const msgs = (await (await fetch(mq, { headers })).json().catch(() => [])) || [];
+
+      // Extract unique candidate numbers not already in the CRM.
+      const candidates = new Map();
+      for (const m of msgs) {
+        for (const raw of extractPhoneCandidates(m.content || '')) {
+          const n = normIndoMobile(raw);
+          if (!n || existingNums.has(n) || ownNumById[m.agent_id] === n || candidates.has(n)) continue;
+          candidates.set(n, { wa_num: n, fromAgentId: m.agent_id, fromName: nameById[m.agent_id] || 'an agent', snippet: String(m.content || '').replace(/\s+/g, ' ').slice(0, 240) });
+          if (candidates.size >= maxCandidates) break;
+        }
+        if (candidates.size >= maxCandidates) break;
+      }
+      const cand = [...candidates.values()];
+      if (!cand.length) return res.status(200).json({ created: 0, skipped: 0, candidates: 0, results: [] });
+
+      // Maya classifies all candidates in one batched call.
+      const list = cand.map((c, i) => `${i + 1}. number ${c.wa_num} — shared by ${c.fromName} — message: "${c.snippet}"`).join('\n');
+      const system = `You are Maya, a CRM assistant for a Bali property company (Samba = monthly RENTALS; KAYA = leasehold/freehold SALES). You are reviewing phone numbers that agents shared in past WhatsApp chats, to decide which to add to the CRM as NEW agent/partner contacts we can send property listings to.
+For each numbered item, decide:
+- "add": true ONLY if the number belongs to a real-estate AGENT, colleague, teammate, agency, or a division/team we should contact about listings (rentals or sales). Set false for a client/guest/tenant, the sender's own number, or a random/unclear/non-property number.
+- "name": a sensible contact name (person or team, e.g. "Oniriq — Long Term Rentals"); if unknown, use the sharer's agency + role.
+- "service_type": "rental", "leasehold", or "both" from context; null if unclear.
+Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true,"name":"...","service_type":"rental"}]. No prose.`;
+      let decisions = [];
+      try {
+        const r = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST', headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 3000, system, messages: [{ role: 'user', content: `Items:\n${list}\n\nReturn the JSON array now.` }] })
+        });
+        const d = await r.json();
+        const txt = d.content?.[0]?.text || '';
+        const mm = txt.match(/\[[\s\S]*\]/);
+        decisions = mm ? JSON.parse(mm[0]) : [];
+      } catch (e) { return res.status(502).json({ error: 'classification failed: ' + e.message }); }
+      const byI = {}; decisions.forEach(x => { if (x && x.i) byI[x.i] = x; });
+
+      let created = 0, skipped = 0;
+      const results = [];
+      for (let i = 0; i < cand.length; i++) {
+        const c = cand[i];
+        const dec = byI[i + 1];
+        if (!dec || !dec.add) { skipped++; results.push({ wa_num: c.wa_num, add: false }); continue; }
+        // Final dedupe guard (numbers can repeat across messages).
+        const chk = await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${c.wa_num}&select=id`, { headers }).then(r => r.json()).catch(() => []);
+        if (Array.isArray(chk) && chk.length) { skipped++; results.push({ wa_num: c.wa_num, add: false, reason: 'exists' }); continue; }
+        const fields = baseAgentFields({
+          name: dec.name || `${c.fromName} contact`, waNum: c.wa_num,
+          referrerId: c.fromAgentId, referrerName: c.fromName,
+          source: 'history_backfill', reason: 'number shared in past chat',
+          serviceType: ['rental', 'leasehold', 'both'].includes(dec.service_type) ? dec.service_type : null,
+        });
+        const cr = await createAgentRow(SUPABASE_URL, headers, fields);
+        if (cr.ok) { created++; existingNums.add(c.wa_num); results.push({ wa_num: c.wa_num, add: true, id: cr.row?.id, name: dec.name }); }
+        else { results.push({ wa_num: c.wa_num, add: true, error: cr.error }); }
+      }
+      return res.status(200).json({ created, skipped, candidates: cand.length, results });
 
     } else if (action === 'list_listings') {
       // Portal listings as card objects, for the console "Send listing" picker.
