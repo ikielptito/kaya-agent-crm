@@ -575,11 +575,12 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
       });
 
     } else if (action === 'resume_unanswered') {
-      // Answer agents whose latest message is still unanswered — e.g. replies
-      // that arrived while Maya was paused on the spend cap. For each, regenerate
-      // a fresh reply via suggest_reply (same Maya prompt) and send it, then
-      // clear unread. Respects the $2 daily spend cap and skips muted / opted-out
-      // agents and anyone we've already replied to. Triggered from the console.
+      // Catch up on agents whose latest message is still unanswered — e.g. replies
+      // that arrived while Maya was paused on the spend cap. Behaviour follows the
+      // Maya automation mode, resolved per agent (automation_override, else the
+      // global mode): 'autopilot'/'hybrid' → generate + SEND; 'draft' → generate
+      // and save a draft for review (no send); 'off'/'paused' → skip. Respects the
+      // $2 daily spend cap and skips opted-out / already-answered agents.
       const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
       const WA_TOKEN = process.env.META_WA_TOKEN;
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
@@ -596,6 +597,10 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
       const selfOrigin = req.headers.host ? `${proto}://${req.headers.host}` : null;
       if (!selfOrigin) return res.status(500).json({ error: 'cannot resolve self origin' });
 
+      // Global Maya automation mode (per-agent override wins when set).
+      const mRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers });
+      const globalMode = (await mRes.json())?.[0]?.value?.mode || 'draft';
+
       // Candidates: real agents with a recent inbound still unread.
       const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?is_test=eq.false&unread_count=gt.0&last_inbound_at=gte.${sinceIso}&select=id,name,wa_num,wa_url,automation_override,samba_alerts_opt_out&order=last_inbound_at.desc&limit=${maxAgents}`, { headers });
       let candidates = await aRes.json();
@@ -608,7 +613,9 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
 
       const results = [];
       for (const a of candidates) {
-        if (a.automation_override === 'paused' || a.automation_override === 'off') { results.push({ agent: a.name || a.id, skipped: 'muted' }); continue; }
+        // Resolve effective mode: per-agent override (when set) else the global mode.
+        const effMode = (a.automation_override && a.automation_override !== '') ? a.automation_override : globalMode;
+        if (effMode === 'off' || effMode === 'paused') { results.push({ agent: a.name || a.id, skipped: `mode_${effMode}` }); continue; }
         if (a.samba_alerts_opt_out === true) { results.push({ agent: a.name || a.id, skipped: 'opted_out' }); continue; }
         const waNum = String(a.wa_num || (a.wa_url || '').replace(/\D/g, '')).replace(/\D/g, '');
         if (!waNum) { results.push({ agent: a.name || a.id, skipped: 'no_number' }); continue; }
@@ -635,7 +642,14 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         if (!reply || reply.startsWith('[')) { results.push({ agent: a.name || a.id, skipped: 'no_reply' }); continue; }
         todaySpend += cost;
 
-        // Send via WhatsApp.
+        // Draft mode: save the reply for review, leave the thread unread. No send.
+        if (effMode === 'draft') {
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ suggested_reply: reply }) }).catch(() => {});
+          results.push({ agent: a.name || a.id, drafted: true });
+          continue;
+        }
+
+        // Hybrid / autopilot: send via WhatsApp, clear unread + any stale draft.
         const sr = await fetch(`https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`, {
           method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
           body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: reply } })
@@ -661,7 +675,9 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
       }).catch(() => {});
 
       return res.status(200).json({
-        resumed: results.filter(r => r.sent).length,
+        mode: globalMode,
+        sent: results.filter(r => r.sent).length,
+        drafted: results.filter(r => r.drafted).length,
         considered: candidates.length,
         spend_today_usd: +todaySpend.toFixed(2),
         results,

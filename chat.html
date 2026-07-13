@@ -956,19 +956,29 @@ async function setMode(mode) {
   }
 }
 
-// Resume: answer every agent whose latest message is still unanswered — e.g.
-// replies that landed while Maya was paused on the daily spend cap. Maya
-// regenerates each reply and sends it; respects the $2/day cap.
+// Resume: catch up on every agent whose latest message is still unanswered —
+// e.g. replies that landed while Maya was paused on the daily spend cap.
+// Behaviour follows the current Maya automation mode (per-agent override wins):
+// Auto/Hybrid SEND the reply, Draft saves a draft for review, Off skips.
+// Respects the $2/day cap.
 async function resumeUnanswered() {
-  if (!confirm('Answer all agents still waiting for a reply?\n\nMaya will generate and SEND a reply to each agent whose latest message is unanswered (last 4 days). Respects the daily spend cap.')) return;
+  const m = state.mode || 'draft';
+  const verb = (m === 'draft') ? 'draft replies for review (no send)'
+    : (m === 'off') ? 'skip everyone (Maya is Off — switch mode to Hybrid/Auto/Draft first)'
+    : 'generate and SEND replies';
+  if (!confirm(`Catch up on agents still waiting (last 4 days)?\n\nFollowing Maya's current mode (${m.toUpperCase()}), she will ${verb}. Respects the daily spend cap.`)) return;
   const btn = document.getElementById('resumeBtn');
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   toast('Maya is catching up…');
   try {
     const r = await api('resume_unanswered', {});
-    const sent = r?.resumed || 0;
-    const considered = r?.considered || 0;
-    toast(sent ? `Answered ${sent} of ${considered} waiting` : `Nobody waiting${considered ? ` (checked ${considered})` : ''}`);
+    const sent = r?.sent || 0, drafted = r?.drafted || 0, considered = r?.considered || 0;
+    const done = sent + drafted;
+    const label = sent && drafted ? `Sent ${sent}, drafted ${drafted}`
+      : sent ? `Answered ${sent} of ${considered} waiting`
+      : drafted ? `Drafted ${drafted} for review`
+      : `Nobody actioned${considered ? ` (checked ${considered})` : ''}`;
+    toast(label);
     refreshAll(true);
   } catch (e) {
     toast('Catch-up failed — try again');
