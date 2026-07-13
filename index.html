@@ -1401,6 +1401,30 @@ function getWaNum(a) {
   return a.wa_num ? a.wa_num.replace(/\D/g,'') : '';
 }
 function buildWaUrl(num) { return num ? 'https://wa.me/' + num.replace(/\D/g,'') : ''; }
+// Loose number normaliser for duplicate detection (leading 0 → 62).
+function normWaLoose(s) { let d = String(s || '').replace(/\D/g, ''); if (d.startsWith('0')) d = '62' + d.slice(1); return d; }
+// Find another agent (not the one being edited) with the same WhatsApp number.
+function findDupAgent(waRaw) {
+  const n = normWaLoose(waRaw);
+  if (!n || n.length < 8) return null;
+  return agents.find(a => a.id !== editingId && normWaLoose(a.wa_num) === n) || null;
+}
+// Live inline warning under the WhatsApp-number field in the drawer.
+function checkDupWa() {
+  const warn = document.getElementById('df_wa_warn');
+  const inp = document.getElementById('df_wa');
+  if (!warn || !inp) return;
+  const dup = findDupAgent(inp.value);
+  if (dup) {
+    warn.textContent = '';
+    const b = document.createElement('b');
+    b.textContent = dup.name || dup.agency || ('#' + dup.id);
+    warn.append('⚠ This number already belongs to ', b, dup.agency && dup.name ? ` (${dup.agency})` : '', ' — saving will create a duplicate.');
+    warn.style.display = 'block';
+  } else {
+    warn.style.display = 'none';
+  }
+}
 function initials(name, agency) {
   const src = (name || agency || '').trim();
   const words = src.split(/\s+/).filter(Boolean);
@@ -1787,7 +1811,7 @@ function openDrawer(id) {
       <div class="form-grid">
         <div><div class="field-label">Name</div><input class="field-input" type="text" id="df_name" value="${a.name||''}"></div>
         <div><div class="field-label">Agency</div><input class="field-input" type="text" id="df_agency" value="${a.agency||''}"></div>
-        <div><div class="field-label">WhatsApp number</div><input class="field-input" type="text" id="df_wa" value="${waNum}" placeholder="628..."></div>
+        <div><div class="field-label">WhatsApp number</div><input class="field-input" type="text" id="df_wa" value="${waNum}" placeholder="628..." oninput="checkDupWa()"><div id="df_wa_warn" style="display:none;margin-top:6px;padding:7px 10px;background:#fdecea;border:1px solid #f5b5ac;border-radius:8px;font-size:12px;color:#a3271b;line-height:1.35"></div></div>
         <div><div class="field-label">Alternate contact</div><input class="field-input" type="text" id="df_alt" value="${a.alt_contact||''}"></div>
         <div class="form-full"><div class="field-label">General notes</div><textarea class="field-textarea" id="df_notes">${a.notes||''}</textarea></div>
         <div><div class="field-label">Follow-up date (DD/MM/YY)</div><input class="field-input" type="text" id="df_followup" value="${a.followup_date||''}" placeholder="e.g. 25/04/26"></div>
@@ -1839,6 +1863,7 @@ function openDrawer(id) {
   });
 
   document.getElementById('overlay').classList.add('open');
+  checkDupWa();
 }
 
 function toggleUrlRow(k) {
@@ -2133,9 +2158,12 @@ function saveDrawer() {
   if (!editingId) return;
   const a = agents.find(x => x.id === editingId);
   if (!a) return;
+  const waNum = document.getElementById('df_wa').value.replace(/\D/g,'');
+  // Duplicate guard — alert before creating a second contact with the same number.
+  const dup = findDupAgent(waNum);
+  if (dup && !confirm(`⚠ Duplicate contact\n\nThis WhatsApp number already belongs to "${dup.name || dup.agency || ('#' + dup.id)}"${dup.agency && dup.name ? ' (' + dup.agency + ')' : ''}.\n\nSave anyway and create a duplicate?`)) return;
   a.name = document.getElementById('df_name').value.trim();
   a.agency = document.getElementById('df_agency').value.trim();
-  const waNum = document.getElementById('df_wa').value.replace(/\D/g,'');
   a.wa_num = waNum; a.wa_url = waNum ? buildWaUrl(waNum) : '';
   a.alt_contact = document.getElementById('df_alt').value.trim();
   a.notes = document.getElementById('df_notes').value.trim();
