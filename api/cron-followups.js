@@ -52,12 +52,25 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 const FOLLOWUP_INTERVAL_DAYS = 3;
 const MAX_FOLLOWUPS = 4;
 const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
-// Tightened from 2.00 → 0.75 to match webhook cap after one broadcast
-// day burned prepaid credits. Both caps share the same daily_usage
-// counter, so the lower number is the effective ceiling for the whole
-// CRM's Claude spend.
-const DAILY_SPEND_CAP_USD = 0.75;
-const COST_PER_REPLY_USD = 0.05; // Sonnet 4 with smaller follow-up context
+// Shared with the webhook cap — both charge the same daily_usage counter, so
+// this is the effective ceiling for the whole CRM's Claude spend. $2.00 with
+// accurate per-token costing (see costOfUsage) allows ~100+ replies/day.
+const DAILY_SPEND_CAP_USD = 2.00;
+// Forward-looking estimate used ONLY to gate whether the next Claude call would
+// exceed the cap. Actual spend is charged from real token usage (costOfUsage),
+// so this just needs to be a safe upper bound on one reply (~1.5-2¢ real).
+const COST_PER_REPLY_USD = 0.02;
+
+// Sonnet pricing (USD per token): $3/M input, $15/M output; cache read $0.30/M,
+// cache write $3.75/M. Applies to both claude-sonnet-4-6 (draft regen) and the
+// legacy claude-sonnet-4 used for stage follow-ups — same per-token rates.
+function costOfUsage(u) {
+  if (!u) return 0;
+  return (u.input_tokens || 0) * 3 / 1e6
+    + (u.output_tokens || 0) * 15 / 1e6
+    + (u.cache_read_input_tokens || 0) * 0.30 / 1e6
+    + (u.cache_creation_input_tokens || 0) * 3.75 / 1e6;
+}
 const WA_MESSAGE_RETENTION_DAYS = 90; // older rows are pruned on each cron run
 
 export default async function handler(req, res) {
@@ -216,7 +229,7 @@ export default async function handler(req, res) {
         }
 
         // REGENERATE the reply fresh using the canonical Maya prompt path
-        let freshReply = null;
+        let freshReply = null, freshCost = COST_PER_REPLY_USD;
         try {
           const sgRes = await fetch(`${selfOrigin}/api/supabase`, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -225,6 +238,7 @@ export default async function handler(req, res) {
           if (sgRes.ok) {
             const sgData = await sgRes.json();
             freshReply = (sgData?.reply || '').trim();
+            if (typeof sgData?.cost_usd === 'number') freshCost = sgData.cost_usd;
           }
         } catch (e) { /* fall through to skip */ }
 
@@ -234,7 +248,7 @@ export default async function handler(req, res) {
           results.push({ agent: agent.name || agent.id, action: 'draft_skipped', reason: 'regeneration_failed' });
           continue;
         }
-        todaySpend += COST_PER_REPLY_USD;
+        todaySpend += freshCost;
 
         const sendOk = await sendText(WA_PHONE_ID, WA_TOKEN, agent.wa_num, freshReply);
         if (!sendOk) {
@@ -360,10 +374,11 @@ export default async function handler(req, res) {
         }
 
         // Generate follow-up message
-        const followupText = await generateFollowupMessage(
+        const followup = await generateFollowupMessage(
           ANTHROPIC_KEY, agent, projectName, proj, portfolio, count + 1
         );
-        todaySpend += COST_PER_REPLY_USD;
+        const followupText = followup.text;
+        todaySpend += followup.cost_usd;
         if (!followupText) {
           results.push({ agent: agent.name || agent.id, project: projectName, action: 'skipped_no_message' });
           continue;
@@ -603,10 +618,11 @@ Respond with ONLY the message text — no JSON, no preamble.`;
       })
     });
     const data = await res.json();
-    return (data.content?.[0]?.text || '').trim();
+    const text = (data.content?.[0]?.text || '').trim();
+    return { text, cost_usd: data.usage ? costOfUsage(data.usage) : COST_PER_REPLY_USD };
   } catch (e) {
     console.warn('generateFollowupMessage failed:', e.message);
-    return null;
+    return { text: null, cost_usd: 0 };
   }
 }
 

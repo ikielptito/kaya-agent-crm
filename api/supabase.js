@@ -384,15 +384,17 @@ export default async function handler(req, res) {
         }
       } catch (e) { /* availability is best-effort */ }
 
-      const system = `${MAYA_PERSONA}
+      // Cache the stable head (persona + portfolio + rentals + availability);
+      // the volatile per-agent tail stays uncached after the breakpoint.
+      const systemHead = `${MAYA_PERSONA}
 
 ${portfolioCtx}
 
 ${rentalsCtx}
 
-${availabilityCtx}
+${availabilityCtx}`;
 
-This agent's context:
+      const systemRest = `This agent's context:
 Name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 
@@ -400,6 +402,11 @@ Recent message thread (oldest → newest):
 ${thread || '(no prior history)'}
 
 Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent's most recent message. Output ONLY the reply text — no JSON, no preamble, no quotes. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.`;
+
+      const system = [
+        { type: 'text', text: systemHead, cache_control: { type: 'ephemeral' } },
+        { type: 'text', text: systemRest },
+      ];
 
       try {
         const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -414,7 +421,14 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
         });
         const data = await r.json();
         const reply = (data.content?.[0]?.text || '').trim();
-        return res.status(200).json({ reply });
+        // Real token cost (claude-sonnet-4-6: $3/M in, $15/M out) so the cron
+        // charges actual dollars into daily_usage instead of a flat estimate.
+        const u = data.usage || {};
+        const cost_usd = (u.input_tokens || 0) * 3 / 1e6
+          + (u.output_tokens || 0) * 15 / 1e6
+          + (u.cache_read_input_tokens || 0) * 0.30 / 1e6
+          + (u.cache_creation_input_tokens || 0) * 3.75 / 1e6;
+        return res.status(200).json({ reply, cost_usd });
       } catch (e) {
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }

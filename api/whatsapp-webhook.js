@@ -296,18 +296,34 @@ function buildBrochures(projects) {
 // Maya operational windows (WITA = UTC+8)
 const ACTIVE_HOUR_START = 9;  // 9am WITA
 const ACTIVE_HOUR_END = 21;   // 9pm WITA (inclusive of 9:xx, exclusive of 10pm)
-// Tightened from 2.00 → 0.75 after a broadcast day burned through prepaid
-// Anthropic credits. With ~$0.08 actual per-reply on Sonnet 4 (see below),
-// the cap now pauses Maya at ~9 replies/day instead of ~67, leaving a wide
-// margin even on low-balance days.
-const DAILY_SPEND_CAP_USD = 0.75;
+// Spend is charged from ACTUAL token usage returned by the Anthropic API (see
+// generateReply / costOfUsage), not a flat estimate, so this cap tracks real
+// dollars. At ~1.5–2¢ per real reply, $2.00 leaves room for ~100+ replies/day.
+// (Was briefly 0.75 while the flat estimate over-charged ~4×; raised to 2.00
+// once accurate costing landed.)
+const DAILY_SPEND_CAP_USD = 2.00;
 
-// Rough estimate: Claude Sonnet 4 with system prompt ~5k input + ~500 output tokens per reply
-// $3/M input, $15/M output → ~$0.022 per reply. We'll round up for safety to $0.03.
-// Bumped from 0.03 → 0.08 to reflect realistic Sonnet 4 cost with Maya's
-// full context (system prompt + KB + recent thread + projects/rentals
-// blocks). $3/M input + $15/M output × typical ~5K in / ~500 out ≈ $0.075.
-const ESTIMATED_COST_PER_REPLY_USD = 0.08;
+// claude-sonnet-4-6 pricing (USD per token): $3/M input, $15/M output.
+// Cache read ≈ $0.30/M (0.1×), cache write ≈ $3.75/M (1.25×) — both 0 today
+// since Maya's calls don't set cache_control, but included so the number stays
+// correct if caching is added later.
+const SONNET_INPUT_USD_PER_TOK = 3 / 1e6;
+const SONNET_OUTPUT_USD_PER_TOK = 15 / 1e6;
+const SONNET_CACHE_READ_USD_PER_TOK = 0.30 / 1e6;
+const SONNET_CACHE_WRITE_USD_PER_TOK = 3.75 / 1e6;
+
+// Fallback per-reply charge if the API response carries no usage block (e.g.
+// an HTTP error before token accounting). Deliberately conservative.
+const FALLBACK_COST_PER_REPLY_USD = 0.02;
+
+// Real dollar cost of one Anthropic `usage` object.
+function costOfUsage(u) {
+  if (!u) return 0;
+  return (u.input_tokens || 0) * SONNET_INPUT_USD_PER_TOK
+    + (u.output_tokens || 0) * SONNET_OUTPUT_USD_PER_TOK
+    + (u.cache_read_input_tokens || 0) * SONNET_CACHE_READ_USD_PER_TOK
+    + (u.cache_creation_input_tokens || 0) * SONNET_CACHE_WRITE_USD_PER_TOK;
+}
 
 export default async function handler(req, res) {
   const VERIFY_TOKEN = process.env.META_WA_VERIFY_TOKEN;
@@ -671,10 +687,14 @@ export default async function handler(req, res) {
     }
     const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext, inboundImage);
 
-    // Increment today's spend by the estimated cost of the Claude call(s). A
-    // date-range availability lookup costs one extra Claude turn, so charge per
-    // actual LLM call made (aiResult.llm_calls, default 1).
-    await incrementTodaySpend(SUPABASE_URL, sbHeaders, ESTIMATED_COST_PER_REPLY_USD * (aiResult.llm_calls || 1));
+    // Increment today's spend by the ACTUAL token cost of the Claude call(s),
+    // computed from the Anthropic usage block (a date-range availability lookup
+    // adds an extra turn, already summed into cost_usd). Falls back to a flat
+    // per-call charge only if usage accounting was unavailable.
+    const spendDelta = typeof aiResult.cost_usd === 'number'
+      ? aiResult.cost_usd
+      : FALLBACK_COST_PER_REPLY_USD * (aiResult.llm_calls || 1);
+    await incrementTodaySpend(SUPABASE_URL, sbHeaders, spendDelta);
 
     // Apply any CRM updates Maya suggested (status changes, tags)
     // Each update is logged with evidence and a "by_maya: true" flag
@@ -982,6 +1002,11 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
         }).catch(() => {});
         continue;
       }
+      // Mirror the proven-working new-agent insert (see the first-message path
+      // above): conversation_summary + conversation_history + unread_count are
+      // NOT-NULL on the base table, so referral inserts that omitted them were
+      // failing. Include them, then layer the referral extras on top.
+      const dayStr = new Date().toISOString().slice(0, 10);
       const ins = await fetch(`${url}/rest/v1/agents`, {
         method: 'POST',
         headers: { ...headers, Prefer: 'return=representation' },
@@ -990,11 +1015,16 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
           wa_num: waNum,
           wa_url: `https://wa.me/${waNum}`,
           agency: agent.agency || null,
-          notes: `Referred by ${agent.name || 'agent #' + agent.id} (WhatsApp contact card) on ${new Date().toISOString().slice(0, 10)}.`,
+          unread_count: 0,
+          notes: `Referred by ${agent.name || 'agent #' + agent.id} on ${dayStr}.`,
+          conversation_summary: `[${dayStr}] Added by Maya — ${a.reason || 'referral'}. Number provided by ${agent.name || 'agent #' + agent.id}.`,
+          conversation_history: { first_contact: dayStr, last_contact: dayStr, total_messages: 0 },
           campaign_engagement: { samba: { status: 'enrolled', source: 'referral', referred_by: agent.id } },
         }),
       });
-      const created = (await ins.json().catch(() => null)) || [];
+      const insText = await ins.text().catch(() => '');
+      if (!ins.ok) { console.warn('applyCrmActions create_agent insert failed:', insText.slice(0, 300)); }
+      const created = (() => { try { return JSON.parse(insText); } catch { return []; } })() || [];
       const newId = Array.isArray(created) && created[0] ? created[0].id : null;
       await fetch(`${url}/rest/v1/maya_updates`, {
         method: 'POST', headers,
@@ -1173,7 +1203,12 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
     ? `Recent message thread (oldest → newest, both sides):\n${recentThread}`
     : `Prior notes:\n${(agent.conversation_summary || '(no prior history)').slice(-2500)}`;
 
-  const system = `${MAYA_PERSONA}
+  // Split the prompt so the large, byte-stable head (persona + portfolio KB +
+  // rentals + availability + fixed rules) is a cacheable prefix. It only changes
+  // when Ikiel edits projects/inventory, so across a burst of replies it's
+  // served from cache at ~0.1x input cost. The volatile per-conversation tail
+  // (agent name, thread, mode) stays uncached after the breakpoint.
+  const systemHead = `${MAYA_PERSONA}
 
 KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
@@ -1215,9 +1250,9 @@ If they said yes to samba_intro: send a concise overview of all SAMBA RENTAL pro
 
   "All availability, listing photos, and rental details are live at https://sambarentals.com — agents can download photos to share with clients directly, see real-time calendar availability, and use the WhatsApp shortcut to send the listing straight to a client. Happy to answer questions about any specific property too."
 
-Always include the portal link with that explanation on the FIRST Samba response after samba_intro. On subsequent Samba responses you don't need to repeat the explanation — just refer to "the portal" if relevant.
+Always include the portal link with that explanation on the FIRST Samba response after samba_intro. On subsequent Samba responses you don't need to repeat the explanation — just refer to "the portal" if relevant.`;
 
-This conversation's context:
+  const systemRest = `This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${threadBlock}
@@ -1281,9 +1316,9 @@ CONTACT FREQUENCY — when an agent asks to hear from us LESS OFTEN but does not
 Example: { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
 Acknowledge the change in your reply ("Understood — I'll only send the weekly summary from now on."). Do NOT set samba opt-out for these agents; frequency reduction is exactly so we don't lose them entirely.
 
-TEAM HANDOFF / NEW CONTACTS — when the agent shares a WhatsApp contact card (you'll see "[Agent shared a WhatsApp contact card: Name — +628…]") or types a teammate's name + number and asks us to contact that person / add them to updates, use crm_actions to create the new contact:
-  { "type": "create_agent", "name": "<person's name>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "referred by this agent" }
-Rules: only create when there is an explicit number; never invent numbers; if the card came without a number, ask them to resend or type it. If the agent says the NEW person should be contacted INSTEAD of them, also set contact_frequency = "paused" on the current agent via crm_updates and say you've switched over. Confirm in your reply that the teammate has been added.
+TEAM HANDOFF / NEW CONTACTS — ALWAYS capture a new contact whenever the agent gives us ANY alternate WhatsApp number to use for future updates. This covers: (a) a shared WhatsApp contact card ("[Agent shared a WhatsApp contact card: Name — +628…]"), (b) a teammate's name + number to add to updates, and (c) a redirect — they tell us to contact a different number/colleague/department/division instead (e.g. "for monthly/rental please contact our long-term rental team on +62 822…", "message my colleague X on …", "send future updates to …"). In every one of these cases, use crm_actions to create the new contact so we can reach them directly:
+  { "type": "create_agent", "name": "<person or team name, e.g. 'Oniriq — Long Term Rentals'>", "wa_num": "<digits only, e.g. 6281234567890>", "reason": "redirect: agent asked us to contact this number for future updates" }
+Rules: only create when there is an explicit number in the message; never invent or guess digits; if a card came without a number, ask them to resend or type it. If the agent says the NEW number should be contacted INSTEAD of them, ALSO set samba_alerts_opt_out = true (or contact_frequency = "paused") on the current agent via crm_updates so we stop bouncing off them, and say you've switched future updates over to the new number. Confirm in your reply that the new contact has been added.
 
 For timestamp fields (stage_updated_at, next_followup_at), use these special marker strings — the system will substitute the actual ISO timestamp:
 - For "right now" → use the literal string "__NOW__"
@@ -1315,6 +1350,14 @@ Set "send_photo" when the agent asks to SEE a Samba rental ("can you send a phot
 Set "crm_updates" to an empty array if no clear pipeline signals are present.
 Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 
+  // systemHead is the stable, cacheable prefix; systemRest carries the volatile
+  // per-conversation context. Together they carry the same instructions as the
+  // old single-string prompt, so Maya's behaviour is unchanged.
+  const system = [
+    { type: 'text', text: systemHead, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: systemRest },
+  ];
+
   // Conversation turns for this reply. A date-range availability check appends
   // an assistant turn + the calendar result, then re-prompts once (max 2 calls).
   // When the agent sent an image, it rides along as a vision block.
@@ -1324,6 +1367,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
     : `The agent just sent: "${inbound}"`;
   const messages = [{ role: 'user', content: firstTurn }];
   let llmCalls = 0;
+  let costUsd = 0;
   const MAX_LLM_CALLS = 2;
 
   try {
@@ -1340,10 +1384,12 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
       });
       llmCalls++;
       const data = await res.json();
+      // Charge actual token spend for this hop (falls back if usage is absent).
+      costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
       const raw = data.content?.[0]?.text || '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls };
+        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
       }
       const parsed = JSON.parse(jsonMatch[0]);
 
@@ -1364,13 +1410,14 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
         crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
         llm_calls: llmCalls,
+        cost_usd: costUsd,
       };
     }
     // Exhausted hops without a terminal reply (e.g. Maya asked for availability
     // twice) — escalate so a human picks it up rather than sending nothing.
-    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls };
+    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls || 1 };
+    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
   }
 }
