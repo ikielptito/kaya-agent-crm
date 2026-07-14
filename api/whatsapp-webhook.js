@@ -446,6 +446,17 @@ export default async function handler(req, res) {
       return res.status(200).end();
     }
 
+    // Archive inbound documents to our own storage so they stay openable past
+    // Meta's ~30-day media window (agreements, PDFs, etc.). On success we store
+    // the permanent public URL in media_id; the inbox renders a URL media_id
+    // directly, and falls back to the Meta-id proxy if archiving failed.
+    let storedMediaId = mediaId;
+    if (mediaType === 'document' && mediaId) {
+      const docName = (String(dbContent || '').match(/^\[Document:\s*([^\]]+)\]/) || [])[1] || 'document';
+      const archived = await archiveInboundDoc(SUPABASE_URL, SUPABASE_KEY, mediaId, docName, WA_TOKEN);
+      if (archived) storedMediaId = archived;
+    }
+
     // Store inbound message — content is human-readable summary, media
     // identifiers go in dedicated columns for the inbox to render inline.
     await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
@@ -453,7 +464,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         agent_id: agent?.id || null, wa_num: fromNum, direction: 'inbound',
         content: dbContent, wa_message_id: waMessageId, timestamp, source: 'webhook',
-        media_type: mediaType || null, media_id: mediaId || null,
+        media_type: mediaType || null, media_id: storedMediaId || null,
         reply_to: msg.context?.id || null,   // id of the message this one quotes, if any
       })
     });
@@ -1102,6 +1113,36 @@ async function fetchWaMediaBase64(mediaId, token) {
   const buf = Buffer.from(await binRes.arrayBuffer());
   if (buf.length > MAX_BYTES) return null;
   return { mime, data: buf.toString('base64') };
+}
+
+// Download an inbound WhatsApp document (PDF, agreement, etc.) and archive it to
+// Supabase Storage so it stays openable forever — Meta deletes media after ~30
+// days. Returns a permanent public URL, or null on any failure (the caller then
+// falls back to the Meta media id, served through the short-lived proxy).
+async function archiveInboundDoc(supabaseUrl, supabaseKey, mediaId, filename, token) {
+  const MAX_BYTES = 25 * 1024 * 1024;
+  try {
+    const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!metaRes.ok) return null;
+    const meta = await metaRes.json();
+    if (!meta.url) return null;
+    if (meta.file_size && meta.file_size > MAX_BYTES) return null;
+    const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!binRes.ok) return null;
+    const buf = Buffer.from(await binRes.arrayBuffer());
+    if (buf.length > MAX_BYTES) return null;
+    const safe = (String(filename || 'document').replace(/[^\w.\-]+/g, '_').replace(/^_+/, '').slice(-80)) || 'document';
+    const path = `docs/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safe}`;
+    const up = await fetch(`${supabaseUrl}/storage/v1/object/brochures/${path}`, {
+      method: 'POST',
+      headers: { apikey: supabaseKey, Authorization: 'Bearer ' + supabaseKey, 'Content-Type': meta.mime_type || 'application/octet-stream', 'x-upsert': 'true' },
+      body: buf,
+    });
+    if (!up.ok) return null;
+    return `${supabaseUrl}/storage/v1/object/public/brochures/${encodeURI(path)}`;
+  } catch (e) {
+    return null;
+  }
 }
 
 // Sends a free-text WhatsApp message and returns Meta's wa_message_id (or null)

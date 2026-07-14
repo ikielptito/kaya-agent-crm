@@ -1558,7 +1558,10 @@ function renderMedia(m) {
   const label = MEDIA_LABELS[m.media_type] || 'Attachment';
   // Known media type but no id we can fetch (legacy row) — show a clear chip.
   if (!m.media_id) return `<span class="bubble-missing">📎 ${label} — not saved</span>`;
-  const src = '/api/whatsapp-send?fetch_media=' + encodeURIComponent(m.media_id);
+  // media_id is either a permanent URL (archived inbound docs, or our own sent
+  // image/doc) — use it directly — or a Meta media id served via the proxy.
+  const src = /^https?:\/\//i.test(m.media_id) ? m.media_id
+    : '/api/whatsapp-send?fetch_media=' + encodeURIComponent(m.media_id);
   if (m.media_type === 'image' || m.media_type === 'sticker')
     return `<img class="bubble-img" src="${src}" loading="lazy" onclick="lightbox('${src}')" onerror="mediaFailed(this,'${src}','${label}')">`;
   if (m.media_type === 'audio') return `<audio controls preload="metadata" src="${src}"></audio>`;

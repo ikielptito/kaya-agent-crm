@@ -154,7 +154,11 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         campaign_id: campaignId || null,
         reply_to: replyTo || null,
         status: 'sent',
-        template_name: type === 'template' ? (templateName || null) : null
+        template_name: type === 'template' ? (templateName || null) : null,
+        // Persist the media URL so the inbox renders sent images inline and sent
+        // documents (e.g. a signed agreement) as a tappable card, not plain text.
+        media_type: (type === 'image' || type === 'document') ? type : null,
+        media_id: type === 'image' ? (imageUrl || null) : (type === 'document' ? (docUrl || null) : null)
       })
     }).catch(e => console.warn('Failed to log outbound message:', e.message));
   }
