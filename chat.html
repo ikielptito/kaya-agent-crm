@@ -205,6 +205,16 @@
   .bubble-img { display: block; max-width: 100%; border-radius: 6px; margin-bottom: 3px; cursor: zoom-in; }
   .bubble-doc, .bubble-loc { display: inline-flex; align-items: center; gap: 7px; padding: 9px 12px; background: #00000008;
     border-radius: 7px; color: var(--wa-green-dark); text-decoration: none; font-weight: 500; font-size: 13.5px; margin-bottom: 3px; }
+  /* Document card — tap name to view, ⬇ to download (PDFs, agreements, etc.) */
+  .doc-card { display: flex; align-items: stretch; gap: 1px; margin-bottom: 3px; border-radius: 9px; overflow: hidden; max-width: 260px; }
+  .doc-open { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 9px 11px; background: #00000008; text-decoration: none; }
+  .doc-ico { font-size: 20px; flex: none; }
+  .doc-meta { min-width: 0; display: flex; flex-direction: column; }
+  .doc-name { font-weight: 600; font-size: 13.5px; color: var(--wa-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .doc-sub { font-size: 11px; color: var(--wa-ink-2); letter-spacing: .02em; }
+  .doc-dl { flex: none; display: flex; align-items: center; justify-content: center; width: 40px; background: #00000012;
+    color: var(--wa-green-dark); text-decoration: none; font-size: 17px; }
+  .doc-dl:active, .doc-open:active { background: #0000001c; }
   .bubble audio, .bubble video { max-width: 240px; display: block; margin-bottom: 3px; }
   .bubble-missing { display: inline-block; color: var(--wa-ink-2); font-style: italic; font-size: 13.5px; padding: 2px 0; }
   /* Contact card bubble */
@@ -1556,7 +1566,16 @@ function renderMedia(m) {
     return `<video class="bubble-img" controls preload="metadata" src="${src}" onerror="mediaFailed(this,'${src}','${label}')"></video>`;
   if (m.media_type === 'document') {
     const name = (m.content || '').match(/^\[Document:\s*([^\]]+)\]/)?.[1] || 'document';
-    return `<a class="bubble-doc" href="${src}" target="_blank" download="${esc(name)}">📄 ${esc(name)}</a>`;
+    const ext = (name.match(/\.([a-z0-9]+)$/i)?.[1] || 'file').toUpperCase();
+    // Tap the card to VIEW inline (opens the PDF/doc in a viewer); the ⬇ button
+    // downloads it to sign and send back. Both stream through the media proxy.
+    return `<span class="doc-card">
+      <a class="doc-open" href="${src}" target="_blank" rel="noopener" title="Open ${esc(name)}">
+        <span class="doc-ico">📄</span>
+        <span class="doc-meta"><span class="doc-name">${esc(name)}</span><span class="doc-sub">${esc(ext)} · tap to view</span></span>
+      </a>
+      <a class="doc-dl" href="${src}" download="${esc(name)}" title="Download ${esc(name)}" aria-label="Download">⬇</a>
+    </span>`;
   }
   if (m.media_type === 'location') return `<a class="bubble-loc" href="https://www.google.com/maps?q=${esc(m.media_id)}" target="_blank">📍 Open in Maps</a>`;
   return '';
