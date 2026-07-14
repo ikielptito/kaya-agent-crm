@@ -1146,14 +1146,16 @@ export async function runAvailabilityNotifications(ctx) {
     // rejections (parameter format, language mismatch, unapproved name, etc.)
     let metaErr = null;
     let waMessageId = null;
-    // Use the visual carousel for the weekly digest AND mid-week availability
-    // alerts. The one exception is an agent's first-ever availability send, which
-    // keeps the text intro so we introduce Maya/Samba before showing listings.
-    const sendCarousel = carouselCards && !isFirstSend;
+    // Use the visual carousel for EVERY availability touch — weekly digest,
+    // mid-week alerts, and the first-ever send — so all agent-facing marketing
+    // is the same rich format. The intro just gets a warmer onboarding line.
+    const sendCarousel = !!carouselCards;
     const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
-    const carouselIntro = isMonday
-      ? `Hi ${firstName}, here's this week's Samba rentals availability`
-      : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
+    const carouselIntro = isFirstSend
+      ? `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`
+      : isMonday
+        ? `Hi ${firstName}, here's this week's Samba rentals availability`
+        : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
     const sendComponents = sendCarousel
       ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
       : [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }];
