@@ -2,6 +2,7 @@ import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
+import { getPlaybook, renderPlaybookBlock, applyDecisions } from '../lib/maya-review.js';
 import webpush from 'web-push';
 
 // Property listings (portal) → card objects for the console listing picker and
@@ -860,6 +861,68 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         results,
       });
 
+    } else if (action === 'quick_add_agent') {
+      const { name, wa_num, agency, notes, service_type } = payload || {};
+      if (!name || !wa_num) return res.status(400).json({ error: 'name and wa_num required' });
+      const wa = String(wa_num).replace(/\D/g, '');
+      if (!wa || wa.length < 9) return res.status(400).json({ error: 'valid wa_num required (digits incl. country code)' });
+      const dup = await (await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${wa}&select=id,name`, { headers })).json();
+      if (Array.isArray(dup) && dup.length) return res.status(409).json({ error: `Already exists: #${dup[0].id} ${dup[0].name || ''}`.trim(), existing_agent_id: dup[0].id });
+      const fields = baseAgentFields({
+        name, waNum: wa, agency: agency || null, notes: notes || null,
+        source: 'quick_add', reason: 'recruited via quick-add form',
+        serviceType: service_type || 'rental',
+      });
+      const created = await createAgentRow(SUPABASE_URL, headers, fields);
+      if (!created.ok) return res.status(500).json({ error: 'insert failed: ' + created.error });
+      const row = created.row;
+      let welcome_sent = false;
+      const TOKEN = process.env.META_WA_TOKEN;
+      const PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (row?.id && TOKEN && PHONE_ID) {
+        try {
+          const WABA_ID = process.env.META_WABA_ID;
+          if (WABA_ID) {
+            const tr = await fetch(`https://graph.facebook.com/v19.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
+              headers: { 'Authorization': 'Bearer ' + TOKEN }
+            });
+            const td = await tr.json();
+            const welcomeTpl = (td.data || []).find(t => t.status === 'APPROVED' && t.name === 'samba_agent_welcome_v1');
+            if (welcomeTpl) {
+              const bodyComp = (welcomeTpl.components || []).find(c => c.type === 'BODY');
+              const fName = String(name).trim().split(/\s+/)[0] || 'there';
+              const components = [{ type: 'body', parameters: [{ type: 'text', text: fName }] }];
+              const btnComp = (welcomeTpl.components || []).find(c => c.type === 'BUTTONS');
+              const urlBtn = (btnComp?.buttons || []).find(b => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || ''));
+              if (urlBtn) components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: '' }] });
+              const sr = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  messaging_product: 'whatsapp', to: wa, type: 'template',
+                  template: { name: welcomeTpl.name, language: { code: welcomeTpl.language || 'en' }, components }
+                })
+              });
+              const sd = await sr.json();
+              if (sr.ok) {
+                welcome_sent = true;
+                const rendered = (bodyComp?.text || '').replace(/\{\{1\}\}/g, fName);
+                await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+                  method: 'POST', headers,
+                  body: JSON.stringify({
+                    agent_id: row.id, wa_num: wa, direction: 'outbound',
+                    content: rendered, wa_message_id: sd.messages?.[0]?.id,
+                    timestamp: new Date().toISOString(), source: 'api',
+                    category: 'onboarding', status: 'sent', template_name: welcomeTpl.name
+                  })
+                }).catch(() => {});
+              }
+            }
+          }
+        } catch (e) { console.warn('welcome template send failed:', e.message); }
+      }
+      return res.status(200).json({ success: true, agent: row, welcome_sent });
+
     } else if (action === 'assistant') {
       // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
       return await handleAssistant(req, res, { SUPABASE_URL, headers });
@@ -867,6 +930,36 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
     } else if (action === 'execute_broadcast') {
       // User confirmed a pending assistant broadcast draft — deterministic send
       return await handleExecuteBroadcast(req, res, { SUPABASE_URL, headers });
+
+    } else if (action === 'get_maya_review') {
+      // Console: the weekly self-review card. Returns the pending review (if not
+      // yet decided), the current approved playbook, and the metrics log.
+      const env = { SUPABASE_URL, headers };
+      const get = async (key) => {
+        const rr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${key}&select=value`, { headers });
+        return (await rr.json())?.[0]?.value ?? null;
+      };
+      const [pending, log] = await Promise.all([get('maya_review_pending'), get('maya_review_log')]);
+      const playbook = await getPlaybook(env);
+      return res.status(200).json({
+        pending: (pending && !pending.decided) ? pending : null,
+        last_decided: (pending && pending.decided) ? { week_of: pending.week_of, decided_at: pending.decided_at } : null,
+        playbook: { version: playbook.version, updated_at: playbook.updated_at,
+          lessons: playbook.lessons, facts: playbook.facts },
+        playbook_preview: renderPlaybookBlock(playbook),
+        log: Array.isArray(log) ? log : [],
+      });
+
+    } else if (action === 'apply_maya_review') {
+      // Console: Ikiel approved/rejected lessons + answered questions. This is
+      // the ONLY path that changes Maya's live behaviour (merges the playbook).
+      const { approve = [], reject = [], answers = {} } = payload || {};
+      const out = await applyDecisions(
+        { SUPABASE_URL, headers, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
+        { approve, reject, answers }
+      );
+      if (out?.error) return res.status(400).json(out);
+      return res.status(200).json(out);
 
     } else if (action === 'remove_push_subscription') {
       const endpoint = payload?.endpoint;

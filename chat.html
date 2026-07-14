@@ -483,6 +483,19 @@
     font-size: 13.5px; color: var(--wa-ink); text-align: left; cursor: pointer; }
   .sugg:active { background: var(--wa-panel-2); }
 
+  /* ── Quick-add agent modal ──────────────────────────────── */
+  .qa-form { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .qa-field { display: flex; flex-direction: column; gap: 4px; }
+  .qa-field label { font-size: 11px; font-weight: 700; color: var(--wa-ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
+  .qa-field input, .qa-field select, .qa-field textarea { border: 1px solid var(--wa-rule); border-radius: 8px; padding: 9px 12px; font-size: 14px; outline: none; background: var(--wa-bg); color: var(--wa-ink); }
+  .qa-field input:focus, .qa-field select:focus, .qa-field textarea:focus { border-color: var(--wa-accent); }
+  .qa-field textarea { resize: vertical; min-height: 44px; font-family: inherit; }
+  .qa-submit { width: 100%; background: var(--wa-accent); color: #fff; border: none; border-radius: 10px; padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .qa-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+  .qa-result { font-size: 13px; padding: 8px 12px; border-radius: 8px; margin-top: 4px; }
+  .qa-result.ok { background: #e6f4ea; color: #1e6b46; }
+  .qa-result.err { background: #fce8e6; color: #c5221f; }
+
   /* ── Analytics overlay ─────────────────────────────────── */
   .analytics-overlay { position: fixed; inset: 0; z-index: 120; background: var(--wa-bg);
     display: flex; flex-direction: column; }
@@ -536,6 +549,49 @@
   .tier-warm { background: #fff3cd; color: #8a6d00; } .tier-dormant { background: #ececec; color: #666; } .tier-new { background: #e7f0ff; color: #1d4ed8; } .tier-unset { background: #ececec; color: #888; }
   .an-note { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 8px; line-height: 1.4; }
 
+  /* ── Maya self-review overlay ──────────────────────────── */
+  .review-btn { position: relative; }
+  .review-dot { position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border-radius: 50%;
+    background: #C46E4B; border: 1.5px solid var(--wa-panel-2); }
+  .rv-scorecard { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 14px;
+    padding: 15px 16px; box-shadow: var(--wa-shadow); display: flex; align-items: center; gap: 14px; }
+  .rv-grade { font-size: 2.1rem; font-weight: 800; width: 58px; height: 58px; flex: none; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center; color: #fff; line-height: 1; }
+  .rv-grade.g-A { background: #1e6b46; } .rv-grade.g-B { background: #3f8f5f; } .rv-grade.g-C { background: #b8860b; }
+  .rv-grade.g-D { background: #c4713b; } .rv-grade.g-F { background: #b23b3b; } .rv-grade.g-none { background: #9a9086; font-size: 1rem; }
+  .rv-scoremeta { flex: 1; min-width: 0; }
+  .rv-headline { font-size: 13.5px; color: var(--wa-ink); font-weight: 600; line-height: 1.35; }
+  .rv-scoresub { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 4px; }
+  .rv-card { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px; padding: 13px 14px;
+    box-shadow: var(--wa-shadow); margin-bottom: 10px; }
+  .rv-card.picked { border-color: #1e6b46; box-shadow: 0 0 0 1.5px #1e6b4655; }
+  .rv-card.rejected { opacity: 0.5; }
+  .rv-cardtop { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+  .rv-catchip { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 2px 7px; border-radius: 5px; background: var(--wa-panel-2); color: var(--wa-ink-2); }
+  .rv-catchip.sev-high { background: #f6d9d3; color: #a3341f; } .rv-catchip.sev-med { background: #fdefd0; color: #8a6d00; }
+  .rv-rule { font-size: 14px; color: var(--wa-ink); font-weight: 600; line-height: 1.4; }
+  .rv-rationale { font-size: 12px; color: var(--wa-ink-2); margin-top: 5px; line-height: 1.4; }
+  .rv-evidence { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 7px; padding: 7px 9px; border-left: 2px solid var(--wa-rule);
+    background: var(--wa-panel-2); border-radius: 0 6px 6px 0; font-style: italic; }
+  .rv-toggle { display: flex; gap: 7px; margin-top: 11px; }
+  .rv-tbtn { flex: 1; border: 1px solid var(--wa-rule); background: #fff; color: var(--wa-ink-2); border-radius: 8px;
+    padding: 7px; font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer; }
+  .rv-tbtn.approve.on { background: #1e6b46; color: #fff; border-color: #1e6b46; }
+  .rv-tbtn.reject.on { background: #b23b3b; color: #fff; border-color: #b23b3b; }
+  .rv-qinput { width: 100%; border: 1px solid var(--wa-rule); border-radius: 8px; padding: 8px 10px; font-size: 13px;
+    font-family: inherit; color: var(--wa-ink); margin-top: 9px; box-sizing: border-box; resize: vertical; min-height: 38px; }
+  .rv-qcontext { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 4px; line-height: 1.4; }
+  .rv-empty { text-align: center; color: var(--wa-ink-2); padding: 40px 0; line-height: 1.5; }
+  .rv-pblesson { font-size: 12.5px; color: var(--wa-ink); padding: 7px 0; border-bottom: 1px solid var(--wa-rule); line-height: 1.4; }
+  .rv-pblesson:last-child { border-bottom: none; }
+  .rv-applybar { display: flex; align-items: center; gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    background: var(--wa-panel-2); border-top: 1px solid var(--wa-rule); }
+  .rv-applysummary { flex: 1; font-size: 12.5px; color: var(--wa-ink-2); }
+  .rv-applybtn { background: #1e6b46; color: #fff; border: none; border-radius: 9px; padding: 11px 20px;
+    font-size: 14px; font-weight: 700; font-family: inherit; cursor: pointer; }
+  .rv-applybtn:disabled { opacity: 0.5; }
+
   /* ── Responsive: single-pane on phones ────────────────── */
   @media (max-width: 759px) {
     .pane-list { max-width: none; }
@@ -562,9 +618,11 @@
     <div class="list-head">
       <div class="list-head-top">
         <div class="list-title">Maya</div>
+        <button class="refresh-btn" id="quickAddBtn" onclick="openQuickAdd()" title="Add new agent">+</button>
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)">↩</button>
         <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats">🧲</button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics">📊</button>
+        <button class="refresh-btn review-btn" id="reviewBtn" onclick="openReview()" title="Maya's weekly self-review">🎓<span class="review-dot" id="reviewDot" style="display:none"></span></button>
         <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
         <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
       </div>
@@ -659,6 +717,20 @@
     </select>
   </div>
   <div class="an-body" id="anBody"><div class="an-loading">Loading…</div></div>
+</div>
+
+<!-- ── Maya self-review overlay ───────────────────────────── -->
+<div id="reviewOverlay" class="analytics-overlay" style="display:none">
+  <div class="an-head">
+    <button class="an-back" onclick="closeReview()">‹</button>
+    <div class="an-title">Maya — Weekly Review</div>
+    <button class="refresh-btn" onclick="loadReview()" title="Refresh">⟳</button>
+  </div>
+  <div class="an-body" id="rvBody"><div class="an-loading">Loading…</div></div>
+  <div class="rv-applybar" id="rvApplyBar" style="display:none">
+    <div class="rv-applysummary" id="rvApplySummary"></div>
+    <button class="rv-applybtn" id="rvApplyBtn" onclick="applyReview()">Apply to Maya</button>
+  </div>
 </div>
 
 <!-- Attach / message-action bottom sheet -->
@@ -765,6 +837,7 @@ async function init() {
   setupThreadGestures();
   await registerServiceWorker();
   await Promise.all([refreshAll(), loadMode()]);
+  refreshReviewBadge();
   startPolling();
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { refreshAll(); loadMode(); if (state.activeId) refreshThread(); }
@@ -1032,6 +1105,53 @@ async function backfillContacts() {
     toast('Backfill failed — try again');
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🧲'; }
+  }
+}
+
+// ── Quick-add agent ──────────────────────────────────────────────────
+function openQuickAdd() {
+  document.getElementById('modalHost').innerHTML =
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add Agent</h3><button onclick="closeModal()">✕</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitQuickAdd(event)">
+      <div class="qa-field"><label>Name *</label><input id="qaName" required autocomplete="off"></div>
+      <div class="qa-field"><label>WhatsApp number *</label><input id="qaNum" required placeholder="+62 812 3456 7890" inputmode="tel" autocomplete="off"></div>
+      <div class="qa-field"><label>Agency</label><input id="qaAgency" autocomplete="off"></div>
+      <div class="qa-field"><label>Notes</label><textarea id="qaNotes" rows="2" placeholder="e.g. Found in FB group Bali Villas For Rent"></textarea></div>
+      <div class="qa-field"><label>Type</label><select id="qaType"><option value="rental" selected>Rental</option><option value="leasehold">Leasehold</option><option value="both">Both</option></select></div>
+      <div id="qaResult"></div>
+      <button class="qa-submit" id="qaSubmit" type="submit">Add & Send Welcome</button>
+    </form></div></div></div>`;
+  document.getElementById('qaName').focus();
+}
+
+async function submitQuickAdd(e) {
+  e.preventDefault();
+  const btn = document.getElementById('qaSubmit');
+  const result = document.getElementById('qaResult');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  result.className = 'qa-result'; result.textContent = '';
+  try {
+    const r = await api('quick_add_agent', {
+      name: document.getElementById('qaName').value.trim(),
+      wa_num: document.getElementById('qaNum').value.trim(),
+      agency: document.getElementById('qaAgency').value.trim() || undefined,
+      notes: document.getElementById('qaNotes').value.trim() || undefined,
+      service_type: document.getElementById('qaType').value,
+    });
+    if (r.error) throw new Error(r.error);
+    result.className = 'qa-result ok';
+    result.textContent = r.welcome_sent
+      ? `Added! Welcome message sent to ${r.agent?.name || 'agent'}.`
+      : `Added! (Welcome template not yet approved — no message sent)`;
+    btn.textContent = 'Done';
+    refreshAll(true);
+    setTimeout(() => {
+      closeModal();
+      if (r.agent?.id) openConv(r.agent.id);
+    }, 1500);
+  } catch (err) {
+    result.className = 'qa-result err';
+    result.textContent = err.message || 'Failed — try again';
+    btn.disabled = false; btn.textContent = 'Add & Send Welcome';
   }
 }
 
@@ -2215,6 +2335,167 @@ function openAnalytics() {
   loadAnalytics();
 }
 function closeAnalytics() { document.getElementById('analyticsOverlay').style.display = 'none'; }
+
+// ════════════════════════════════════════════════════════════════════
+// Maya self-review — the weekly loop's approval surface. Reads
+// get_maya_review; Ikiel approves/rejects lessons + answers questions;
+// apply_maya_review merges the approved playbook into Maya's live prompt.
+// ════════════════════════════════════════════════════════════════════
+const reviewState = { pending: null, decisions: {}, answers: {} };
+
+function openReview() {
+  document.getElementById('reviewOverlay').style.display = 'flex';
+  loadReview();
+}
+function closeReview() {
+  document.getElementById('reviewOverlay').style.display = 'none';
+  refreshReviewBadge();
+}
+
+// Show the header dot when there's an undecided review waiting.
+async function refreshReviewBadge() {
+  try {
+    const d = await api('get_maya_review');
+    document.getElementById('reviewDot').style.display = (d && d.pending) ? 'block' : 'none';
+  } catch { /* silent */ }
+}
+
+async function loadReview() {
+  const body = document.getElementById('rvBody');
+  body.innerHTML = '<div class="an-loading">Loading…</div>';
+  document.getElementById('rvApplyBar').style.display = 'none';
+  try {
+    const d = await api('get_maya_review');
+    if (!d || d.error) throw new Error(d?.error || 'no data');
+    reviewState.pending = d.pending;
+    reviewState.decisions = {};
+    reviewState.answers = {};
+    renderReview(d);
+  } catch (e) {
+    body.innerHTML = `<div class="an-loading">Couldn't load review: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderReview(d) {
+  const body = document.getElementById('rvBody');
+  const p = d.pending;
+  const pb = d.playbook || { lessons: [], facts: [] };
+  let html = '';
+
+  if (p) {
+    const grade = (p.scoreboard?.grade || '?').toString();
+    const gClass = ['A','B','C','D','F'].includes(grade[0]) ? 'g-' + grade[0] : 'g-none';
+    html += `<div class="rv-scorecard">
+      <div class="rv-grade ${gClass}">${esc(grade)}</div>
+      <div class="rv-scoremeta">
+        <div class="rv-headline">${esc(p.scoreboard?.headline || 'Weekly review')}</div>
+        <div class="rv-scoresub">Week of ${esc(p.week_of)} · ${p.thread_count} conversations · ${p.reply_count} replies · ${p.scoreboard?.issues_found ?? 0} issues</div>
+      </div></div>`;
+
+    if (p.lessons?.length) {
+      html += `<div class="an-sec-label">Proposed lessons — approve to teach Maya</div>`;
+      html += p.lessons.map(l => `
+        <div class="rv-card" id="rvc_${l.id}">
+          <div class="rv-cardtop">
+            <span class="rv-catchip sev-${esc(l.severity||'med')}">${esc(l.category||'')}</span>
+          </div>
+          <div class="rv-rule">${esc(l.rule)}</div>
+          ${l.rationale ? `<div class="rv-rationale">${esc(l.rationale)}</div>` : ''}
+          ${l.evidence ? `<div class="rv-evidence">${esc(l.evidence)}</div>` : ''}
+          <div class="rv-toggle">
+            <button class="rv-tbtn approve" onclick="setDecision('${l.id}','approve')">Approve</button>
+            <button class="rv-tbtn reject" onclick="setDecision('${l.id}','reject')">Reject</button>
+          </div>
+        </div>`).join('');
+    }
+
+    if (p.questions?.length) {
+      html += `<div class="an-sec-label">Questions for you — answers become facts Maya can quote</div>`;
+      html += p.questions.map(q => `
+        <div class="rv-card">
+          <div class="rv-rule">${esc(q.question)}</div>
+          ${q.context ? `<div class="rv-qcontext">${esc(q.context)}${q.agent ? ' · '+esc(q.agent) : ''}</div>` : ''}
+          <textarea class="rv-qinput" placeholder="Your answer (leave blank to skip)" oninput="setAnswer('${q.id}', this.value)"></textarea>
+        </div>`).join('');
+    }
+
+    if (!p.lessons?.length && !p.questions?.length) {
+      html += `<div class="rv-empty">Clean week — Maya had no issues worth flagging.<br>Nothing to approve.</div>`;
+    } else {
+      document.getElementById('rvApplyBar').style.display = 'flex';
+    }
+  } else {
+    html += `<div class="rv-empty">No pending review.<br>Maya reviews her conversations every Sunday.${d.last_decided ? '<br><br>Last applied: week of '+esc(d.last_decided.week_of) : ''}</div>`;
+  }
+
+  // Current playbook (what Maya has already learned)
+  if (pb.lessons?.length || pb.facts?.length) {
+    html += `<div class="an-sec-label">Maya's playbook — v${pb.version||0} (${pb.lessons?.length||0} lessons, ${pb.facts?.length||0} facts)</div>`;
+    html += `<div class="rv-card">`;
+    html += (pb.lessons||[]).map(l => `<div class="rv-pblesson">${esc(l.rule)}</div>`).join('');
+    html += (pb.facts||[]).map(f => `<div class="rv-pblesson"><b>Q:</b> ${esc(f.q)}<br><b>A:</b> ${esc(f.a)}</div>`).join('');
+    html += `</div>`;
+  }
+
+  // Metrics trend
+  if (d.log?.length) {
+    html += `<div class="an-sec-label">Recent reviews</div>`;
+    html += `<table class="an-table"><thead><tr><th>Week</th><th>Grade</th><th>Approved</th><th>Facts</th><th>Playbook</th></tr></thead><tbody>`;
+    html += d.log.map(r => `<tr><td>${esc(r.week_of||'')}</td><td>${esc(r.grade||'')}</td><td>${r.approved||0}</td><td>${r.answered||0}</td><td>${r.playbook_size||0}</td></tr>`).join('');
+    html += `</tbody></table>`;
+  }
+
+  body.innerHTML = html;
+  updateApplySummary();
+}
+
+function setDecision(id, choice) {
+  const cur = reviewState.decisions[id];
+  reviewState.decisions[id] = (cur === choice) ? undefined : choice; // toggle off if re-tapped
+  const card = document.getElementById('rvc_' + id);
+  const approveBtn = card.querySelector('.rv-tbtn.approve');
+  const rejectBtn = card.querySelector('.rv-tbtn.reject');
+  const val = reviewState.decisions[id];
+  approveBtn.classList.toggle('on', val === 'approve');
+  rejectBtn.classList.toggle('on', val === 'reject');
+  card.classList.toggle('picked', val === 'approve');
+  card.classList.toggle('rejected', val === 'reject');
+  updateApplySummary();
+}
+function setAnswer(id, val) {
+  reviewState.answers[id] = val;
+  updateApplySummary();
+}
+function updateApplySummary() {
+  const decs = Object.values(reviewState.decisions);
+  const approved = decs.filter(v => v === 'approve').length;
+  const answered = Object.values(reviewState.answers).filter(v => v && v.trim()).length;
+  const el = document.getElementById('rvApplySummary');
+  if (el) el.textContent = `${approved} lesson${approved===1?'':'s'} to teach · ${answered} answer${answered===1?'':'s'}`;
+}
+
+async function applyReview() {
+  const btn = document.getElementById('rvApplyBtn');
+  const approve = Object.keys(reviewState.decisions).filter(id => reviewState.decisions[id] === 'approve');
+  const reject = Object.keys(reviewState.decisions).filter(id => reviewState.decisions[id] === 'reject');
+  const answers = {};
+  Object.keys(reviewState.answers).forEach(id => { if (reviewState.answers[id] && reviewState.answers[id].trim()) answers[id] = reviewState.answers[id].trim(); });
+  if (!approve.length && !Object.keys(answers).length) {
+    toast('Approve at least one lesson or answer a question first'); return;
+  }
+  btn.disabled = true; btn.textContent = 'Applying…';
+  try {
+    const out = await api('apply_maya_review', { approve, reject, answers });
+    if (out?.error) throw new Error(out.error);
+    toast(`Taught Maya ${out.approved} lesson${out.approved===1?'':'s'}${out.answered?` + ${out.answered} fact${out.answered===1?'':'s'}`:''} (playbook v${out.playbook_version})`);
+    await loadReview();
+    refreshReviewBadge();
+  } catch (e) {
+    toast('Apply failed: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Apply to Maya';
+  }
+}
 
 async function loadAnalytics() {
   const body = document.getElementById('anBody');

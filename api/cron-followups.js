@@ -20,6 +20,7 @@ import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
 import { reconcileAllRentals, pullAgentAnalytics } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
+import { runReview } from '../lib/maya-review.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -121,6 +122,23 @@ export default async function handler(req, res) {
       return res.status(200).json({ owner_report: rep });
     } catch (e) {
       return res.status(500).json({ error: 'report failed: ' + e.message });
+    }
+  }
+
+  // ── Weekly Maya self-review hooks ────────────────────────────────────
+  // ?review=preview runs the critic and returns findings WITHOUT staging.
+  // ?review=run runs it AND stages settings.maya_review_pending for approval.
+  // (Applying decisions happens in chat.html via api/supabase apply_maya_review.)
+  if (req.query?.review === 'preview' || req.query?.review === 'run') {
+    try {
+      const kbContext = await buildReviewKbContext(SUPABASE_URL, sbHeaders);
+      const out = await runReview(
+        { SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
+        { kbContext, preview: req.query.review === 'preview' }
+      );
+      return res.status(200).json({ maya_review: out });
+    } catch (e) {
+      return res.status(500).json({ error: 'review failed: ' + e.message });
     }
   }
 
@@ -550,6 +568,24 @@ export default async function handler(req, res) {
       } catch (e) { ownerReport = { error: e.message }; }
     }
 
+    // ── WEEKLY MAYA SELF-REVIEW (Sundays) ────────────────────────────
+    // Once a week Maya grades her own replies and STAGES proposed lessons +
+    // questions for Ikiel to approve in chat.html. Nothing is applied here —
+    // applying is a manual one-tap in the console. Best-effort; never blocks.
+    let weeklyReview = null;
+    if (!previewMode && now.getUTCDay() === 0) {
+      try {
+        const kbContext = await buildReviewKbContext(SUPABASE_URL, sbHeaders);
+        const staged = await runReview(
+          { SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
+          { kbContext }
+        );
+        weeklyReview = { staged: true, week_of: staged.week_of, threads: staged.thread_count,
+          lessons: staged.lessons?.length || 0, questions: staged.questions?.length || 0,
+          grade: staged.scoreboard?.grade };
+      } catch (e) { weeklyReview = { error: e.message }; }
+    }
+
     // Safety-net: catch any numbers agents shared in the last few days that
     // weren't auto-captured live, and add them to the CRM. Best-effort; the
     // action dedupes so it can't create twins. (Full-history backfill is the
@@ -580,6 +616,7 @@ export default async function handler(req, res) {
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
+      weekly_review: weeklyReview,
       results
     });
 
@@ -772,6 +809,45 @@ function buildPortfolioContextFromDb(projects) {
   }).join('\n\n');
 }
 
+// Build the full source-of-truth KB for the weekly review's fact-checking.
+// The critic must grade Maya's replies against the SAME data she answers from
+// (the live DB), so this dumps unit-level KAYA pricing + the Samba rentals table.
+async function buildReviewKbContext(url, headers) {
+  const q = (path) => fetch(`${url}/rest/v1/${path}`, { headers }).then(r => r.json()).catch(() => []);
+  const [projects, rentals] = await Promise.all([
+    q('projects?select=name,area,status,commission_pct,delivery_date,construction_status,payment_plan,units,maya_notes&active=eq.true&order=display_order.asc'),
+    q('rentals?select=name,area,bedrooms,monthly,yearly,available,availability,maya_notes,portal_url&order=name.asc'),
+  ]);
+
+  const P = Array.isArray(projects) ? projects : [];
+  const kaya = P.map(p => {
+    const units = Array.isArray(p.units) ? p.units.map(u =>
+      `    - ${u.code}: ${u.beds || '?'}BR ${u.sqm || '?'}sqm, USD ${u.price_usd || '?'} / IDR ${u.price_idr || '?'} [${u.availability || 'Available'}]${u.notes ? ' (' + u.notes + ')' : ''}`
+    ).join('\n') : '';
+    return [
+      `${p.name}${p.area ? ' — ' + p.area : ''} [${p.status || ''}]`,
+      p.commission_pct != null ? `  Commission: ${p.commission_pct}%` : null,
+      p.delivery_date ? `  Delivery: ${p.delivery_date}` : null,
+      p.construction_status ? `  Construction: ${p.construction_status}` : null,
+      p.payment_plan ? `  Payment plan: ${p.payment_plan}` : null,
+      units ? `  Units:\n${units}` : null,
+      p.maya_notes ? `  Notes: ${p.maya_notes}` : null,
+    ].filter(Boolean).join('\n');
+  }).join('\n\n');
+
+  const R = Array.isArray(rentals) ? rentals : [];
+  const samba = R.map(r => {
+    const avail = r.available != null ? (r.available ? 'available' : 'occupied') : (r.availability || '');
+    return `- ${r.name}${r.area ? ' (' + r.area + ')' : ''}${r.bedrooms ? ' · ' + r.bedrooms + 'BR' : ''}: ${r.monthly ? r.monthly + '/mo' : ''}${r.yearly ? ', ' + r.yearly + '/yr' : ''}${avail ? ' [' + avail + ']' : ''}${r.maya_notes ? ' — ' + String(r.maya_notes).slice(0, 160) : ''}`;
+  }).join('\n');
+
+  return `KAYA SALES PROJECTS (unit-level source of truth — prices/availability Maya must match):
+${kaya || '(none loaded)'}
+
+SAMBA REALTY RENTALS (10% agent commission, already included in the quoted monthly rate):
+${samba || '(none loaded)'}`;
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SAMBA AVAILABILITY NOTIFICATIONS
 // ─────────────────────────────────────────────────────────────────────
@@ -950,17 +1026,21 @@ export async function runAvailabilityNotifications(ctx) {
   const eligible = agents.filter(a => isAvailabilityEligible(a, config));
   summary.recipients = eligible.length;
 
-  // ── Weekly visual carousel digest (opt-in until proven) ─────────
-  // On Mondays, if the carousel template is APPROVED, the feature flag is on,
-  // and there are enough available villas with cover images, send the swipeable
-  // carousel instead of the text digest. Any shortfall → text digest fallback,
-  // so this can never break the Monday send.
+  // ── Visual carousel (weekly digest + mid-week availability alerts) ─────
+  // Whenever we're about to send an availability message — the Monday digest OR
+  // a mid-week "new openings" alert — and the carousel template is approved and
+  // the feature flag is on, prepare the swipeable image carousel and send that
+  // instead of the plain-text template. Any shortfall (portal unreachable, or
+  // <6 villas with cover images) → text fallback, so a send can never break.
+  // Carousel is ON by default now (the visual format is the standard); it only
+  // stays text if the template isn't approved/loaded, the portal is unreachable,
+  // or carousel_enabled is explicitly set to false.
   let carouselCards = null;
-  if (isMonday && config.carousel_enabled && templatesMap[CAROUSEL_DIGEST]) {
+  if ((isMonday || improvements.items.length > 0) && config.carousel_enabled !== false && templatesMap[CAROUSEL_DIGEST]) {
     try {
       carouselCards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT);
     } catch (_) { carouselCards = null; }
-    summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text (portal unreachable)';
+    summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text';
   }
 
   // ── Compose payload ─────────────────────────────────────────────
@@ -1066,12 +1146,16 @@ export async function runAvailabilityNotifications(ctx) {
     // rejections (parameter format, language mismatch, unapproved name, etc.)
     let metaErr = null;
     let waMessageId = null;
-    // Carousel digest (Mondays, when prepared) uses per-card components + its
-    // own template name; everything else sends the body-only text template.
-    const sendCarousel = isMonday && carouselCards;
+    // Use the visual carousel for the weekly digest AND mid-week availability
+    // alerts. The one exception is an agent's first-ever availability send, which
+    // keeps the text intro so we introduce Maya/Samba before showing listings.
+    const sendCarousel = carouselCards && !isFirstSend;
     const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
+    const carouselIntro = isMonday
+      ? `Hi ${firstName}, here's this week's Samba rentals availability`
+      : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
     const sendComponents = sendCarousel
-      ? buildCarouselComponents(firstName, carouselCards)
+      ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
       : [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }];
     try {
       const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {

@@ -1,4 +1,5 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
+import { loadPlaybookBlock } from '../lib/maya-review.js';
 import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
@@ -635,7 +636,8 @@ export default async function handler(req, res) {
     // HOURS OF OPERATION CHECK — Maya only auto-replies between 9am-9pm WITA
     if (!isTestContact && !isWithinOperationalHours()) {
       // Outside hours: still draft a suggestion so Ikiel can review in the morning
-      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft');
+      const offHoursPlaybook = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
+      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft', undefined, undefined, undefined, undefined, undefined, {}, '', null, offHoursPlaybook);
       patch.suggested_reply = aiResultOffHours.reply || '';
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
@@ -653,6 +655,7 @@ export default async function handler(req, res) {
     }
 
     // Generate a reply with Claude — load live project + rental data from DB first
+    const playbookBlock = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
     const projects = await loadProjects(SUPABASE_URL, sbHeaders);
     const rentals = await loadRentals(SUPABASE_URL, sbHeaders);
     const digest = await loadDigest();
@@ -686,7 +689,7 @@ export default async function handler(req, res) {
           + '[The agent sent the attached image — look at it and respond helpfully. If it shows a property, listing screenshot, or document, address its content directly; if it is unrelated small talk (memes, greetings), respond naturally and briefly.]';
       }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext, inboundImage);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext, inboundImage, playbookBlock);
 
     // Increment today's spend by the ACTUAL token cost of the Claude call(s),
     // computed from the Anthropic usage block (a date-range availability lookup
@@ -1198,7 +1201,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '', inboundImage = null) {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '', inboundImage = null, playbookBlock = '') {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -1214,7 +1217,7 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
   // served from cache at ~0.1x input cost. The volatile per-conversation tail
   // (agent name, thread, mode) stays uncached after the breakpoint.
   const systemHead = `${MAYA_PERSONA}
-
+${playbookBlock ? `\n${playbookBlock}\n` : ''}
 KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
 
