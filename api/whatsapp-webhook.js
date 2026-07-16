@@ -4,6 +4,7 @@ import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
+import { transcribeWaAudio } from '../lib/transcribe.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -402,8 +403,8 @@ export default async function handler(req, res) {
     // content string + a media reference (if applicable) so the inbox
     // shows the actual message instead of a blank row.
     const extracted = extractInboundContent(msg);
-    const text = extracted.textForClaude;     // what Maya sees as the inbound prompt
-    const dbContent = extracted.dbContent;    // what gets stored in wa_messages.content
+    let text = extracted.textForClaude;       // what Maya sees as the inbound prompt
+    let dbContent = extracted.dbContent;      // what gets stored in wa_messages.content
     const mediaType = extracted.mediaType;    // 'image' | 'document' | 'audio' | etc, or null
     const mediaId = extracted.mediaId;        // WhatsApp media id, fetched on demand by /api/wa-media
     const reactionTarget = extracted.reactionTarget; // for reactions, the original message_id
@@ -442,6 +443,18 @@ export default async function handler(req, res) {
         body: JSON.stringify({ reaction: reactionEmoji || null }),
       }).catch(() => {});
       return res.status(200).end();
+    }
+
+    // VOICE NOTES — transcribe (Groq/OpenAI/Gemini, whichever key is configured)
+    // so Maya answers the actual question and the inbox shows what was said.
+    // No key or a failed transcription keeps the graceful "could you send that
+    // as text?" fallback prompt from extractInboundContent.
+    if (mediaType === 'audio' && mediaId && WA_TOKEN) {
+      const transcript = await transcribeWaAudio(mediaId, WA_TOKEN).catch(() => null);
+      if (transcript) {
+        dbContent = `[Voice note] "${transcript.slice(0, 1500)}"`;
+        text = `[The agent sent a voice note; its transcript follows — reply to its content normally.] "${transcript.slice(0, 1500)}"`;
+      }
     }
 
     // Archive inbound documents to our own storage so they stay openable past
@@ -600,12 +613,15 @@ export default async function handler(req, res) {
       PREF_MONTHLY: { freq: 'monthly', ack: 'Done — I\'ll keep it to a monthly summary. Reply anytime to change that.' },
       PREF_PAUSE:   { freq: 'paused',  ack: 'No problem — I\'ve paused availability updates. Just message me whenever you\'d like them back on.' },
     };
-    // Match the explicit payload first; fall back to the visible label, since a
-    // template quick-reply defaults its payload to the button text unless the
-    // sender overrides it.
+    // Match the explicit payload first; fall back to the visible label ONLY for
+    // template quick-replies (whose payload defaults to the button text). Maya's
+    // in-conversation buttons carry MAYA_QR_* ids — their labels must never be
+    // pattern-matched into a frequency change ("Check other dates" ≠ weekly!);
+    // they flow to Maya as a normal inbound message instead.
     const btnLabel = (extracted.textForClaude || '').toLowerCase();
+    const isTemplateDefaultPayload = extracted.buttonPayload === extracted.textForClaude;
     const pref = (extracted.buttonPayload && PREF_MAP[extracted.buttonPayload])
-      || (extracted.buttonPayload && (/week/.test(btnLabel) ? PREF_MAP.PREF_WEEKLY
+      || (isTemplateDefaultPayload && (/week/.test(btnLabel) ? PREF_MAP.PREF_WEEKLY
         : /month/.test(btnLabel) ? PREF_MAP.PREF_MONTHLY
         : /pause|less|fewer/.test(btnLabel) ? PREF_MAP.PREF_PAUSE : null));
     if (pref) {
@@ -663,6 +679,17 @@ export default async function handler(req, res) {
       }
     }
 
+    // SUPERSEDE CHECK #1 (pre-generation) — if the agent already sent a NEWER
+    // message (rapid-fire double text), skip this one entirely: the invocation
+    // handling the newest message sees the full thread and replies once.
+    // Fixes the duplicate-reply bug (e.g. Maya answering the same question
+    // twice when an agent sends two messages seconds apart). Also saves the
+    // Claude call for the superseded message.
+    if (await hasNewerInbound(SUPABASE_URL, sbHeaders, agent.id, timestamp, waMessageId)) {
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
     // Generate a reply with Claude — load live project + rental data from DB first
     const playbookBlock = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
     const projects = await loadProjects(SUPABASE_URL, sbHeaders);
@@ -718,6 +745,15 @@ export default async function handler(req, res) {
       await applyCrmActions(SUPABASE_URL, sbHeaders, agent, aiResult.crm_actions, text);
     }
 
+    // SUPERSEDE CHECK #2 (post-generation) — a newer message may have landed
+    // while Claude was generating (the common rapid-fire window). Drop this
+    // reply/draft; the newer invocation covers both messages in one answer.
+    // CRM updates above still applied — they were valid signals either way.
+    if (await hasNewerInbound(SUPABASE_URL, sbHeaders, agent.id, timestamp, waMessageId)) {
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      return res.status(200).end();
+    }
+
     // Listing cards Maya attached to this reply. On drafts they ride along as a
     // [[send-cards:...]] suffix that the inbox strips into an attachment chip
     // and sends (via /api/whatsapp-send action 'cards') when the draft goes out.
@@ -747,8 +783,12 @@ export default async function handler(req, res) {
     }
 
     if (aiResult.reply && WA_TOKEN && WA_PHONE_ID) {
-      const replyMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply);
-      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply, replyMid);
+      // Quick-reply buttons ride on the reply bubble when Maya offered any
+      // (interactive message; falls back to plain text on any Meta rejection).
+      const buttons = Array.isArray(aiResult.reply_buttons) ? aiResult.reply_buttons : [];
+      const replyMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply, buttons);
+      const buttonsNote = buttons.length ? `\n[Buttons: ${buttons.join(' | ')}]` : '';
+      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply + buttonsNote, replyMid);
       // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
       forwardMayaReply(agent, aiResult.reply).catch(() => {});
 
@@ -772,12 +812,21 @@ export default async function handler(req, res) {
           for (const card of cards) {
             const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, fromNum, card);
             if (sent.waMessageId) {
-              await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, cardMarker(card), sent.waMessageId);
+              await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, cardMarker(card), sent.waMessageId, 'listing_card');
             } else {
               console.warn('listing card send failed:', card.slug, sent.error);
             }
           }
         } catch (e) { console.warn('listing cards failed:', e.message); }
+      }
+      // Native contact card for viewing handoffs ("who do I contact?") —
+      // tappable, saves straight to the agent's phone.
+      const contact = aiResult.send_contact;
+      if (contact && contact.phone && contact.phone.length >= 9 && contact.phone.length <= 15) {
+        const contactMid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, fromNum, contact.name, contact.phone);
+        if (contactMid) {
+          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Contact card: ${contact.name} — +${contact.phone}]`, contactMid);
+        }
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -1073,19 +1122,41 @@ async function applyCrmActions(url, headers, agent, actions, evidenceQuote) {
   }
 }
 
+// True when a DIFFERENT inbound message with a later timestamp already exists
+// for this agent — i.e. the one we're processing has been superseded. On equal
+// timestamps the wa_message_id string breaks the tie so exactly ONE of two
+// concurrent invocations proceeds (both skipping would mean no reply at all).
+async function hasNewerInbound(url, headers, agentId, ownTimestamp, ownWaMessageId) {
+  try {
+    const r = await fetch(`${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.inbound&order=timestamp.desc,wa_message_id.desc&limit=1&select=wa_message_id,timestamp`, { headers });
+    const latest = (await r.json())?.[0];
+    if (!latest || !latest.wa_message_id || latest.wa_message_id === ownWaMessageId) return false;
+    // Compare as epoch ms — Supabase serialises timestamptz as "+00:00" while
+    // ours are "Z"-suffixed, so string comparison would misorder them. WhatsApp
+    // timestamps are second-precision, so exact ties are common in bursts.
+    const latestT = new Date(latest.timestamp).getTime();
+    const ownT = new Date(ownTimestamp).getTime();
+    if (latestT > ownT) return true;
+    return latestT === ownT && String(latest.wa_message_id) > String(ownWaMessageId);
+  } catch (_) { return false; }
+}
+
 async function patchAgent(url, headers, id, fields) {
   await fetch(`${url}/rest/v1/agents?id=eq.${id}`, {
     method: 'PATCH', headers, body: JSON.stringify(fields)
   }).catch(e => console.warn('patchAgent failed:', e.message));
 }
 
-async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null) {
+async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null, category = null) {
   const ts = new Date().toISOString();
   await fetch(`${url}/rest/v1/wa_messages`, {
     method: 'POST', headers,
     body: JSON.stringify({
       agent_id: agentId, wa_num: waNum, direction: 'outbound',
       content, timestamp: ts, source: 'api',
+      // category feeds comms_metrics' read-rate-by-format breakdown
+      // (e.g. 'listing_card' vs free-text vs template sends).
+      category,
       // Baseline status + the id so delivered/read events can be matched.
       status: 'sent', wa_message_id: waMessageId
     })
@@ -1172,6 +1243,53 @@ async function sendText(phoneId, token, to, text) {
     const d = await r.json().catch(() => ({}));
     return d?.messages?.[0]?.id || null;
   } catch (e) { console.warn('sendText failed:', e.message); return null; }
+}
+
+// Free-text reply with up to 3 native quick-reply buttons attached (interactive
+// 'button' message). Falls back to a plain text send when there are no valid
+// buttons, the body exceeds Meta's 1024-char interactive limit, or Meta
+// rejects the interactive shape — the reply itself must never be lost.
+async function sendTextWithButtons(phoneId, token, to, text, buttons) {
+  const titles = (buttons || []).map(b => String(b).trim().slice(0, 20)).filter(Boolean).slice(0, 3);
+  if (!titles.length || text.length > 1024) return sendText(phoneId, token, to, text);
+  try {
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', to, type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text },
+          action: { buttons: titles.map((t, i) => ({ type: 'reply', reply: { id: 'MAYA_QR_' + i, title: t } })) }
+        }
+      })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.messages?.[0]?.id) return d.messages[0].id;
+  } catch (e) { console.warn('button send failed:', e.message); }
+  return sendText(phoneId, token, to, text);
+}
+
+// Native WhatsApp contact card — the agent taps to save/chat. Returns the
+// message id or null.
+async function sendContactCard(phoneId, token, to, name, phoneDigits) {
+  try {
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', to, type: 'contacts',
+        contacts: [{
+          name: { formatted_name: name, first_name: String(name).split(/\s+/)[0] },
+          phones: [{ phone: '+' + phoneDigits, wa_id: phoneDigits, type: 'CELL' }]
+        }]
+      })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { console.warn('contact card send failed:', d?.error?.message || r.status); return null; }
+    return d.messages?.[0]?.id || null;
+  } catch (e) { console.warn('contact card send failed:', e.message); return null; }
 }
 
 // Mark an inbound message as read AND show a typing indicator. The typing
@@ -1411,6 +1529,8 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
   "send_doc": null | one of [${brochureKeys}],
   "send_cards": [] | up to 4 Samba rental slugs, e.g. ["villa_umah_astanine", "haus_4"] — valid slugs: [${rentalSlugs.join(', ') || '(none available)'}],
+  "send_contact": null | { "name": "Era", "phone": "6281246357778" },
+  "reply_buttons": [] | up to 3 short tap options (max 20 chars each), e.g. ["More options", "Download photos"],
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -1429,6 +1549,8 @@ Any time your reply pitches, recommends, or answers about one or more SPECIFIC S
 - EXCEPTION: when the agent explicitly asks to DOWNLOAD photos (to share with a client), give the property's photos_url (Google Drive) in text; when they ask for the location/pin, give maps_url. Those direct links are still the right answer for download/location requests — send them alongside the card.
 - "Can I see X" / "what does X look like" / "send a photo of X" → put X's slug in send_cards; the card includes the photo. If a property group has several units (e.g. Tropicana), pick the specific unit(s) you are recommending.
 Set "send_cards" to [] only when no specific Samba property is being shared (greetings, commission questions, KAYA sales talk, etc).
+CONTACT CARD ("send_contact"): when the agent asks WHO to contact for a viewing, visit, or booking of a Samba rental, set send_contact with the EXACT name and number from that property's "enquire with" line in the live availability data (never a number from conversation history). The system sends a native, tappable WhatsApp contact card the agent can save. Still mention the name briefly in your text reply ("I'm sending you Era's contact card -- she arranges the viewings for this villa."). Leave null otherwise.
+QUICK-REPLY BUTTONS ("reply_buttons"): when there is an obvious next step, offer up to 3 tap options so the agent doesn't have to type — e.g. after recommending villas: ["More options", "Download photos", "Book a viewing"]; after an availability answer: ["Check other dates", "Send the listing"]. Each label max 20 characters, plain words, no emojis. When the agent taps one, you receive that label as their next message — so only offer buttons you can actually act on. Leave [] on closers ("thanks, bye"), escalations, and when no clear next step exists.
 Set "crm_updates" to an empty array if no clear pipeline signals are present.
 Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 
@@ -1471,7 +1593,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
       const raw = data.content?.[0]?.text || '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
       }
       const parsed = JSON.parse(jsonMatch[0]);
 
@@ -1491,6 +1613,12 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         // send_photo is the legacy single-photo field — fold it into cards.
         send_cards: Array.isArray(parsed.send_cards) ? parsed.send_cards.slice(0, 4)
           : (parsed.send_photo ? [parsed.send_photo] : []),
+        send_contact: (parsed.send_contact && parsed.send_contact.name && parsed.send_contact.phone)
+          ? { name: String(parsed.send_contact.name).slice(0, 80), phone: String(parsed.send_contact.phone).replace(/\D/g, '') }
+          : null,
+        reply_buttons: Array.isArray(parsed.reply_buttons)
+          ? parsed.reply_buttons.map(b => String(b).trim().slice(0, 20)).filter(Boolean).slice(0, 3)
+          : [],
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
         crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
         llm_calls: llmCalls,
@@ -1499,9 +1627,9 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
     }
     // Exhausted hops without a terminal reply (e.g. Maya asked for availability
     // twice) — escalate so a human picks it up rather than sending nothing.
-    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
   }
 }

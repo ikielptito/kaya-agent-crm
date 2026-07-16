@@ -724,7 +724,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       // Log with a [[card]] marker so the console renders the card.
       await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
         method: 'POST', headers,
-        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: cardMarker(card), wa_message_id: sent.waMessageId, timestamp: new Date().toISOString(), source: 'manual', status: 'sent' })
+        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: cardMarker(card), wa_message_id: sent.waMessageId, timestamp: new Date().toISOString(), category: 'listing_card', source: 'manual', status: 'sent' })
       }).catch(() => {});
 
       return res.status(200).json({ ok: true, waMessageId: sent.waMessageId, format: sent.format, card });

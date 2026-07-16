@@ -196,7 +196,7 @@ async function handleCards(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHead
         body: JSON.stringify({
           agent_id: agentId || null, wa_num: waNum, direction: 'outbound',
           content: cardMarker(card), wa_message_id: r.waMessageId,
-          timestamp: new Date().toISOString(),
+          timestamp: new Date().toISOString(), category: 'listing_card',
           source: source === 'manual' ? 'manual' : 'api', status: 'sent'
         })
       }).catch(e => console.warn('card log failed:', e.message));

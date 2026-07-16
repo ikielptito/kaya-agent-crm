@@ -1,6 +1,7 @@
 {
   "functions": {
-    "api/supabase.js": { "maxDuration": 60 }
+    "api/supabase.js": { "maxDuration": 60 },
+    "api/whatsapp-webhook.js": { "maxDuration": 60 }
   },
   "routes": [
     { "src": "^/(lib|dev)(/.*)?$", "status": 404 },
