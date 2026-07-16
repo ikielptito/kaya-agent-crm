@@ -8,6 +8,7 @@
 //   - 'template' — pre-approved template
 //   - 'document' — PDF / brochure
 //   - 'image'    — inline photo with optional caption
+//   - 'cards'    — rich listing cards (cta_url with native View-listing button)
 //   - 'recall'   — attempt to delete a previously-sent message (24h window)
 //   - 'edit'     — attempt to edit a previously-sent text message (15min window)
 //   - 'fetch_media' — proxy an inbound WhatsApp media id through to a temp signed URL
@@ -16,6 +17,8 @@
 // row's deleted_at / edited_at + content as appropriate. If Meta's API rejects
 // the recall/edit (e.g. window expired), we STILL update local state — your CRM
 // view will reflect the intent even if the agent's chat doesn't.
+
+import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -56,6 +59,7 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'fetch_media') return await handleFetchMedia(req, res, body.mediaId, TOKEN);
+    if (action === 'cards')    return await handleCards(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'reaction') return await handleReaction(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'recall')   return await handleRecall(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'edit')     return await handleEdit(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
@@ -164,6 +168,41 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
   }
 
   return res.status(200).json({ success: true, waMessageId });
+}
+
+// ── CARDS (rich listing cards, e.g. attached to an approved Maya draft) ──
+// body: { waNum, agentId, slugs: ['villa-saturno', ...], source }
+// Each slug is sent as an interactive CTA-URL card (hero photo + native
+// "View listing" button) and logged with a [[card]] marker for the inbox.
+async function handleCards(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders) {
+  const { waNum, agentId, slugs, source } = body;
+  if (!waNum) return res.status(400).json({ error: 'waNum is required' });
+  if (!Array.isArray(slugs) || !slugs.length) return res.status(400).json({ error: 'slugs array is required' });
+
+  let cards = [];
+  try { cards = await resolveListingCards(slugs, 4); }
+  catch (e) { return res.status(502).json({ error: 'portal unreachable: ' + e.message }); }
+  if (!cards.length) return res.status(404).json({ error: 'no listings matched those slugs' });
+
+  const sent = [];
+  const failed = [];
+  for (const card of cards) {
+    const r = await sendListingCardMessage({ PHONE_ID, TOKEN }, waNum, card);
+    if (!r.waMessageId) { failed.push({ slug: card.slug, error: r.error }); continue; }
+    sent.push({ slug: card.slug, waMessageId: r.waMessageId, format: r.format });
+    if (sbHeaders) {
+      await fetch(SUPABASE_URL + '/rest/v1/wa_messages', {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({
+          agent_id: agentId || null, wa_num: waNum, direction: 'outbound',
+          content: cardMarker(card), wa_message_id: r.waMessageId,
+          timestamp: new Date().toISOString(),
+          source: source === 'manual' ? 'manual' : 'api', status: 'sent'
+        })
+      }).catch(e => console.warn('card log failed:', e.message));
+    }
+  }
+  return res.status(200).json({ success: sent.length > 0, sent, failed });
 }
 
 // ── FETCH_MEDIA (proxy WhatsApp media id → temp signed URL) ─────────

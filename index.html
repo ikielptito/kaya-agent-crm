@@ -4821,6 +4821,17 @@ let inboxOpen = false;
 let activeConvId = null;
 let inboxPollTimer = null;
 let inboxAttachments = [];
+// Listing cards Maya attached to a draft via a [[send-cards:slug1,slug2]]
+// suffix on suggested_reply — stripped from the reply box on open and sent
+// via /api/whatsapp-send {action:'cards'} after the approved text.
+let inboxDraftCards = [];
+function draftCardSlugs(text) {
+  const m = String(text || '').match(/\[\[send-cards:([^\]]+)\]\]/);
+  return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+function stripDraftCards(text) {
+  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').trim();
+}
 
 function openInboxAttachMenu(agentId) {
   const menu = document.getElementById('inboxBrochureMenu');
@@ -5066,7 +5077,7 @@ async function openConversation(agentId) {
     <div class="inbox-thread-msgs" id="threadMsgs"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading messages...</div></div>
     <div class="inbox-reply">
       ${a.automation_override === 'paused' ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#78350f"><span>⏸ Maya is paused for this conversation. You're in control.</span><button onclick="resumeMaya(${a.id})" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Resume Maya</button></div>` : ''}
-      ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Maya drafted a reply — review and send</span></div>` : ''}
+      ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Maya drafted a reply${draftCardSlugs(a.suggested_reply).length ? ` + ${draftCardSlugs(a.suggested_reply).length} listing card(s)` : ''} — review and send</span></div>` : ''}
       <div id="inboxAttachChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px"></div>
       <div class="inbox-reply-row">
         <button class="inbox-suggest-btn" onclick="suggestReply(${a.id})" title="Claude suggests a reply">✦</button>
@@ -5076,15 +5087,16 @@ async function openConversation(agentId) {
         <input type="file" id="inboxFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg,.jpeg" style="display:none" onchange="handleInboxFileUpload(this, ${a.id})">
         <textarea id="replyBox" placeholder="Type a reply…  (Enter to send · Shift+Enter newline · / for snippets)"
           onkeydown="handleReplyKeydown(event, ${a.id})"
-          oninput="handleReplyInput(event, ${a.id})">${(a.suggested_reply || '').replace(/</g,'&lt;')}</textarea>
+          oninput="handleReplyInput(event, ${a.id})">${stripDraftCards(a.suggested_reply).replace(/</g,'&lt;')}</textarea>
         <button class="inbox-send-btn" id="replySendBtn" onclick="sendReply(${a.id})">Send</button>
       </div>
       <div id="emojiPicker" class="inbox-popover" style="display:none"></div>
       <div id="quickReplyMenu" class="inbox-popover" style="display:none"></div>
       <div id="inboxBrochureMenu" style="display:none;margin-top:8px;padding:8px;background:var(--sand);border-radius:8px;flex-wrap:wrap;gap:5px"></div>
     </div>`;
-  // Reset inbox attachments
+  // Reset inbox attachments; pick up any listing cards riding on Maya's draft
   inboxAttachments = [];
+  inboxDraftCards = draftCardSlugs(a.suggested_reply);
   renderInboxAttachChips();
 
   // Clear unread
@@ -5463,6 +5475,18 @@ async function sendReply(agentId) {
       } else {
         errorMsg = result.error || 'unknown error';
       }
+    }
+
+    // Send listing cards Maya attached to her draft (best-effort)
+    if (sentOk && inboxDraftCards.length > 0) {
+      const slugs = inboxDraftCards.slice(0, 4);
+      inboxDraftCards = [];
+      try {
+        await fetch('/api/whatsapp-send', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cards', waNum, agentId: a.id, slugs, source: 'manual' })
+        });
+      } catch(e) { console.warn('Listing card send failed:', e.message); }
     }
 
     // Send attachments (if text succeeded or no text was sent)

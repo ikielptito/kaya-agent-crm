@@ -1343,8 +1343,10 @@ function openConv(id) {
   document.getElementById('thName').textContent = a.name || a.agency || 'Unknown';
   document.getElementById('thSub').textContent = '+' + (a.wa_num || '') + (a.agency ? ' · ' + a.agency : '');
   renderChatMode();
-  // Prefer Maya's pending draft; else restore a saved local draft.
-  document.getElementById('replyBox').value = (a.suggested_reply || '') || localStorage.getItem('maya_draft_' + id) || '';
+  // Prefer Maya's pending draft; else restore a saved local draft. Any
+  // [[send-cards:...]] suffix becomes an attachment (state.draftCards).
+  state.draftCards = draftCardSlugs(a.suggested_reply);
+  document.getElementById('replyBox').value = stripDraftCards(a.suggested_reply) || localStorage.getItem('maya_draft_' + id) || '';
   autoGrow(document.getElementById('replyBox'));
   document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
   renderBanner(a);
@@ -1377,7 +1379,11 @@ function renderBanner(a) {
     html += `<div class="pause-banner"><span>⏸ Maya is paused here — you're in control.</span>
       <button onclick="resumeMaya(${a.id})">Resume Maya</button></div>`;
   } else if (a.suggested_reply && a.suggested_reply.trim()) {
-    html += `<div class="draft-banner">✦ Maya drafted a reply — review &amp; send</div>`;
+    const nCards = (a.id === state.activeId ? (state.draftCards || []) : draftCardSlugs(a.suggested_reply)).length;
+    const cardsBit = nCards
+      ? ` with ${nCards} listing card${nCards > 1 ? 's' : ''} <button onclick="dropDraftCards()" style="margin-left:6px;font-size:11px;border:1px solid currentColor;background:none;border-radius:8px;padding:1px 8px;color:inherit;cursor:pointer">✕ cards</button>`
+      : '';
+    html += `<div class="draft-banner">✦ Maya drafted a reply${cardsBit} — review &amp; send</div>`;
   }
   el.innerHTML = html;
 }
@@ -1453,6 +1459,24 @@ function parseCardMarker(content) {
   const m = content.match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
   if (!m) return null;
   try { return { type: m[1], data: JSON.parse(m[2]) }; } catch (_) { return null; }
+}
+
+// Maya can attach listing cards to a DRAFT via a [[send-cards:slug1,slug2]]
+// suffix on suggested_reply. The inbox strips the marker out of the reply box,
+// shows it in the draft banner, and sends the cards (via /api/whatsapp-send
+// action 'cards') right after the approved text goes out.
+function draftCardSlugs(text) {
+  const m = String(text || '').match(/\[\[send-cards:([^\]]+)\]\]/);
+  return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
+}
+function stripDraftCards(text) {
+  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').trim();
+}
+function dropDraftCards() {
+  state.draftCards = [];
+  const a = state.agents.find(x => x.id === state.activeId);
+  if (a) renderBanner(a);
+  toast('Cards detached — only the text will send');
 }
 function listingCardHtml(c) {
   if (!c) return '';
@@ -2091,6 +2115,18 @@ async function send() {
     clearReply();
     document.getElementById('emojiPop').style.display = 'none';
     document.getElementById('qrPop').style.display = 'none';
+    // Send any listing cards Maya attached to this draft (best-effort — the
+    // text is already out either way).
+    const cardSlugs = (state.draftCards || []).slice(0, 4);
+    state.draftCards = [];
+    if (cardSlugs.length) {
+      try {
+        const cr = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'cards', waNum: getWaNum(a), agentId: a.id, slugs: cardSlugs, source: 'manual' }) });
+        const cres = await cr.json();
+        if (!cres.success) toast('Listing cards failed: ' + (cres.error || 'not sent'));
+      } catch (e2) { toast('Listing cards failed: ' + e2.message); }
+    }
     // A manual reply pauses Maya for this agent (matches the main CRM).
     pauseMayaAfterManual(a);
     await refreshThread(true);

@@ -3,6 +3,7 @@ import { loadPlaybookBlock } from '../lib/maya-review.js';
 import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
+import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -188,6 +189,7 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     const links = [photoLink, mapsLink, portalLink].filter(Boolean).join(' · ');
     const lines = [
       `${i + 1}. ${p.name.toUpperCase()}${badge}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
+      p.slug ? `   Slug: ${p.slug}` : null,
       p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
       `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
       occ || actualRev ? `   Performance: ${[occ, actualRev].filter(Boolean).join(', ')}` : null,
@@ -207,7 +209,14 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
 4. If asked for PHOTOS → share the property's photos_url (Google Drive). If asked for LOCATION → share the property's maps_url (Google Maps). If neither is in the data, say you'll get it from Ikiel.
 5. Property types are exactly what's listed (Apartment / Townhouse / Villa). HAUS Canggu units are 1BR APARTMENTS, not villas. Tropicana Valley units are 1BR APARTMENTS with private pools, not houses.
 6. For live booking calendar availability, direct agents to the portal: sambarentals.com
-7. COMMISSION STRUCTURE (zero ambiguity): the 10% is ALREADY INCLUDED in the portal price. Agent quotes the portal price to their client; the agent's 10% comes out of what we collect. If the agent wants 20%, they may quote portal price + 10% to their client (the extra 10% comes from the client, not from us). Never say "commission is paid on top" or "you can earn 10% in addition to the price" — those phrasings break the deal structure.`;
+7. COMMISSION STRUCTURE (zero ambiguity): the 10% is ALREADY INCLUDED in the portal price. Agent quotes the portal price to their client; the agent's 10% comes out of what we collect. If the agent wants 20%, they may quote portal price + 10% to their client (the extra 10% comes from the client, not from us). Never say "commission is paid on top" or "you can earn 10% in addition to the price" — those phrasings break the deal structure.
+
+CLIENT MATCHING RULES (when an agent gives criteria — bedrooms, budget, features, area — follow these exactly):
+1. Scan EVERY property in the portfolio above before answering. Never claim nothing matches until you have checked all of them against each stated criterion.
+2. Lead with the properties that tick ALL the stated boxes within budget. The closest full match ALWAYS comes first in your reply — this is the agent's actual request; alternatives never displace it.
+3. After the full matches, you may add one or two near-miss options (slightly over budget, or missing one feature) clearly framed as such ("a bit above budget at 35jt/mo, but..."). Rates are often negotiable so near-budget options are worth surfacing — but only AFTER the exact matches, never instead of them.
+4. AVAILABILITY: if the agent did NOT name dates, a property that fits the criteria still counts as a match even if it is occupied now or booked soon — recommend it and note when it is next free (from the live availability data). Only rule a match out on availability when the agent gave specific dates and the calendar conflicts.
+5. Budget phrasing like "27 mil" / "27jt" / "27 juta" means IDR 27,000,000 per month.`;
 }
 
 async function loadProjects(supabaseUrl, sbHeaders) {
@@ -263,20 +272,9 @@ function buildPortfolioContext(projects) {
   return `KAYA portfolio (current, live from DB):\n\n${blocks.join('\n\n')}`;
 }
 
-// Build hero photo map from rentals: { slug: { imageUrl, caption } }
-// Used when Maya wants to send a property photo inline ("send me a photo of HAUS Canggu").
-function buildRentalPhotos(rentals) {
-  if (!rentals || rentals.length === 0) return {};
-  const map = {};
-  for (const r of rentals) {
-    if (r.hero_image_url && r.slug) {
-      map[r.slug] = {
-        imageUrl: r.hero_image_url,
-        caption: `${r.name}${r.area ? ' · ' + r.area : ''}${r.monthly_rate_idr ? ' · IDR ' + (r.monthly_rate_idr / 1e6).toFixed(0) + 'M/month' : ''}`
-      };
-    }
-  }
-  return map;
+// Valid slugs Maya may reference in send_cards — every active rental.
+function buildRentalSlugs(rentals) {
+  return (rentals || []).map(r => r.slug).filter(Boolean);
 }
 
 // Build brochure map from projects: { slug: { url, filename, label } }
@@ -648,7 +646,7 @@ export default async function handler(req, res) {
     if (!isTestContact && !isWithinOperationalHours()) {
       // Outside hours: still draft a suggestion so Ikiel can review in the morning
       const offHoursPlaybook = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
-      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft', undefined, undefined, undefined, undefined, undefined, {}, '', null, offHoursPlaybook);
+      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft', undefined, undefined, undefined, undefined, undefined, [], '', null, offHoursPlaybook);
       patch.suggested_reply = aiResultOffHours.reply || '';
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
@@ -674,7 +672,7 @@ export default async function handler(req, res) {
     const rentalsContext = buildRentalsContext(rentals);
     const availabilityContext = buildAvailabilityContext(digest);
     const liveBrochures = buildBrochures(projects);
-    const rentalPhotos = buildRentalPhotos(rentals);
+    const rentalSlugs = buildRentalSlugs(rentals);
     // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
     const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
     // If this agent is engaged in an active campaign, fetch the campaign's context
@@ -700,7 +698,7 @@ export default async function handler(req, res) {
           + '[The agent sent the attached image — look at it and respond helpfully. If it shows a property, listing screenshot, or document, address its content directly; if it is unrelated small talk (memes, greetings), respond naturally and briefly.]';
       }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalPhotos, availabilityContext, inboundImage, playbookBlock);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalSlugs, availabilityContext, inboundImage, playbookBlock);
 
     // Increment today's spend by the ACTUAL token cost of the Claude call(s),
     // computed from the Anthropic usage block (a date-range availability lookup
@@ -720,15 +718,21 @@ export default async function handler(req, res) {
       await applyCrmActions(SUPABASE_URL, sbHeaders, agent, aiResult.crm_actions, text);
     }
 
+    // Listing cards Maya attached to this reply. On drafts they ride along as a
+    // [[send-cards:...]] suffix that the inbox strips into an attachment chip
+    // and sends (via /api/whatsapp-send action 'cards') when the draft goes out.
+    const cardSlugs = Array.isArray(aiResult.send_cards) ? aiResult.send_cards.filter(Boolean).slice(0, 4) : [];
+    const draftCardsSuffix = cardSlugs.length ? `\n[[send-cards:${cardSlugs.join(',')}]]` : '';
+
     if (mode === 'draft') {
-      patch.suggested_reply = aiResult.reply || '';
+      patch.suggested_reply = (aiResult.reply || '') && (aiResult.reply + draftCardsSuffix);
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
     }
 
     // HYBRID — auto-send only confident FAQ answers, else escalate
     if (mode === 'hybrid' && aiResult.action === 'escalate') {
-      patch.suggested_reply = aiResult.reply || '';
+      patch.suggested_reply = (aiResult.reply || '') && (aiResult.reply + draftCardsSuffix);
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
     }
@@ -760,17 +764,26 @@ export default async function handler(req, res) {
           console.log(`Skipping ${doc.filename} — already sent in last 14 days`);
         }
       }
-      // Send rental hero photo if Claude requested one ("show me HAUS Canggu")
-      const photo = aiResult.send_photo && rentalPhotos[aiResult.send_photo];
-      if (photo && photo.imageUrl) {
-        await sendImage(WA_PHONE_ID, WA_TOKEN, fromNum, photo.imageUrl, photo.caption);
-        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Image: ${photo.caption}]`);
+      // Send rich listing cards for every property Maya referenced — cover
+      // photo + native "View listing" button, one card per property.
+      if (cardSlugs.length) {
+        try {
+          const cards = await resolveListingCards(cardSlugs, 4);
+          for (const card of cards) {
+            const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, fromNum, card);
+            if (sent.waMessageId) {
+              await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, cardMarker(card), sent.waMessageId);
+            } else {
+              console.warn('listing card send failed:', card.slug, sent.error);
+            }
+          }
+        } catch (e) { console.warn('listing cards failed:', e.message); }
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
       patch.unread_count = 0;
     } else {
-      patch.suggested_reply = aiResult.reply || '';
+      patch.suggested_reply = (aiResult.reply || '') && (aiResult.reply + draftCardsSuffix);
     }
 
     await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
@@ -1084,7 +1097,8 @@ async function logOutbound(url, headers, agentId, waNum, content, waMessageId = 
       const agentRes = await fetch(`${url}/rest/v1/agents?id=eq.${agentId}&select=conversation_summary`, { headers });
       const agentRow = (await agentRes.json())?.[0];
       const dateStr = new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
-      const snippet = content.slice(0, 120) + (content.length > 120 ? '...' : '');
+      const readable = humanizeMarker(content);
+      const snippet = readable.slice(0, 120) + (readable.length > 120 ? '...' : '');
       const newLine = `\n[${dateStr}] Maya: ${snippet}`;
       const updatedSummary = ((agentRow?.conversation_summary || '') + newLine).slice(-4000);
       await fetch(`${url}/rest/v1/agents?id=eq.${agentId}`, {
@@ -1197,23 +1211,26 @@ async function wasDocRecentlySent(url, headers, agentId, filename, days) {
   }
 }
 
-async function sendImage(phoneId, token, to, link, caption) {
-  return fetch(`${GRAPH}/${phoneId}/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messaging_product: 'whatsapp', to, type: 'image',
-      image: { link, ...(caption ? { caption } : {}) }
-    })
-  });
-}
-
 async function sendDocument(phoneId, token, to, link, filename) {
   return fetch(`${GRAPH}/${phoneId}/messages`, {
     method: 'POST',
     headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'document', document: { link, filename } })
   });
+}
+
+// Rich [[card]] / [[carousel]] rows read as JSON gunk in Maya's own context —
+// collapse them to a short human line for summaries and thread history.
+function humanizeMarker(content) {
+  const c = String(content || '');
+  const m = c.match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
+  if (!m) return c;
+  try {
+    const data = JSON.parse(m[2]);
+    if (m[1] === 'card') return `[Sent listing card: ${data.title || 'property'}]`;
+    const names = (data.cards || []).map(x => x.title).filter(Boolean).join(', ');
+    return `[Sent availability carousel${names ? ': ' + names : ''}]`;
+  } catch (_) { return `[Sent listing ${m[1]}]`; }
 }
 
 // Fetch the last 30 messages (both directions) for an agent, ordered oldest→newest.
@@ -1234,7 +1251,7 @@ async function fetchRecentThread(url, headers, agentId) {
     return rows.map(m => {
       const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
       const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
-      const content = m.content?.slice(0, 200) || '';
+      const content = humanizeMarker(m.content || '').slice(0, 200);
       return `[${t}] ${sender}: ${content}`;
     }).join('\n');
   } catch (e) {
@@ -1242,7 +1259,7 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalPhotos = {}, availabilityContext = '', inboundImage = null, playbookBlock = '') {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '') {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -1393,7 +1410,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability",
   "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
   "send_doc": null | one of [${brochureKeys}],
-  "send_photo": null | one of [${Object.keys(rentalPhotos).join(', ') || '(no rental hero photos available)'}],
+  "send_cards": [] | up to 4 Samba rental slugs, e.g. ["villa_umah_astanine", "haus_4"] — valid slugs: [${rentalSlugs.join(', ') || '(none available)'}],
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -1406,7 +1423,12 @@ ${isHybrid
   ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
 Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific KAYA sales project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
-Set "send_photo" when the agent asks to SEE a Samba rental ("can you send a photo of HAUS Canggu", "what does Villa Saturno look like", "show me LaneHAUS"). Pick the slug of the specific property they asked about — exact match required. The system will send the property's hero photo inline. ALSO mention in your text reply that the photo is for [property name] and that the full set is in the portal. If multiple units are in a property group (e.g. Tropicana has 7 units), prefer the first unit's slug (e.g. tropicana_a4). If no specific property was asked about, set send_photo to null.
+LISTING CARDS ("send_cards") — MANDATORY whenever you share Samba rentals:
+Any time your reply pitches, recommends, or answers about one or more SPECIFIC Samba rental properties, put their slugs in "send_cards" (max 4, in the order they appear in your reply — best match first). The system sends each one as a rich WhatsApp card right after your text: cover photo, name, rate, and a native "View listing" button that opens the live listing. Because the cards carry the photo and the link:
+- Do NOT paste listing URLs (sambarentals.com/?property=...), Google Drive photo links, or long links of any kind in your reply text when cards are going out — keep the text to the pitch and the facts, and let the cards do the visuals. A closing reference to "the portal" in words is fine.
+- EXCEPTION: when the agent explicitly asks to DOWNLOAD photos (to share with a client), give the property's photos_url (Google Drive) in text; when they ask for the location/pin, give maps_url. Those direct links are still the right answer for download/location requests — send them alongside the card.
+- "Can I see X" / "what does X look like" / "send a photo of X" → put X's slug in send_cards; the card includes the photo. If a property group has several units (e.g. Tropicana), pick the specific unit(s) you are recommending.
+Set "send_cards" to [] only when no specific Samba property is being shared (greetings, commission questions, KAYA sales talk, etc).
 Set "crm_updates" to an empty array if no clear pipeline signals are present.
 Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 
@@ -1449,7 +1471,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
       const raw = data.content?.[0]?.text || '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
-        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
       }
       const parsed = JSON.parse(jsonMatch[0]);
 
@@ -1466,7 +1488,9 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
         send_doc: parsed.send_doc || null,
-        send_photo: parsed.send_photo || null,
+        // send_photo is the legacy single-photo field — fold it into cards.
+        send_cards: Array.isArray(parsed.send_cards) ? parsed.send_cards.slice(0, 4)
+          : (parsed.send_photo ? [parsed.send_photo] : []),
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
         crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
         llm_calls: llmCalls,
@@ -1475,9 +1499,9 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
     }
     // Exhausted hops without a terminal reply (e.g. Maya asked for availability
     // twice) — escalate so a human picks it up rather than sending nothing.
-    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, send_photo: null, crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
   }
 }

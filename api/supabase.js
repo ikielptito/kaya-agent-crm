@@ -3,24 +3,11 @@ import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import { getPlaybook, renderPlaybookBlock, applyDecisions } from '../lib/maya-review.js';
+// Portal listings → card objects { slug, title, subtitle, image, url, badge }
+// plus the send/log machinery — shared with Maya's autoresponder and the
+// whatsapp-send 'cards' action.
+import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import webpush from 'web-push';
-
-// Property listings (portal) → card objects for the console listing picker and
-// send-as-card flow. Each card: { slug, title, subtitle, image, url, badge }.
-const LISTINGS_PORTAL = 'https://sambarentals.com';
-function coverPhotoUrl(id) { return id ? `https://lh3.googleusercontent.com/d/${id}=w1600` : null; }
-async function fetchPortalCards() {
-  const r = await fetch(`${LISTINGS_PORTAL}/api/listings`);
-  let listings = await r.json();
-  if (!Array.isArray(listings)) listings = listings.listings || [];
-  return listings
-    .filter(l => l && l.slug && l.coverPhotoId && !l.isHidden)
-    .map(l => {
-      const rate = l.monthly ? `${l.monthly}/mo` : 'Monthly rental';
-      const subtitle = [rate, l.unitType, l.location].filter(Boolean).join(' · ');
-      return { slug: l.slug, title: l.name || l.slug, subtitle, image: coverPhotoUrl(l.coverPhotoId), url: `${LISTINGS_PORTAL}/?property=${l.slug}`, badge: l.badge || null };
-    });
-}
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
 // Filters out prices/landlines/garbage (must be a 62 8xx mobile, 10–15 digits).
@@ -710,9 +697,9 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       }
 
     } else if (action === 'send_listing_card') {
-      // Send one property to an agent as a rich card: a WhatsApp image (hero
-      // photo) + caption (name, detail, link), logged with a [[card]] marker so
-      // the console thread renders it as a card rather than a bare URL.
+      // Send one property to an agent as a rich card — interactive CTA-URL
+      // (hero photo + native "View listing" button, image+caption fallback),
+      // logged with a [[card]] marker so the console thread renders it richly.
       const WA_TOKEN = process.env.META_WA_TOKEN;
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ ok: false, error: 'WhatsApp env not configured' });
@@ -726,31 +713,21 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!waNum) return res.status(400).json({ ok: false, error: 'agent has no WhatsApp number' });
 
       // Resolve the card.
-      let cards = [];
-      try { cards = await fetchPortalCards(); } catch (e) { return res.status(502).json({ ok: false, error: 'portal unreachable' }); }
-      const card = cards.find(c => c.slug === slug);
+      let card = null;
+      try { card = (await resolveListingCards([slug], 1))[0] || null; }
+      catch (e) { return res.status(502).json({ ok: false, error: 'portal unreachable' }); }
       if (!card) return res.status(404).json({ ok: false, error: 'listing not found' });
-      if (!card.image) return res.status(422).json({ ok: false, error: 'listing has no photo' });
 
-      // Send the hero image + caption via WhatsApp.
-      const captionLines = [`*${card.title}*`, card.subtitle, '', card.url].filter(v => v !== undefined && v !== null);
-      const caption = captionLines.join('\n');
-      const wr = await fetch(`https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`, {
-        method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'image', image: { link: card.image, caption } })
-      });
-      const wd = await wr.json().catch(() => ({}));
-      if (!wr.ok) return res.status(wr.status).json({ ok: false, error: wd?.error?.message || `WhatsApp HTTP ${wr.status}` });
-      const waMessageId = wd.messages?.[0]?.id || null;
+      const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, waNum, card);
+      if (!sent.waMessageId) return res.status(502).json({ ok: false, error: sent.error || 'WhatsApp send failed' });
 
       // Log with a [[card]] marker so the console renders the card.
-      const marker = '[[card]]' + JSON.stringify({ title: card.title, subtitle: card.subtitle, image: card.image, url: card.url, badge: card.badge });
       await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
         method: 'POST', headers,
-        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: marker, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'manual', status: waMessageId ? 'sent' : null })
+        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: cardMarker(card), wa_message_id: sent.waMessageId, timestamp: new Date().toISOString(), source: 'manual', status: 'sent' })
       }).catch(() => {});
 
-      return res.status(200).json({ ok: true, waMessageId, card });
+      return res.status(200).json({ ok: true, waMessageId: sent.waMessageId, format: sent.format, card });
 
     } else if (action === 'resume_unanswered') {
       // Catch up on agents whose latest message is still unanswered — e.g. replies
