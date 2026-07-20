@@ -16,9 +16,13 @@ export default async function handler(req, res) {
   // Fails closed if the secret is missing so a misconfigured deploy can never
   // expose template management or test sends.
   if (req.method === 'POST') {
-    const secret = process.env.LISTING_SYNC_SECRET;
-    if (!secret) return res.status(500).json({ error: 'LISTING_SYNC_SECRET not configured' });
-    if ((req.headers.authorization || '') !== `Bearer ${secret}`) {
+    // TEMPLATE_ADMIN_SECRET is an optional second key for one-off admin
+    // submissions (LISTING_SYNC_SECRET is Vercel-sensitive, so it can't be
+    // retrieved for ad-hoc curl use).
+    const secrets = [process.env.LISTING_SYNC_SECRET, process.env.TEMPLATE_ADMIN_SECRET].filter(Boolean);
+    if (!secrets.length) return res.status(500).json({ error: 'no template auth secret configured' });
+    const auth = req.headers.authorization || '';
+    if (!secrets.some(s => auth === `Bearer ${s}`)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
   }
