@@ -6,8 +6,22 @@ import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, cr
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // All mutating branches (create/delete templates, send test messages) are
+  // gated behind the shared sync secret — same convention as api/supabase.js
+  // sync and the portal's agent_funnel endpoint. The GET template list stays
+  // open: it's read-only and the chat/CRM consoles fetch it without headers.
+  // Fails closed if the secret is missing so a misconfigured deploy can never
+  // expose template management or test sends.
+  if (req.method === 'POST') {
+    const secret = process.env.LISTING_SYNC_SECRET;
+    if (!secret) return res.status(500).json({ error: 'LISTING_SYNC_SECRET not configured' });
+    if ((req.headers.authorization || '') !== `Bearer ${secret}`) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  }
 
   const TOKEN = process.env.META_WA_TOKEN;
   const PHONE_ID = process.env.META_WA_PHONE_ID;
