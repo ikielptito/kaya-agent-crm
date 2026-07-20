@@ -148,7 +148,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     await fetch(SUPABASE_URL + '/rest/v1/wa_messages', {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
-        agent_id: agentId || null,
+        agent_id: agentId ?? null,
         wa_num: waNum,
         direction: 'outbound',
         content: logContent,
@@ -194,7 +194,7 @@ async function handleCards(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHead
       await fetch(SUPABASE_URL + '/rest/v1/wa_messages', {
         method: 'POST', headers: sbHeaders,
         body: JSON.stringify({
-          agent_id: agentId || null, wa_num: waNum, direction: 'outbound',
+          agent_id: agentId ?? null, wa_num: waNum, direction: 'outbound',
           content: cardMarker(card), wa_message_id: r.waMessageId,
           timestamp: new Date().toISOString(), category: 'listing_card',
           source: source === 'manual' ? 'manual' : 'api', status: 'sent'

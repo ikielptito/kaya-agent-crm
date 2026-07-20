@@ -35,7 +35,9 @@ async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agen
   } catch (_) { return; }
   if (!list.length) return;
 
-  const json = JSON.stringify({ title, body, agentId: agentId || null, url: '/chat.html', badge_count: badgeCount });
+  // agentId ?? null (not `|| null`): agent id 0 is a real contact ("Oniriq") —
+  // `0 || null` would drop it, breaking deep-link-to-thread on the push.
+  const json = JSON.stringify({ title, body, agentId: agentId ?? null, url: '/chat.html', badge_count: badgeCount });
   const dead = [];
   await Promise.all(list.map(async sub => {
     try {
@@ -473,7 +475,7 @@ export default async function handler(req, res) {
     await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
-        agent_id: agent?.id || null, wa_num: fromNum, direction: 'inbound',
+        agent_id: agent ? agent.id : null, wa_num: fromNum, direction: 'inbound',
         content: dbContent, wa_message_id: waMessageId, timestamp, source: 'webhook',
         media_type: mediaType || null, media_id: storedMediaId || null,
         reply_to: msg.context?.id || null,   // id of the message this one quotes, if any
@@ -484,7 +486,7 @@ export default async function handler(req, res) {
     sendPushNotifications(SUPABASE_URL, sbHeaders, {
       title: agent?.name || agent?.agency || ('+' + fromNum),
       body: (dbContent || text || 'New message').slice(0, 160),
-      agentId: agent?.id || null,
+      agentId: agent ? agent.id : null,
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
 
@@ -497,17 +499,21 @@ export default async function handler(req, res) {
       // agents immediately learn what she can do.
       try {
         const firstDateStr = new Date(timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
-        const createRes = await fetch(`${SUPABASE_URL}/rest/v1/agents`, {
-          method: 'POST', headers: { ...sbHeaders, Prefer: 'return=representation' },
-          body: JSON.stringify({
-            name: '+' + fromNum, wa_num: fromNum,
-            unread_count: 1, last_inbound_at: timestamp,
-            conversation_summary: `[${firstDateStr}] New contact (self-introduced via WhatsApp): ${(text || dbContent || '').slice(0, 120)}`,
-            conversation_history: { first_contact: firstDateStr, last_contact: firstDateStr, total_messages: 1 },
-          }),
+        // Use the self-healing createAgentRow (reads the live schema, fills any
+        // NOT-NULL column we didn't set) instead of a raw insert. A raw insert
+        // that hit an unanticipated NOT-NULL column used to fail silently here,
+        // leaving the just-stored inbound message orphaned (agent_id null →
+        // invisible in the inbox) even though a push had already fired. That is
+        // exactly how non-Indonesian guests' booking messages went missing.
+        const createRes = await createAgentRow(SUPABASE_URL, sbHeaders, {
+          name: '+' + fromNum, wa_num: fromNum,
+          unread_count: 1, last_inbound_at: timestamp,
+          conversation_summary: `[${firstDateStr}] New contact (self-introduced via WhatsApp): ${(text || dbContent || '').slice(0, 120)}`,
+          conversation_history: { first_contact: firstDateStr, last_contact: firstDateStr, total_messages: 1 },
         });
-        const newAgent = (await createRes.json().catch(() => null))?.[0];
-        if (newAgent?.id) {
+        if (!createRes.ok) console.warn('new-contact create failed:', createRes.error);
+        const newAgent = createRes.row;
+        if (newAgent && newAgent.id != null) {
           if (waMessageId) {
             await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, {
               method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ agent_id: newAgent.id }),

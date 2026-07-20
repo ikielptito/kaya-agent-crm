@@ -687,6 +687,74 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       }
       return res.status(200).json({ created, skipped, candidates: cand.length, results });
 
+    } else if (action === 'relink_orphan_messages') {
+      // Repair for the two bugs that left inbound messages with agent_id = null
+      // (invisible in the inbox even though a push fired):
+      //   1. `agent?.id || null` mapped agent id 0 ("Oniriq") to null.
+      //   2. A raw agent-create that failed silently for brand-new senders.
+      // For every orphaned inbound message, attach it to the existing contact
+      // for that number, or create the contact (self-healing) if none exists.
+      // Idempotent: re-running finds nothing to do. dry_run reports without writing.
+      const dryRun = !!payload?.dry_run;
+      const orphRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/wa_messages?direction=eq.inbound&agent_id=is.null&deleted_at=is.null&select=id,wa_num,content,timestamp&order=timestamp.asc&limit=5000`,
+        { headers }
+      );
+      const orphans = (await orphRes.json().catch(() => [])) || [];
+      // Group by sender number (skip rows with no number — unrecoverable).
+      const byNum = {};
+      for (const m of orphans) {
+        const num = String(m.wa_num || '').replace(/[^\d]/g, '');
+        if (!num) continue;
+        (byNum[num] = byNum[num] || []).push(m);
+      }
+      const report = [];
+      let relinked = 0, createdContacts = 0;
+      for (const [num, msgs] of Object.entries(byNum)) {
+        // Existing contact for this number?
+        const exRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}&select=id,name,unread_count,last_inbound_at,conversation_history&limit=1`, { headers });
+        let agentRow = (await exRes.json().catch(() => []))?.[0] || null;
+        let didCreate = false;
+        if (!agentRow) {
+          const latest = msgs[msgs.length - 1];
+          const dateStr = new Date(latest.timestamp).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+          if (dryRun) {
+            report.push({ wa_num: num, messages: msgs.length, action: 'would_create_and_link' });
+            continue;
+          }
+          const cr = await createAgentRow(SUPABASE_URL, headers, {
+            name: '+' + num, wa_num: num,
+            unread_count: msgs.length, last_inbound_at: latest.timestamp,
+            conversation_summary: `[${dateStr}] Contact recovered by orphan-message backfill: ${String(latest.content || '').slice(0, 120)}`,
+            conversation_history: { first_contact: dateStr, last_contact: dateStr, total_messages: msgs.length },
+          });
+          if (!cr.ok) { report.push({ wa_num: num, messages: msgs.length, error: cr.error }); continue; }
+          agentRow = cr.row; didCreate = true; createdContacts++;
+        }
+        if (!agentRow || agentRow.id == null) { report.push({ wa_num: num, messages: msgs.length, error: 'no agent id' }); continue; }
+        if (dryRun) { report.push({ wa_num: num, messages: msgs.length, action: 'would_link', agent_id: agentRow.id, agent_name: agentRow.name }); continue; }
+        // Attach every orphaned inbound from this number to the contact.
+        const patchRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&agent_id=is.null&direction=eq.inbound`, {
+          method: 'PATCH', headers: { ...headers, Prefer: 'return=minimal' },
+          body: JSON.stringify({ agent_id: agentRow.id }),
+        });
+        if (!patchRes.ok) { report.push({ wa_num: num, messages: msgs.length, error: 'link failed: ' + (await patchRes.text().catch(() => '')).slice(0, 120) }); continue; }
+        relinked += msgs.length;
+        // For an existing contact, bump unread + last_inbound so the thread
+        // resurfaces (a freshly created contact already carries these).
+        if (!didCreate) {
+          const latest = msgs[msgs.length - 1];
+          const newUnread = (agentRow.unread_count || 0) + msgs.length;
+          const lastAt = (!agentRow.last_inbound_at || new Date(latest.timestamp) > new Date(agentRow.last_inbound_at)) ? latest.timestamp : agentRow.last_inbound_at;
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentRow.id}`, {
+            method: 'PATCH', headers: { ...headers, Prefer: 'return=minimal' },
+            body: JSON.stringify({ unread_count: newUnread, last_inbound_at: lastAt }),
+          }).catch(() => {});
+        }
+        report.push({ wa_num: num, messages: msgs.length, action: didCreate ? 'created_and_linked' : 'linked', agent_id: agentRow.id, agent_name: agentRow.name });
+      }
+      return res.status(200).json({ dry_run: dryRun, orphans_found: orphans.length, numbers: Object.keys(byNum).length, relinked, contacts_created: createdContacts, report });
+
     } else if (action === 'list_listings') {
       // Portal listings as card objects, for the console "Send listing" picker.
       try {
@@ -724,7 +792,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       // Log with a [[card]] marker so the console renders the card.
       await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
         method: 'POST', headers,
-        body: JSON.stringify({ agent_id: agent?.id || null, wa_num: waNum, direction: 'outbound', content: cardMarker(card), wa_message_id: sent.waMessageId, timestamp: new Date().toISOString(), category: 'listing_card', source: 'manual', status: 'sent' })
+        body: JSON.stringify({ agent_id: agent ? agent.id : null, wa_num: waNum, direction: 'outbound', content: cardMarker(card), wa_message_id: sent.waMessageId, timestamp: new Date().toISOString(), category: 'listing_card', source: 'manual', status: 'sent' })
       }).catch(() => {});
 
       return res.status(200).json({ ok: true, waMessageId: sent.waMessageId, format: sent.format, card });
