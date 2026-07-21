@@ -22,6 +22,36 @@ function normIndoMobile(raw) {
   if (!d.startsWith('628')) return null; // Indonesian mobiles only
   return d;
 }
+// True when a wa_num value carries no actual digits (empty / whitespace / junk).
+const isBlankNum = (v) => !String(v || '').replace(/\D/g, '');
+
+// Guard against silent number loss: a stale browser tab saves the whole agent
+// row, and if its cached copy had an empty wa_num it would blank a real number
+// on the server. For every incoming row that has an id but a blank wa_num,
+// look up the stored row and, if it still holds a number, keep it (wa_num +
+// wa_url). New rows (no id) and rows that actually change the number are left
+// alone. `rows` is mutated in place; returns the list of preserved ids.
+async function preserveExistingNumbers(SUPABASE_URL, headers, rows) {
+  const needCheck = rows.filter((a) => a && a.id != null && 'wa_num' in a && isBlankNum(a.wa_num));
+  if (!needCheck.length) return [];
+  const ids = [...new Set(needCheck.map((a) => a.id))];
+  const existing = await fetch(
+    `${SUPABASE_URL}/rest/v1/agents?id=in.(${ids.join(',')})&select=id,wa_num,wa_url`,
+    { headers }
+  ).then((r) => r.json()).catch(() => []);
+  const byId = new Map((Array.isArray(existing) ? existing : []).map((e) => [String(e.id), e]));
+  const preserved = [];
+  for (const a of needCheck) {
+    const cur = byId.get(String(a.id));
+    if (cur && !isBlankNum(cur.wa_num)) {
+      a.wa_num = cur.wa_num;
+      a.wa_url = cur.wa_url || `https://wa.me/${String(cur.wa_num).replace(/\D/g, '')}`;
+      preserved.push(a.id);
+    }
+  }
+  return preserved;
+}
+
 // Pull phone-shaped substrings out of a message body.
 function extractPhoneCandidates(text) {
   const out = [];
@@ -83,10 +113,13 @@ export default async function handler(req, res) {
       return res.status(r.status).json(data);
 
     } else if (action === 'upsert_agent') {
+      // Never let a stale-tab save blank an existing number (see helper above).
+      const rows = Array.isArray(payload) ? payload : [payload];
+      await preserveExistingNumbers(SUPABASE_URL, headers, rows);
       r = await fetch(SUPABASE_URL + '/rest/v1/agents', {
         method: 'POST',
         headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(Array.isArray(payload) ? rows : rows[0])
       });
       if (!r.ok) {
         const err = await r.text();
@@ -97,6 +130,15 @@ export default async function handler(req, res) {
 
     } else if (action === 'patch_agent') {
       const { id, fields } = payload;
+      // Don't let a patch that carries a blank wa_num wipe a stored number.
+      if (fields && 'wa_num' in fields && isBlankNum(fields.wa_num) && id != null) {
+        const cur = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${id}&select=wa_num`, { headers })
+          .then((rr) => rr.json()).catch(() => []);
+        if (Array.isArray(cur) && cur[0] && !isBlankNum(cur[0].wa_num)) {
+          delete fields.wa_num;
+          delete fields.wa_url;
+        }
+      }
       r = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + id, {
         method: 'PATCH',
         headers,
