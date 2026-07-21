@@ -3,6 +3,7 @@ import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import { getPlaybook, renderPlaybookBlock, applyDecisions } from '../lib/maya-review.js';
+import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 // Portal listings → card objects { slug, title, subtitle, image, url, badge }
 // plus the send/log machinery — shared with Maya's autoresponder and the
 // whatsapp-send 'cards' action.
@@ -431,12 +432,29 @@ Agency: ${agent.agency || 'independent'}
 Recent message thread (oldest → newest):
 ${thread || '(no prior history)'}
 
-Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent's most recent message. Output ONLY the reply text — no JSON, no preamble, no quotes. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.`;
+${CRM_SIGNALS_INSTRUCTIONS}
+
+Respond with ONLY a JSON object (no markdown, no prose):
+{
+  "reply": "the WhatsApp reply to send (1-4 sentences typical), responding to the agent's most recent message",
+  "crm_updates": [
+    { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
+  ],
+  "crm_actions": [
+    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "service_type": "rental", "replace": false }
+  ]
+}
+Set "crm_updates" to an empty array if no clear pipeline / frequency / service-classification signals are present. Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.`;
 
       const system = [
         { type: 'text', text: systemHead, cache_control: { type: 'ephemeral' } },
         { type: 'text', text: systemRest },
       ];
+
+      // Evidence for the maya_updates audit log = the agent's most recent
+      // inbound message (rows are newest-first from the timestamp.desc query).
+      const lastInbound = Array.isArray(rows) ? rows.find(m => m.direction === 'inbound') : null;
+      const evidenceQuote = (lastInbound?.content || '').slice(0, 500);
 
       try {
         const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -444,13 +462,37 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
           headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 500,
+            max_tokens: 700,
             system,
             messages: [{ role: 'user', content: 'Generate the reply now.' }]
           })
         });
         const data = await r.json();
-        const reply = (data.content?.[0]?.text || '').trim();
+        const raw = (data.content?.[0]?.text || '').trim();
+
+        // Parse Maya's JSON contract (reply + crm_updates + crm_actions). Fall
+        // back to treating the raw text as the reply if she didn't emit JSON,
+        // so the console/catch-up never break on a malformed response.
+        let reply = '', crmUpdates = [], crmActions = [];
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            reply = (parsed.reply || '').trim();
+            if (Array.isArray(parsed.crm_updates)) crmUpdates = parsed.crm_updates;
+            if (Array.isArray(parsed.crm_actions)) crmActions = parsed.crm_actions;
+          } catch (_) { reply = raw; }
+        } else {
+          reply = raw;
+        }
+
+        // Apply the CRM changes Maya recognised — SAME helpers the webhook uses.
+        // Before this, suggest_reply dropped them, so catch-up (resume_unanswered)
+        // and console-drafted replies could promise "I'll stop the daily updates"
+        // without ever recording the opt-out / frequency change (21 Jul 2026).
+        if (crmUpdates.length) await applyCrmUpdates(SUPABASE_URL, headers, agent, crmUpdates, evidenceQuote);
+        if (crmActions.length) await applyCrmActions(SUPABASE_URL, headers, agent, crmActions, evidenceQuote);
+
         // Real token cost (claude-sonnet-4-6: $3/M in, $15/M out) so the cron
         // charges actual dollars into daily_usage instead of a flat estimate.
         const u = data.usage || {};
@@ -458,7 +500,7 @@ Generate a single concise WhatsApp reply (1-4 sentences) responding to the agent
           + (u.output_tokens || 0) * 15 / 1e6
           + (u.cache_read_input_tokens || 0) * 0.30 / 1e6
           + (u.cache_creation_input_tokens || 0) * 3.75 / 1e6;
-        return res.status(200).json({ reply, cost_usd });
+        return res.status(200).json({ reply, cost_usd, crm_updates: crmUpdates.length, crm_actions: crmActions.length });
       } catch (e) {
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }
