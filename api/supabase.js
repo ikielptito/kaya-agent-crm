@@ -1,4 +1,4 @@
-import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '../lib/kb.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
@@ -1034,7 +1034,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
               headers: { 'Authorization': 'Bearer ' + TOKEN }
             });
             const td = await tr.json();
-            const welcomeTpl = (td.data || []).find(t => t.status === 'APPROVED' && t.name === 'samba_agent_welcome_v1');
+            const welcomeTpl = pickWelcomeTemplate(td.data);
             if (welcomeTpl) {
               const bodyComp = (welcomeTpl.components || []).find(c => c.type === 'BODY');
               const fName = String(name).trim().split(/\s+/)[0] || 'there';
