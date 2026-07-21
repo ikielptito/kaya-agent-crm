@@ -21,7 +21,7 @@ import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
 import { reconcileAllRentals, pullAgentAnalytics } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
-import { runReview } from '../lib/maya-review.js';
+import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -878,44 +878,6 @@ function buildPortfolioContextFromDb(projects) {
   }).join('\n\n');
 }
 
-// Build the full source-of-truth KB for the weekly review's fact-checking.
-// The critic must grade Maya's replies against the SAME data she answers from
-// (the live DB), so this dumps unit-level KAYA pricing + the Samba rentals table.
-async function buildReviewKbContext(url, headers) {
-  const q = (path) => fetch(`${url}/rest/v1/${path}`, { headers }).then(r => r.json()).catch(() => []);
-  const [projects, rentals] = await Promise.all([
-    q('projects?select=name,area,status,commission_pct,delivery_date,construction_status,payment_plan,units,maya_notes&active=eq.true&order=display_order.asc'),
-    q('rentals?select=name,area,bedrooms,monthly,yearly,available,availability,maya_notes,portal_url&order=name.asc'),
-  ]);
-
-  const P = Array.isArray(projects) ? projects : [];
-  const kaya = P.map(p => {
-    const units = Array.isArray(p.units) ? p.units.map(u =>
-      `    - ${u.code}: ${u.beds || '?'}BR ${u.sqm || '?'}sqm, USD ${u.price_usd || '?'} / IDR ${u.price_idr || '?'} [${u.availability || 'Available'}]${u.notes ? ' (' + u.notes + ')' : ''}`
-    ).join('\n') : '';
-    return [
-      `${p.name}${p.area ? ' — ' + p.area : ''} [${p.status || ''}]`,
-      p.commission_pct != null ? `  Commission: ${p.commission_pct}%` : null,
-      p.delivery_date ? `  Delivery: ${p.delivery_date}` : null,
-      p.construction_status ? `  Construction: ${p.construction_status}` : null,
-      p.payment_plan ? `  Payment plan: ${p.payment_plan}` : null,
-      units ? `  Units:\n${units}` : null,
-      p.maya_notes ? `  Notes: ${p.maya_notes}` : null,
-    ].filter(Boolean).join('\n');
-  }).join('\n\n');
-
-  const R = Array.isArray(rentals) ? rentals : [];
-  const samba = R.map(r => {
-    const avail = r.available != null ? (r.available ? 'available' : 'occupied') : (r.availability || '');
-    return `- ${r.name}${r.area ? ' (' + r.area + ')' : ''}${r.bedrooms ? ' · ' + r.bedrooms + 'BR' : ''}: ${r.monthly ? r.monthly + '/mo' : ''}${r.yearly ? ', ' + r.yearly + '/yr' : ''}${avail ? ' [' + avail + ']' : ''}${r.maya_notes ? ' — ' + String(r.maya_notes).slice(0, 160) : ''}`;
-  }).join('\n');
-
-  return `KAYA SALES PROJECTS (unit-level source of truth — prices/availability Maya must match):
-${kaya || '(none loaded)'}
-
-SAMBA REALTY RENTALS (10% agent commission, already included in the quoted monthly rate):
-${samba || '(none loaded)'}`;
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // SAMBA AVAILABILITY NOTIFICATIONS

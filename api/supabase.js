@@ -3,7 +3,7 @@ import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
-import { getPlaybook, renderPlaybookBlock, applyDecisions } from '../lib/maya-review.js';
+import { getPlaybook, renderPlaybookBlock, applyDecisions, runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 // Portal listings → card objects { slug, title, subtitle, image, url, badge }
 // plus the send/log machinery — shared with Maya's autoresponder and the
@@ -1105,6 +1105,24 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         playbook_preview: renderPlaybookBlock(playbook),
         log: Array.isArray(log) ? log : [],
       });
+
+    } else if (action === 'run_maya_review') {
+      // Manual re-run of the weekly self-review (same path the Sunday cron uses):
+      // grade the last `days` (default 7, floored at the manual-tagging cutoff),
+      // stage it for approval, and notify. Returns the staged review to inspect.
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      const kbContext = await buildReviewKbContext(SUPABASE_URL, headers);
+      const staged = await runReview(
+        { SUPABASE_URL, headers, ANTHROPIC_KEY },
+        { kbContext, days: Number(payload?.days) > 0 ? Number(payload.days) : 7 }
+      );
+      let notified = 0;
+      if (staged.thread_count > 0 && payload?.notify !== false) {
+        const push = await sendOwnerPush({ SUPABASE_URL, headers }, buildReviewPushPayload(staged));
+        notified = push.sent || 0;
+      }
+      return res.status(200).json({ ...staged, notified });
 
     } else if (action === 'notify_review_ready') {
       // Push the currently-staged self-review to the owner's device(s), deep-
