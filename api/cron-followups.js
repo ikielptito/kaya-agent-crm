@@ -142,6 +142,31 @@ export default async function handler(req, res) {
     }
   }
 
+  // ── Availability broadcast waves ≥2 ──────────────────────────────────
+  // The scheduled morning broadcast is staggered: vercel.json crons hit
+  // ?wave=0 at 9:00 WITA (rides the full daily pass below), then ?wave=1 and
+  // ?wave=2 at 9:20/9:40. These later invocations send ONLY the availability
+  // broadcast to their cohort (agent.id % AVAILABILITY_WAVES), reusing the
+  // improvements wave 0 stashed — no follow-ups, no reports, no reconcile.
+  const waveParam = req.query?.wave !== undefined ? parseInt(req.query.wave, 10) : null;
+  if (waveParam !== null && waveParam >= 1) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null`, { headers: sbHeaders });
+      const agents = await r.json();
+      if (!Array.isArray(agents)) return res.status(500).json({ error: 'Failed to fetch agents' });
+      const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
+      const availability = await runAvailabilityNotifications({
+        now: new Date(), sbHeaders, supabaseUrl: SUPABASE_URL,
+        agents, templatesMap, waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+        results: [], previewMode: false,
+        wave: waveParam, waveCount: AVAILABILITY_WAVES,
+      });
+      return res.status(200).json({ ran_at: new Date().toISOString(), wave: waveParam, availability });
+    } catch (e) {
+      return res.status(500).json({ error: `wave ${waveParam} failed: ` + e.message });
+    }
+  }
+
   try {
     // Global automation switch — when it's "off", suspend Maya's reactive
     // follow-ups (overnight-draft regen, campaign sequences, anything that
@@ -456,12 +481,18 @@ export default async function handler(req, res) {
     // skips wa_messages logging, and does not persist a new snapshot. The
     // caller can then show the user what would go out before they confirm.
     const previewMode = req.query?.preview === '1';
+    // Scheduled invocations carry ?wave=0 → send to cohort 0 and stash the
+    // improvements for the :20/:40 waves. Bare invocations (manual fire from
+    // the dashboard, ad-hoc curl) keep the old behavior: everyone in one pass.
+    const staggered = waveParam === 0 && !previewMode;
     const availabilityResult = await runAvailabilityNotifications({
       now, sbHeaders, supabaseUrl: SUPABASE_URL,
       agents, templatesMap,
       waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
       results,
       previewMode,
+      wave: 0,
+      waveCount: staggered ? AVAILABILITY_WAVES : 1,
     });
 
     // ── RENTALS RECONCILE (daily safety net) ─────────────────────────
@@ -664,7 +695,7 @@ Respond with ONLY the message text — no JSON, no preamble.`;
       method: 'POST',
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 300,
         system,
         messages: [{ role: 'user', content: `Send the follow-up now.` }]
@@ -912,14 +943,14 @@ const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'a
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
-const ALERT_FREQUENCY_HOURS = 20;
+const ALERT_FREQUENCY_HOURS = 72;   // max ~2 event alerts/week + Monday digest = ≤3 touches
 // A paused thread (manual takeover) with no message either direction for this
 // many days is considered cold and auto-resumed so Maya reclaims coverage.
 const AUTO_RESUME_DAYS = 7;
 // Minimum genuine improvements for an event alert to interrupt agents; anything
 // below rolls into the Monday digest. Raising this is the single biggest lever
 // on volume + relevance.
-const HIGH_SIGNAL_MIN = 2;
+const HIGH_SIGNAL_MIN = 3;
 // Tier-based cadence for event alerts (the Monday digest still goes to everyone
 // except paused). Engaged agents get the full stream; disengaged ones only see
 // the weekly anchor, which is where most of the 12.6-msg/month cut comes from.
@@ -929,6 +960,17 @@ const TIER_EVENT_ALERTS = {
   dormant: false,                            // weekly digest only
 };
 const TIER_ALERT_HOURS = { warm: 72 };       // warm: at most ~1 alert / 3 days
+// Tier vocabulary drift guard — engagement scoring has written 'hot'/'cold'
+// rows, and many agents have no engagement_tier at all. Normalise before the
+// mute table so an unknown or missing tier can never fall into the full
+// event-alert stream by accident (previously NULL defaulted to 'active').
+const TIER_ALIASES = { hot: 'active', cold: 'dormant' };
+const DEFAULT_TIER = 'warm';
+// The scheduled morning broadcast is split into waves 20 min apart
+// (vercel.json crons hit ?wave=0/1/2). Cohort = agent.id % AVAILABILITY_WAVES.
+// Smooths Meta template volume (quality rating) and Maya's reply burst.
+// Bare invocations (manual fire from the dashboard) send to everyone at once.
+const AVAILABILITY_WAVES = 3;
 const LONG_WINDOW_MOVE_THRESHOLD_DAYS = 7;
 const MAX_ALERT_BULLETS = 5;
 const MAX_DIGEST_BULLETS = 8;
@@ -937,7 +979,8 @@ const EMPTY_SLOT = '—';               // pad for unused bullet slots (Meta rej
 const PORTAL_BASE = 'https://sambarentals.com';
 
 export async function runAvailabilityNotifications(ctx) {
-  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results, previewMode } = ctx;
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results, previewMode,
+    wave = 0, waveCount = 1 } = ctx;
 
   const summary = {
     enabled: false, ran: false, recipients: 0,
@@ -996,35 +1039,64 @@ export async function runAvailabilityNotifications(ctx) {
   const introducedSet = isMonday ? new Set() : await loadIntroducedSet(supabaseUrl, sbHeaders);
 
   // ── Snapshot diff (event alerts only) ───────────────────────────
-  const prevSnapshot = (await loadSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot')) || null;
+  // Waves ≥1 never re-diff: wave 0 already advanced the snapshot, so a fresh
+  // diff would see "no changes". They reuse the improvements wave 0 stashed
+  // for today, and bail if wave 0 never got to a send (kill switch, first
+  // run, or below the signal bar — the stash date won't match today).
+  const WAVE_STASH_KEY = 'samba_availability_wave';
+  const todayKey = now.toISOString().slice(0, 10);
   const newSnapshot = buildSnapshot(digest.properties);
-  const improvements = prevSnapshot
-    ? diffImprovements(prevSnapshot, digest.properties)
-    : { isFirstRun: true, items: [] };
+  let improvements;
+  if (wave > 0 && !previewMode) {
+    const stash = await loadSetting(supabaseUrl, sbHeaders, WAVE_STASH_KEY);
+    if (!stash || stash.date !== todayKey) {
+      summary.skipped_reason = `wave ${wave + 1}/${waveCount}: no wave stash for ${todayKey}`;
+      return summary;
+    }
+    improvements = { isFirstRun: false, items: stash.items || [] };
+    if (!isMonday && improvements.items.length < HIGH_SIGNAL_MIN) {
+      summary.ran = true;
+      summary.skipped_no_changes = 1;
+      return summary;
+    }
+  } else {
+    const prevSnapshot = (await loadSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot')) || null;
+    improvements = prevSnapshot
+      ? diffImprovements(prevSnapshot, digest.properties)
+      : { isFirstRun: true, items: [] };
 
-  // First-ever run on this CRM: persist snapshot, send nothing (no baseline to diff against).
-  if (improvements.isFirstRun && !isMonday) {
-    await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
-    summary.ran = true;
-    summary.skipped_reason = 'first-run; snapshot saved';
-    return summary;
-  }
+    // First-ever run on this CRM: persist snapshot, send nothing (no baseline to diff against).
+    if (improvements.isFirstRun && !isMonday) {
+      await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+      summary.ran = true;
+      summary.skipped_reason = 'first-run; snapshot saved';
+      return summary;
+    }
 
-  // High-signal bar: an event alert must carry at least HIGH_SIGNAL_MIN genuine
-  // improvements. Sparse single-item days roll into the Monday digest instead of
-  // interrupting everyone — this both cuts noise and removes the old "• —" empty
-  // bullet padding (which only appeared when there were fewer items than slots).
-  if (!isMonday && improvements.items.length < HIGH_SIGNAL_MIN) {
-    await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
-    summary.ran = true;
-    summary.skipped_no_changes = 1;
-    summary.below_signal_bar = improvements.items.length;
-    return summary;
+    // High-signal bar: an event alert must carry at least HIGH_SIGNAL_MIN genuine
+    // improvements. Sparse days roll into the Monday digest instead of
+    // interrupting everyone — this both cuts noise and removes the old "• —" empty
+    // bullet padding (which only appeared when there were fewer items than slots).
+    if (!isMonday && improvements.items.length < HIGH_SIGNAL_MIN) {
+      await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+      summary.ran = true;
+      summary.skipped_no_changes = 1;
+      summary.below_signal_bar = improvements.items.length;
+      return summary;
+    }
+
+    // Stash today's improvements so waves 2..N can reuse them (staggered runs only).
+    if (!previewMode && waveCount > 1) {
+      await saveSetting(supabaseUrl, sbHeaders, WAVE_STASH_KEY, { date: todayKey, items: improvements.items });
+    }
   }
 
   // ── Recipient filter ────────────────────────────────────────────
   const eligible = agents.filter(a => isAvailabilityEligible(a, config));
-  summary.recipients = eligible.length;
+  // Staggered runs send to this wave's cohort only; bare runs send to everyone.
+  const cohort = waveCount > 1 ? eligible.filter(a => a.id % waveCount === wave) : eligible;
+  summary.recipients = cohort.length;
+  if (waveCount > 1) summary.wave = `${wave + 1}/${waveCount}`;
 
   // ── Visual carousel (weekly digest + mid-week availability alerts) ─────
   // Whenever we're about to send an availability message — the Monday digest OR
@@ -1088,8 +1160,16 @@ export async function runAvailabilityNotifications(ctx) {
   }
 
   // ── Send loop ───────────────────────────────────────────────────
-  for (const agent of eligible) {
+  for (const agent of cohort) {
     if (agent.samba_alerts_opt_out) { summary.skipped_opt_out++; continue; }
+
+    // Idempotency guard — no agent gets a second availability touch within 6h,
+    // whatever the day. Protects against double cron fires, a manual re-run
+    // after the morning waves, and duplicate Monday digests.
+    if (agent.last_availability_alert_at) {
+      const hrsSinceAny = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 3.6e6;
+      if (hrsSinceAny < 6) { summary.skipped_freq_cap++; continue; }
+    }
 
     // Reduced-frequency preference — set by Maya when an agent asks for fewer
     // messages without unsubscribing. 'weekly' = Monday digest only,
@@ -1105,8 +1185,11 @@ export async function runAvailabilityNotifications(ctx) {
     // Tier-based cadence (event alerts only; the Monday digest still reaches
     // every non-paused agent). Disengaged tiers are muted from the daily stream
     // so we stop blasting the 95 dormant agents who never reply.
-    const tier = String(agent.engagement_tier || 'active').toLowerCase();
-    if (!isMonday && TIER_EVENT_ALERTS[tier] === false) { summary.skipped_tier_cap = (summary.skipped_tier_cap || 0) + 1; continue; }
+    const tierRaw = String(agent.engagement_tier || '').toLowerCase();
+    const tier = TIER_ALIASES[tierRaw] || tierRaw || DEFAULT_TIER;
+    // Mute-by-default: only tiers explicitly marked true get the event stream.
+    // Unknown vocabulary ('cold', typos, future tiers) → Monday digest only.
+    if (!isMonday && TIER_EVENT_ALERTS[tier] !== true) { summary.skipped_tier_cap = (summary.skipped_tier_cap || 0) + 1; continue; }
 
     // Frequency cap (event alerts only — digest is once weekly so cap is moot).
     // Cap widens for less-engaged tiers so they get fewer interruptions.
@@ -1146,10 +1229,11 @@ export async function runAvailabilityNotifications(ctx) {
     // rejections (parameter format, language mismatch, unapproved name, etc.)
     let metaErr = null;
     let waMessageId = null;
-    // Use the visual carousel for EVERY availability touch — weekly digest,
-    // mid-week alerts, and the first-ever send — so all agent-facing marketing
-    // is the same rich format. The intro just gets a warmer onboarding line.
-    const sendCarousel = !!carouselCards;
+    // Carousel only for the Monday digest and the first-ever send (intro).
+    // Mid-week alerts go as the text template listing ONLY the new openings —
+    // the carousel showed the same top villas every day, so agents read
+    // back-to-back sends as the identical blast re-sent ("stop sending daily").
+    const sendCarousel = !!carouselCards && (isMonday || isFirstSend);
     const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
     const carouselIntro = isFirstSend
       ? `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`
@@ -1196,7 +1280,7 @@ export async function runAvailabilityNotifications(ctx) {
       // hero images + links), matching what the agent sees on WhatsApp. Any
       // consumer that reads plain content still gets a readable "[[carousel]]…".
       renderedPreview = '[[carousel]]' + JSON.stringify({
-        title: 'Weekly availability',
+        title: isMonday ? 'Weekly availability' : 'Current openings',
         cards: carouselCards.map(c => ({
           title: c.name,
           subtitle: [c.detail, c.area].filter(Boolean).join(' · '),
@@ -1238,7 +1322,10 @@ export async function runAvailabilityNotifications(ctx) {
 
   // Persist the new snapshot only after a successful send pass — if Supabase
   // is down mid-loop, leaving the old snapshot means we'll retry next cron.
-  await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+  // Waves ≥1 never advance the snapshot; that's wave 0's job.
+  if (wave === 0) {
+    await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
+  }
   summary.ran = true;
   return summary;
 }

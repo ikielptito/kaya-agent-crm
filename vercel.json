@@ -10,8 +10,16 @@
   ],
   "crons": [
     {
-      "path": "/api/cron-followups",
+      "path": "/api/cron-followups?wave=0",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron-followups?wave=1",
+      "schedule": "20 1 * * *"
+    },
+    {
+      "path": "/api/cron-followups?wave=2",
+      "schedule": "40 1 * * *"
     }
   ]
 }
