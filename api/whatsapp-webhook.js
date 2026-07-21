@@ -1,6 +1,6 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 import { loadPlaybookBlock } from '../lib/maya-review.js';
-import { forwardInbound, forwardMayaReply } from '../lib/telegram.js';
+import { forwardInbound, forwardMayaReply, postToTelegram } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
@@ -55,6 +55,37 @@ async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agen
       body: JSON.stringify({ key: 'push_subscriptions', value: alive })
     }).catch(() => {});
   }
+}
+
+// ── Loud generation-failure alert ──────────────────────────────────────
+// When the Claude call itself errors (credit exhaustion, auth, overload),
+// the failure must never be silent (the 21 Jul 2026 credit outage: every
+// reply dissolved into an empty draft with no alert). The caller writes a
+// loud marker into suggested_reply; this helper fires push + Telegram,
+// throttled to one alert per 15 min across invocations so an outage doesn't
+// spam once per inbound message. Alerting must never crash the webhook.
+const FAILURE_ALERT_THROTTLE_MS = 15 * 60 * 1000;
+async function alertGenerationFailure(supabaseUrl, sbHeaders, agent, errMsg) {
+  try {
+    const r = await fetch(`${supabaseUrl}/rest/v1/settings?key=eq.maya_failure_alert_at&select=value`, { headers: sbHeaders });
+    const lastAt = (await r.json())?.[0]?.value?.at;
+    if (lastAt && (Date.now() - new Date(lastAt).getTime()) < FAILURE_ALERT_THROTTLE_MS) return;
+    await fetch(`${supabaseUrl}/rest/v1/settings`, {
+      method: 'POST',
+      headers: { ...sbHeaders, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key: 'maya_failure_alert_at', value: { at: new Date().toISOString() } }),
+    }).catch(() => {});
+    const who = agent?.name || `agent #${agent?.id}`;
+    await sendPushNotifications(supabaseUrl, sbHeaders, {
+      title: '🚨 Maya is failing — replies not going out',
+      body: `${who}: ${errMsg}`,
+      agentId: agent?.id,
+    }).catch(() => {});
+    const safeErr = String(errMsg).replace(/[<>&]/g, '');
+    await postToTelegram(
+      `🚨 <b>Maya failed to reply</b> (${who})\n\n${safeErr}\n\nDraft slots are marked [Maya failed: …]. Fix the API/billing, then run resume-unanswered to catch up.`
+    ).catch(() => {});
+  } catch (_) { /* never block or fail the webhook on alerting */ }
 }
 
 // In-memory cache for projects (warm container only). 60s TTL.
@@ -669,6 +700,14 @@ export default async function handler(req, res) {
       // Outside hours: still draft a suggestion so Ikiel can review in the morning
       const offHoursPlaybook = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
       const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft', undefined, undefined, undefined, undefined, undefined, [], '', null, offHoursPlaybook);
+      // Off-hours drafts fail loudly too — marker + throttled alert, so a
+      // nighttime API outage is visible before the 9am send window.
+      if (aiResultOffHours.error) {
+        patch.suggested_reply = `[Maya failed: ${aiResultOffHours.error} — reply manually.]`;
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+        await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, aiResultOffHours.error);
+        return res.status(200).end();
+      }
       patch.suggested_reply = aiResultOffHours.reply || '';
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
@@ -741,6 +780,17 @@ export default async function handler(req, res) {
       ? aiResult.cost_usd
       : FALLBACK_COST_PER_REPLY_USD * (aiResult.llm_calls || 1);
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, spendDelta);
+
+    // GENERATION FAILURE — the Claude call itself errored (credits, auth,
+    // overload). Never let this dissolve into a silent empty draft (the
+    // 21 Jul 2026 credit-exhaustion outage): store a loud marker where the
+    // draft would be and alert Ikiel (push + Telegram, throttled), then stop.
+    if (aiResult.error) {
+      patch.suggested_reply = `[Maya failed: ${aiResult.error} — reply manually.]`;
+      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+      await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, aiResult.error);
+      return res.status(200).end();
+    }
 
     // Apply any CRM updates Maya suggested (status changes, tags)
     // Each update is logged with evidence and a "by_maya: true" flag
@@ -1594,6 +1644,16 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
       });
       llmCalls++;
       const data = await res.json();
+      // API-level failure (credit exhaustion, auth, rate limit, 5xx): the body
+      // is an error envelope, not a message. Surface it as a distinct failure —
+      // the handler turns aiResult.error into a loud draft marker + alert —
+      // instead of dissolving into an empty escalate. Errored calls are not
+      // billed, so no fallback cost is charged for this hop.
+      if (!res.ok || data.type === 'error') {
+        const errMsg = data?.error?.message || `HTTP ${res.status}`;
+        console.warn('generateReply API error:', errMsg);
+        return { action: 'escalate', reply: '', error: errMsg, send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+      }
       // Charge actual token spend for this hop (falls back if usage is absent).
       costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
       const raw = data.content?.[0]?.text || '';
@@ -1636,6 +1696,6 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
     return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', error: err.message || 'generateReply threw', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
   }
 }
