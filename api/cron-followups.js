@@ -15,6 +15,7 @@
 // Each follow-up gets progressively softer in tone.
 
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '../lib/kb.js';
+import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
@@ -644,6 +645,12 @@ export default async function handler(req, res) {
         weeklyReview = { staged: true, week_of: staged.week_of, threads: staged.thread_count,
           lessons: staged.lessons?.length || 0, questions: staged.questions?.length || 0,
           grade: staged.scoreboard?.grade };
+        // Notify Ikiel in the chat app (push -> deep-link to the review panel) so
+        // a staged review never sits unseen. Skip empty weeks. Best-effort.
+        if (staged.thread_count > 0) {
+          const push = await sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, buildReviewPushPayload(staged));
+          weeklyReview.notified = push.sent || 0;
+        }
       } catch (e) { weeklyReview = { error: e.message }; }
     }
 

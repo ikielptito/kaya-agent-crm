@@ -1,4 +1,5 @@
 import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate, isWithinWitaHours } from '../lib/kb.js';
+import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
@@ -1104,6 +1105,21 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         playbook_preview: renderPlaybookBlock(playbook),
         log: Array.isArray(log) ? log : [],
       });
+
+    } else if (action === 'notify_review_ready') {
+      // Push the currently-staged self-review to the owner's device(s), deep-
+      // linked to the approval panel. Fired automatically by the Sunday cron;
+      // also callable directly (dashboard/manual) to re-send or to test.
+      const get = async (key) => {
+        const rr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${key}&select=value`, { headers });
+        return (await rr.json())?.[0]?.value ?? null;
+      };
+      const pending = await get('maya_review_pending');
+      if (!pending || pending.decided || !(pending.thread_count > 0)) {
+        return res.status(200).json({ notified: false, reason: 'no_pending_review' });
+      }
+      const out = await sendOwnerPush({ SUPABASE_URL, headers }, buildReviewPushPayload(pending));
+      return res.status(200).json({ notified: out.sent > 0, week_of: pending.week_of, ...out });
 
     } else if (action === 'apply_maya_review') {
       // Console: Ikiel approved/rejected lessons + answered questions. This is

@@ -870,6 +870,7 @@ async function registerServiceWorker() {
     state.swReg = await navigator.serviceWorker.register('/sw.js');
     navigator.serviceWorker.addEventListener('message', e => {
       if (e.data?.type === 'open-agent' && e.data.agentId) openConv(Number(e.data.agentId));
+      else if (e.data?.type === 'open-review') openReview();
     });
     refreshNotifButton();
     // If already granted but not yet subscribed (e.g. new device), (re)subscribe silently.
@@ -948,6 +949,11 @@ function urlB64ToUint8Array(b64) {
 function handleDeepLink() {
   const m = location.hash.match(/agent=(\d+)/);
   if (m) { openConv(Number(m[1])); history.replaceState(null, '', location.pathname); }
+  // Opened from the weekly-review push notification.
+  if (new URLSearchParams(location.search).get('review') === '1') {
+    openReview();
+    history.replaceState(null, '', location.pathname);
+  }
 }
 
 async function refreshAll(manual) {

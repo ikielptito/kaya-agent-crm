@@ -48,7 +48,7 @@ self.addEventListener('push', event => {
     badge: '/maya-icon.svg',
     tag: data.tag || ('maya-' + (data.agentId || 'msg')),
     renotify: true,
-    data: { url: data.url || '/chat.html', agentId: data.agentId || null },
+    data: { url: data.url || '/chat.html', agentId: data.agentId || null, review: !!data.review },
   };
 
   event.waitUntil((async () => {
@@ -62,15 +62,17 @@ self.addEventListener('push', event => {
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  const target = (event.notification.data && event.notification.data.url) || '/chat.html';
-  const agentId = event.notification.data && event.notification.data.agentId;
-  const url = agentId ? `${target}#agent=${agentId}` : target;
+  const d = event.notification.data || {};
+  const isReview = !!d.review;
+  const target = d.url || '/chat.html';
+  const agentId = d.agentId;
+  const url = isReview ? target : (agentId ? `${target}#agent=${agentId}` : target);
 
   event.waitUntil((async () => {
     const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
       if (c.url.includes('/chat.html') && 'focus' in c) {
-        c.postMessage({ type: 'open-agent', agentId });
+        c.postMessage(isReview ? { type: 'open-review' } : { type: 'open-agent', agentId });
         return c.focus();
       }
     }
