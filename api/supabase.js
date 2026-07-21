@@ -108,6 +108,24 @@ export default async function handler(req, res) {
       }
       return res.status(r.status).end();
 
+    } else if (action === 'delete_agent') {
+      const { id } = payload || {};
+      if (id == null) return res.status(400).json({ error: 'id required' });
+      // Refuse if the contact has WhatsApp history: deleting would orphan the
+      // messages, and relink_orphan_messages would then resurrect the contact.
+      const msgs = await (await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${id}&select=id&limit=1`, { headers })).json().catch(() => []);
+      if (Array.isArray(msgs) && msgs.length) {
+        return res.status(409).json({ error: 'This contact has WhatsApp message history and cannot be deleted. If it is a duplicate, keep this card and delete the other one.' });
+      }
+      // maya_updates audit rows hold a FK to agents(id); remove them first.
+      await fetch(`${SUPABASE_URL}/rest/v1/maya_updates?agent_id=eq.${id}`, { method: 'DELETE', headers });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${id}`, { method: 'DELETE', headers });
+      if (!r.ok) {
+        const err = await r.text();
+        return res.status(r.status).json({ error: err });
+      }
+      return res.status(200).json({ success: true, deleted: id });
+
     } else if (action === 'get_messages') {
       const { agentId } = payload || {};
       const filter = agentId ? `?agent_id=eq.${agentId}&order=timestamp.desc&limit=100` : '?order=timestamp.desc&limit=500';

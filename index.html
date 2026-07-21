@@ -1030,6 +1030,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
     </div>
     <div class="drawer-body" id="drawerBody"></div>
     <div class="drawer-footer">
+      <button class="btn-secondary" id="drawerDeleteBtn" onclick="deleteDrawerAgent()" style="margin-right:auto;color:#b3402e;border-color:#e2c0b8">Delete</button>
       <button class="btn-secondary" onclick="closeDrawer()">Cancel</button>
       <button class="btn-primary" id="drawerSaveBtn" onclick="saveDrawer()">Save changes</button>
     </div>
@@ -2152,6 +2153,33 @@ async function restartFollowups(agentId, projectName) {
   a.projects = projectsObj;
   await saveAgent(a.id, { projects: projectsObj });
   openDrawer(agentId);
+}
+
+async function deleteDrawerAgent() {
+  if (editingId == null) return;
+  const a = agents.find(x => x.id === editingId);
+  if (!a) return;
+  const label = a.name || a.agency || ('#' + a.id);
+  if (!confirm(`Delete "${label}" permanently?\n\nThe contact card is removed from the CRM for everyone. This cannot be undone.`)) return;
+  const btn = document.getElementById('drawerDeleteBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Deleting…'; }
+  try {
+    const r = await fetch('/api/supabase', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete_agent', payload: { id: a.id } })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof data.error === 'string' ? data.error : 'HTTP ' + r.status);
+    agents = agents.filter(x => x.id !== a.id);
+    try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
+    closeDrawer();
+    render();
+  } catch(e) {
+    alert('Delete failed: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Delete'; }
+  }
 }
 
 function saveDrawer() {
