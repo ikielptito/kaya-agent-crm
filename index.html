@@ -732,7 +732,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div id="overdueBanner" class="overdue-banner" style="display:none;margin:0 0 8px">
   <span class="overdue-banner-text"></span>
   <span class="overdue-banner-agents"></span>
-  <button onclick="activeStatusFilter='';activeTagFilter='';render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap">View all</button>
+  <button onclick="activeStatusFilter='';activeTagFilter='';activeNoNumberFilter=false;render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap">View all</button>
 </div>
 <div class="card-grid" id="cardGrid"></div>
 </div><!-- /pipelineView -->
@@ -1285,6 +1285,7 @@ let pipeline = 'all';  // view lens: 'all' | 'kaya' | 'samba'
 let activeStatusFilter = '';
 let activeTagFilter = '';
 let activeProjFilter = 'All';
+let activeNoNumberFilter = false;
 let viewMode = 'grid';
 let editingId = null;
 let selectedAreas = new Set(['canggu']);
@@ -1509,6 +1510,13 @@ function renderSummaryBar() {
       <strong>${counts[s] || 0}</strong>&nbsp;${s}
     </button>`;
   });
+  const noNumCount = agents.filter(a => !getWaNum(a)).length;
+  if (noNumCount) {
+    html += `<button class="stat-chip ${activeNoNumberFilter ? 'active' : ''}" style="background:#fbeceb;color:#8a2c1c" onclick="toggleNoNumberFilter()" title="Show only agent cards missing a WhatsApp number">
+      <span class="stat-dot" style="background:#c0442e"></span>
+      <strong>${noNumCount}</strong>&nbsp;No number
+    </button>`;
+  }
   document.getElementById('summaryBar').innerHTML = html;
 }
 
@@ -1536,7 +1544,10 @@ function renderProjBar() {
 function getFiltered() {
   const q = document.getElementById('searchInput').value.toLowerCase();
   const result = agents.filter(a => {
-    if (!a.name && !a.agency && !getWaNum(a)) return false;
+    const hasNum = !!getWaNum(a);
+    if (activeNoNumberFilter && hasNum) return false;
+    // Hide completely-empty phantom rows, except when specifically hunting no-number cards.
+    if (!a.name && !a.agency && !hasNum && !activeNoNumberFilter) return false;
     if (q) { const h = (a.name + ' ' + a.agency + ' ' + (a.notes||'')).toLowerCase(); if (!h.includes(q)) return false; }
     if (activeStatusFilter) {
       if (getCurrentStatus(a) !== activeStatusFilter) return false;
@@ -1746,6 +1757,11 @@ function render() {
 
 function toggleStatusFilter(s) {
   activeStatusFilter = activeStatusFilter === s ? '' : s;
+  render();
+}
+
+function toggleNoNumberFilter() {
+  activeNoNumberFilter = !activeNoNumberFilter;
   render();
 }
 
