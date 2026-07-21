@@ -556,7 +556,9 @@ export default async function handler(req, res) {
             const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
             welcomeMode = (await sRes.json())?.[0]?.value?.mode || 'draft';
           } catch (e) { /* stay conservative: no auto-welcome */ }
-          if ((welcomeMode === 'autopilot' || welcomeMode === 'hybrid') && isWithinOperationalHours()) {
+          // No hours gate: this fires only when an agent messages Maya first, and
+          // agent-initiated contact is answered any time (night owls included).
+          if (welcomeMode === 'autopilot' || welcomeMode === 'hybrid') {
             const welcome = "Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty. I can send project info and brochures, check live villa availability for your clients, and walk you through commissions — 5% on KAYA sales, 10% on Samba monthly rentals (already built into the portal price you quote). Ikiel sees every message and jumps in personally when needed. What can I help you with?";
             const welcomeMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
             await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome, welcomeMid);
@@ -696,23 +698,13 @@ export default async function handler(req, res) {
     // Real agents still get the production guardrails.
     const isTestContact = agent.is_test === true;
 
-    // HOURS OF OPERATION CHECK — Maya only auto-replies between 9am-9pm WITA
-    if (!isTestContact && !isWithinOperationalHours()) {
-      // Outside hours: still draft a suggestion so Ikiel can review in the morning
-      const offHoursPlaybook = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
-      const aiResultOffHours = await generateReply(ANTHROPIC_KEY, agent, text, 'draft', undefined, undefined, undefined, undefined, undefined, [], '', null, offHoursPlaybook);
-      // Off-hours drafts fail loudly too — marker + throttled alert, so a
-      // nighttime API outage is visible before the 9am send window.
-      if (aiResultOffHours.error) {
-        patch.suggested_reply = `[Maya failed: ${aiResultOffHours.error} — reply manually.]`;
-        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
-        await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, aiResultOffHours.error);
-        return res.status(200).end();
-      }
-      patch.suggested_reply = aiResultOffHours.reply || '';
-      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
-      return res.status(200).end();
-    }
+    // NO HOURS GATE ON INBOUND — agent-initiated messages are answered any time
+    // of day (night owls send real questions late; silence loses them). The
+    // 9am-9pm WITA window only governs Maya-INITIATED outreach: the onboarding
+    // welcome (deferred in quick_add_agent) and the scheduled follow-ups/broadcast
+    // in cron-followups. Inbound now flows straight to the normal mode-based
+    // handling below (autopilot sends, draft/hybrid still just drafts), with the
+    // spend cap and all other guardrails intact.
 
     // SPEND CAP CHECK — pause Maya for the day if over $2 daily Claude spend
     if (!isTestContact) {

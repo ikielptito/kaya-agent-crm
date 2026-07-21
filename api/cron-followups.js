@@ -14,7 +14,7 @@
 // Follow-up policy: every 3 days, max 4 follow-ups, then mark stalled and notify Ikiel.
 // Each follow-up gets progressively softer in tone.
 
-import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO } from '../lib/kb.js';
+import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '../lib/kb.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
@@ -200,6 +200,7 @@ export default async function handler(req, res) {
     let sequenceSent = 0;
     let sequenceCompleted = 0;
     let draftsSent = 0;
+    let welcomesSent = 0;
 
     // Initial spend check — abort if already over cap from inbox auto-replies today
     let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
@@ -234,6 +235,35 @@ export default async function handler(req, res) {
     // template send, not a Maya reply — but we suspend everything that
     // would otherwise run a Claude prompt for an inbound or a follow-up.
     if (!mayaOff) {
+
+    // ── DEFERRED ONBOARDING WELCOMES — agents added outside 9am-9pm WITA had
+    // their welcome held (quick_add_agent set campaign_engagement.samba.welcome_pending).
+    // This is the 9am WITA send: Maya-initiated outreach that respects quiet hours.
+    try {
+      const welcomeTpl = pickWelcomeTemplate(Object.values(templatesMap), { requireApproved: false });
+      if (welcomeTpl) {
+        for (const agent of agents) {
+          const samba = agent.campaign_engagement?.samba;
+          if (!samba?.welcome_pending || !agent.wa_num) continue;
+          const fName = String(agent.name || '').trim().split(/\s+/)[0] || 'there';
+          const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, welcomeTpl, [fName]);
+          if (!ok) { results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_failed' }); continue; }
+          // Clear the flag so it sends exactly once (preserve the rest of the bucket).
+          await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent, 'samba', { ...samba, welcome_pending: false });
+          const rendered = (welcomeTpl.body || '').replace(/\{\{1\}\}/g, fName);
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({
+              agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+              content: rendered, timestamp: now.toISOString(), source: 'cron',
+              category: 'onboarding', template_name: welcomeTpl.name
+            })
+          }).catch(() => {});
+          welcomesSent++;
+          results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_sent' });
+        }
+      }
+    } catch (e) { results.push({ action: 'deferred_welcome_error', error: e.message }); }
 
     // ── PENDING DRAFTS FROM OFF-HOURS — regenerate fresh + send at 9am WITA ─
     // When an inbound arrives between 9pm-9am WITA, the webhook generates a draft
@@ -637,6 +667,7 @@ export default async function handler(req, res) {
       contact_backfill: backfill ? { created: backfill.created, candidates: backfill.candidates } : null,
       total_agents: agents.length,
       drafts_sent: draftsSent,
+      deferred_welcomes_sent: welcomesSent,
       listing_sent: sent, listing_stalled: stalled, skipped,
       sequence_sent: sequenceSent, sequence_completed: sequenceCompleted,
       pruned_wa_messages: pruned,

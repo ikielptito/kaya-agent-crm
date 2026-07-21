@@ -1,4 +1,4 @@
-import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '../lib/kb.js';
+import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate, isWithinWitaHours } from '../lib/kb.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { baseAgentFields, createAgentRow } from '../lib/agents.js';
@@ -1020,13 +1020,21 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         source: 'quick_add', reason: 'recruited via quick-add form',
         serviceType: service_type || 'rental',
       });
+      // Quiet-hours guard: outside 9am-9pm WITA, hold the welcome and let the 9am
+      // cron send it, so a late-night add doesn't ping the agent at 2am. Flag it
+      // on the row before insert; cron-followups drains welcome_pending.
+      const deferWelcome = !isWithinWitaHours();
+      if (deferWelcome) {
+        fields.campaign_engagement = fields.campaign_engagement || {};
+        fields.campaign_engagement.samba = { ...(fields.campaign_engagement.samba || {}), welcome_pending: true };
+      }
       const created = await createAgentRow(SUPABASE_URL, headers, fields);
       if (!created.ok) return res.status(500).json({ error: 'insert failed: ' + created.error });
       const row = created.row;
       let welcome_sent = false;
       const TOKEN = process.env.META_WA_TOKEN;
       const PHONE_ID = process.env.META_WA_PHONE_ID;
-      if (row?.id && TOKEN && PHONE_ID) {
+      if (!deferWelcome && row?.id && TOKEN && PHONE_ID) {
         try {
           const WABA_ID = process.env.META_WABA_ID;
           if (WABA_ID) {
@@ -1068,7 +1076,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
           }
         } catch (e) { console.warn('welcome template send failed:', e.message); }
       }
-      return res.status(200).json({ success: true, agent: row, welcome_sent });
+      return res.status(200).json({ success: true, agent: row, welcome_sent, welcome_deferred: deferWelcome });
 
     } else if (action === 'assistant') {
       // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
