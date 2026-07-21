@@ -15,23 +15,24 @@
 
 const ENDPOINT = 'https://kaya-agent-crm.vercel.app/api/whatsapp-templates';
 
-const BODY = `Hi {{1}}, I'm Maya, Ikiel's assistant at Samba Realty. Ikiel mentioned you were interested in listing some of our rental villas for your clients.
+// Meta caps template BODY at 1,024 chars, so the bilingual copy is kept tight.
+const BODY = `Hi {{1}}, I'm Maya, Ikiel's assistant at Samba Realty. Ikiel mentioned you were interested in listing some of our rental villas.
 
-Here's how it works: our Agent Portal keeps all the listing materials, photos and live availability for every villa in one place, so you always have what you need to pitch a client. You deal with your client directly, and you can share a custom listing link with them straight from the portal. Commission is 10%, already built into the price you quote.
+Our Agent Portal has every villa's photos, materials and live availability in one place. You deal with your client directly and can share a custom listing link with them. Commission is 10%, already in the price you quote.
 
-Have a browse here: https://sambarentals.com
+Take a look: https://sambarentals.com
 
-Is there a particular area or budget your clients usually look in?
+Which area do your clients usually look in?
 
 ---
 
-Halo {{1}}, saya Maya, asisten Ikiel di Samba Realty. Kata Ikiel, Anda tertarik untuk memasarkan beberapa villa sewa kami untuk klien Anda.
+Halo {{1}}, saya Maya, asisten Ikiel di Samba Realty. Kata Ikiel, Anda tertarik memasarkan villa sewa kami.
 
-Cara kerjanya: Agent Portal kami menyimpan semua materi listing, foto, dan ketersediaan real-time setiap villa di satu tempat, jadi Anda selalu punya yang dibutuhkan untuk menawarkan ke klien. Anda berkomunikasi langsung dengan klien, dan bisa membagikan link listing khusus langsung dari portal. Komisi 10%, sudah termasuk dalam harga yang Anda tawarkan.
+Agent Portal kami memuat foto, materi, dan ketersediaan real-time tiap villa di satu tempat. Anda berkomunikasi langsung dengan klien dan bisa membagikan link listing khusus. Komisi 10%, sudah termasuk harga.
 
-Silakan lihat di sini: https://sambarentals.com
+Lihat di sini: https://sambarentals.com
 
-Biasanya klien Anda mencari di area atau kisaran harga tertentu?`;
+Klien Anda biasanya cari di area mana?`;
 
 async function status() {
   const r = await fetch(ENDPOINT);
