@@ -149,6 +149,22 @@ export default async function handler(req, res) {
   // ?wave=2 at 9:20/9:40. These later invocations send ONLY the availability
   // broadcast to their cohort (agent.id % AVAILABILITY_WAVES), reusing the
   // improvements wave 0 stashed — no follow-ups, no reports, no reconcile.
+  // Persist a compact per-run summary (settings.cron_run_log, newest first,
+  // capped) so the chat app's Schedule view can show past-run stats. Best-effort.
+  const CRON_LOG_CAP = 40;
+  async function logCronRun(entry) {
+    try {
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.cron_run_log&select=value`, { headers: sbHeaders });
+      const log = (await r.json())?.[0]?.value;
+      const next = [{ at: new Date().toISOString(), ...entry }, ...(Array.isArray(log) ? log : [])].slice(0, CRON_LOG_CAP);
+      await fetch(`${SUPABASE_URL}/rest/v1/settings`, {
+        method: 'POST',
+        headers: { ...sbHeaders, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ key: 'cron_run_log', value: next }),
+      });
+    } catch (e) { /* never block the run */ }
+  }
+
   const waveParam = req.query?.wave !== undefined ? parseInt(req.query.wave, 10) : null;
   if (waveParam !== null && waveParam >= 1) {
     try {
@@ -162,6 +178,9 @@ export default async function handler(req, res) {
         results: [], previewMode: false,
         wave: waveParam, waveCount: AVAILABILITY_WAVES,
       });
+      await logCronRun({ kind: `wave${waveParam + 1}`,
+        alerts: availability?.event_alerts_sent || 0, digests: availability?.weekly_digest_sent || 0,
+        errors: availability?.errors?.length || 0 });
       return res.status(200).json({ ran_at: new Date().toISOString(), wave: waveParam, availability });
     } catch (e) {
       return res.status(500).json({ error: `wave ${waveParam} failed: ` + e.message });
@@ -206,6 +225,7 @@ export default async function handler(req, res) {
     // Initial spend check — abort if already over cap from inbox auto-replies today
     let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
     if (todaySpend >= DAILY_SPEND_CAP_USD) {
+      await logCronRun({ kind: 'suspended', spend: +todaySpend.toFixed(2) });
       return res.status(200).json({ ran_at: now.toISOString(), suspended: true, reason: `daily spend cap ($${DAILY_SPEND_CAP_USD}) already reached: $${todaySpend.toFixed(2)}` });
     }
 
@@ -667,6 +687,25 @@ export default async function handler(req, res) {
         });
         backfill = bf.ok ? await bf.json() : { error: `HTTP ${bf.status}` };
       } catch (e) { backfill = { error: e.message }; }
+    }
+
+    // Compact run-log entry for the Schedule view (skip pure previews).
+    if (!previewMode) {
+      await logCronRun({
+        kind: waveParam === 0 ? 'daily' : 'manual',
+        agents: agents.length,
+        drafts: draftsSent,
+        welcomes: welcomesSent,
+        followups: sent, stalled,
+        sequences: sequenceSent,
+        alerts: availabilityResult?.event_alerts_sent || 0,
+        digests: availabilityResult?.weekly_digest_sent || 0,
+        resumed: autoResumed || 0,
+        briefing: !!ownerReport?.sent,
+        review: weeklyReview?.grade || (weeklyReview?.staged ? 'staged' : null),
+        backfilled: backfill?.created || 0,
+        spend: +(+todaySpend).toFixed(2),
+      });
     }
 
     return res.status(200).json({

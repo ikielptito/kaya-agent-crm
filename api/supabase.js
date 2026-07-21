@@ -1106,6 +1106,60 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         log: Array.isArray(log) ? log : [],
       });
 
+    } else if (action === 'get_schedule') {
+      // Schedule view for the chat app: what the next scheduled runs will do
+      // (computed from the cron calendar + live pending state) and the log of
+      // past runs (settings.cron_run_log, written by api/cron-followups.js).
+      const getS = async (key) => {
+        const rr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${key}&select=value`, { headers });
+        return (await rr.json())?.[0]?.value ?? null;
+      };
+      const [runLog, automation, agentRows] = await Promise.all([
+        getS('cron_run_log'), getS('automation'),
+        fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,is_test,suggested_reply,engagement_tier,campaign_engagement&wa_num=not.is.null`, { headers })
+          .then(r => r.json()).catch(() => []),
+      ]);
+      const A = (Array.isArray(agentRows) ? agentRows : []).filter(a => !a.is_test);
+      const pendingWelcomes = A.filter(a => a.campaign_engagement?.samba?.welcome_pending === true);
+      const drafts = A.filter(a => { const s = (a.suggested_reply || '').trim(); return s && !s.startsWith('['); });
+      const enrolled = A.filter(a => a.campaign_engagement?.samba?.status === 'enrolled').length;
+      const dormant = A.filter(a => ['dormant', 'cold'].includes(a.engagement_tier)).length;
+      const mode = automation?.mode || 'draft';
+
+      // Next daily run = next 01:00 UTC (9am WITA); waves follow at :20/:40.
+      const nowD = new Date();
+      const next9 = new Date(Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth(), nowD.getUTCDate(), 1, 0, 0));
+      if (next9 <= nowD) next9.setUTCDate(next9.getUTCDate() + 1);
+      const dow = next9.getUTCDay();
+      const nextOf = (target) => { const d = new Date(next9); while (d.getUTCDay() !== target) d.setUTCDate(d.getUTCDate() + 1); return d; };
+
+      const items = [
+        { task: 'Owner morning briefing', detail: 'Last-24h agent activity summary to your WhatsApp' },
+        pendingWelcomes.length ? {
+          task: 'Deferred onboarding welcomes', count: pendingWelcomes.length,
+          detail: pendingWelcomes.slice(0, 5).map(a => a.name || '#' + a.id).join(', ') + (pendingWelcomes.length > 5 ? '…' : ''),
+        } : null,
+        drafts.length ? {
+          task: mode === 'autopilot' ? 'Send overnight draft replies' : `Overnight drafts held for review (mode: ${mode})`,
+          count: drafts.length,
+          detail: drafts.slice(0, 5).map(a => a.name || '#' + a.id).join(', ') + (drafts.length > 5 ? '…' : ''),
+        } : null,
+        { task: 'Follow-up nudges', detail: 'Listing-stage follow-ups due (every 3 days, max 4, then stalled)' },
+        { task: 'Auto-resume cold paused threads', detail: 'Manual-takeover threads quiet for 7+ days return to Maya' },
+        dow === 1
+          ? { task: 'Weekly carousel digest', count: enrolled, detail: `6-villa visual digest to all enrolled agents, in 3 waves (9:00 / 9:20 / 9:40)` }
+          : { task: 'Availability event alert (conditional)', detail: `Only fires with 2+ real updates; ${dormant} dormant agents excluded; 3 waves` },
+        dow === 0 ? { task: 'Weekly self-review', detail: 'Maya grades her week; staged for your approval + push notification' } : null,
+      ].filter(Boolean);
+
+      const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dow];
+      const upcoming = [{ at: next9.toISOString(), label: `Daily 9am run — ${dayName}`, items }];
+      if (dow !== 1) upcoming.push({ at: nextOf(1).toISOString(), label: 'Weekly carousel digest — Monday', items: [{ task: '6-villa carousel to all enrolled agents', count: enrolled }] });
+      if (dow !== 0) upcoming.push({ at: nextOf(0).toISOString(), label: 'Weekly self-review — Sunday', items: [{ task: 'Self-grade + proposed lessons staged for approval' }] });
+      upcoming.sort((a, b) => a.at.localeCompare(b.at));
+
+      return res.status(200).json({ now: nowD.toISOString(), mode, upcoming, past: Array.isArray(runLog) ? runLog : [] });
+
     } else if (action === 'run_maya_review') {
       // Manual re-run of the weekly self-review (same path the Sunday cron uses):
       // grade the last `days` (default 7, floored at the manual-tagging cutoff),

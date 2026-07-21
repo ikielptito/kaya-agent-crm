@@ -530,6 +530,30 @@
   .an-fval { font-size: 12.5px; font-weight: 700; color: var(--wa-ink); font-variant-numeric: tabular-nums; text-align: right; }
   .an-fval small { color: var(--wa-ink-2); font-weight: 500; }
 
+  /* Schedule view */
+  .an-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--wa-ink-2); margin: 0 0 12px 2px; }
+  .sch-run { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px; padding: 13px 15px; box-shadow: var(--wa-shadow); margin-bottom: 12px; }
+  .sch-run-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .sch-run-when { font-size: 13px; font-weight: 700; color: var(--wa-ink); }
+  .sch-run-rel { font-size: 11.5px; color: var(--wa-green-dark); font-weight: 600; }
+  .sch-run-label { font-size: 12px; color: var(--wa-ink-2); margin: 2px 0 10px; }
+  .sch-task { padding: 8px 0; border-top: 1px solid var(--wa-rule); display: flex; flex-direction: column; gap: 2px; }
+  .sch-task:first-of-type { border-top: none; }
+  .sch-task-name { font-size: 13.5px; color: var(--wa-ink); font-weight: 600; }
+  .sch-count { display: inline-block; min-width: 18px; text-align: center; font-size: 11px; font-weight: 700; color: #fff; background: var(--wa-green); border-radius: 9px; padding: 1px 6px; margin-left: 4px; }
+  .sch-task-detail { font-size: 12px; color: var(--wa-ink-2); line-height: 1.4; }
+  .sch-past { border: 1px solid var(--wa-rule); border-radius: 10px; padding: 10px 13px; margin-bottom: 8px; background: var(--wa-panel); }
+  .sch-past-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
+  .sch-past-kind { font-size: 12px; font-weight: 700; color: var(--wa-ink); text-transform: capitalize; }
+  .sch-past-when { font-size: 11.5px; color: var(--wa-ink-2); }
+  .sch-stats { display: flex; flex-wrap: wrap; gap: 6px; }
+  .sch-stat { font-size: 11.5px; color: var(--wa-ink-2); background: var(--wa-panel-2); border-radius: 7px; padding: 3px 8px; }
+  .sch-stat b { color: var(--wa-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+  .sch-stat.spend { margin-left: auto; }
+  .sch-stat.err { background: #f7dcd6; color: #9a3327; }
+  .sch-stat.err b { color: #9a3327; }
+  .sch-empty { font-size: 13px; color: var(--wa-ink-2); text-align: center; padding: 30px 0; }
+
   /* Stat tiles */
   .an-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
   .an-tile { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px; padding: 13px 15px; box-shadow: var(--wa-shadow); }
@@ -632,6 +656,7 @@
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)">↩</button>
         <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats">🧲</button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics">📊</button>
+        <button class="refresh-btn" id="scheduleBtn" onclick="openSchedule()" title="Maya's scheduled tasks">🗓</button>
         <button class="refresh-btn review-btn" id="reviewBtn" onclick="openReview()" title="Maya's weekly self-review">🎓<span class="review-dot" id="reviewDot" style="display:none"></span></button>
         <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
         <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
@@ -741,6 +766,16 @@
     <div class="rv-applysummary" id="rvApplySummary"></div>
     <button class="rv-applybtn" id="rvApplyBtn" onclick="applyReview()">Apply to Maya</button>
   </div>
+</div>
+
+<!-- ── Maya schedule overlay ─────────────────────────────── -->
+<div id="scheduleOverlay" class="analytics-overlay" style="display:none">
+  <div class="an-head">
+    <button class="an-back" onclick="closeSchedule()">‹</button>
+    <div class="an-title">Maya — Scheduled tasks</div>
+    <button class="refresh-btn" onclick="loadSchedule()" title="Refresh">⟳</button>
+  </div>
+  <div class="an-body" id="schBody"><div class="an-loading">Loading…</div></div>
 </div>
 
 <!-- Attach / message-action bottom sheet -->
@@ -2399,6 +2434,77 @@ function openAnalytics() {
   loadAnalytics();
 }
 function closeAnalytics() { document.getElementById('analyticsOverlay').style.display = 'none'; }
+
+// ════════════════════════════════════════════════════════════════════
+// Maya schedule — upcoming scheduled runs (from the cron calendar + live
+// pending state) and key stats for past runs (settings.cron_run_log).
+// ════════════════════════════════════════════════════════════════════
+function openSchedule() {
+  document.getElementById('scheduleOverlay').style.display = 'flex';
+  loadSchedule();
+}
+function closeSchedule() { document.getElementById('scheduleOverlay').style.display = 'none'; }
+
+function fmtWita(iso) {
+  try { return new Date(iso).toLocaleString('en-GB', { timeZone: 'Asia/Makassar', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); }
+  catch { return iso; }
+}
+function relDay(iso) {
+  const d = new Date(iso), now = new Date();
+  const days = Math.round((new Date(d.toDateString()) - new Date(now.toDateString())) / 86400000);
+  return days === 0 ? 'today' : days === 1 ? 'tomorrow' : days > 1 ? 'in ' + days + ' days' : days === -1 ? 'yesterday' : Math.abs(days) + ' days ago';
+}
+
+async function loadSchedule() {
+  const body = document.getElementById('schBody');
+  body.innerHTML = '<div class="an-loading">Loading…</div>';
+  try {
+    const d = await api('get_schedule');
+    if (!d || d.error) throw new Error(d?.error || 'no data');
+    let html = '';
+
+    html += '<div class="an-section-title">Upcoming</div>';
+    for (const run of (d.upcoming || [])) {
+      html += `<div class="sch-run">
+        <div class="sch-run-head"><span class="sch-run-when">${esc(fmtWita(run.at))}</span><span class="sch-run-rel">${relDay(run.at)}</span></div>
+        <div class="sch-run-label">${esc(run.label)}</div>`;
+      for (const it of (run.items || [])) {
+        html += `<div class="sch-task">
+          <span class="sch-task-name">${esc(it.task)}${it.count != null ? ` <span class="sch-count">${it.count}</span>` : ''}</span>
+          ${it.detail ? `<span class="sch-task-detail">${esc(it.detail)}</span>` : ''}
+        </div>`;
+      }
+      html += '</div>';
+    }
+
+    html += '<div class="an-section-title" style="margin-top:22px">Past runs</div>';
+    const past = d.past || [];
+    if (!past.length) {
+      html += '<div class="sch-empty">No runs logged yet. The first scheduled run will appear here.</div>';
+    } else {
+      for (const r of past) {
+        const stat = (label, v) => (v ? `<span class="sch-stat"><b>${v}</b> ${label}</span>` : '');
+        const rev = r.review ? `<span class="sch-stat"><b>${esc(String(r.review))}</b> review</span>` : '';
+        const stats = [
+          stat('follow-ups', r.followups), stat('welcomes', r.welcomes), stat('drafts sent', r.drafts),
+          stat('alerts', r.alerts), stat('digests', r.digests), stat('resumed', r.resumed),
+          stat('stalled', r.stalled), r.briefing ? '<span class="sch-stat">briefing ✓</span>' : '', rev,
+          r.errors ? `<span class="sch-stat err"><b>${r.errors}</b> err</span>` : '',
+        ].filter(Boolean).join('');
+        html += `<div class="sch-past">
+          <div class="sch-past-head">
+            <span class="sch-past-kind">${esc(r.kind || 'run')}${r.suspended ? ' (suspended)' : ''}</span>
+            <span class="sch-past-when">${esc(fmtWita(r.at))}</span>
+          </div>
+          <div class="sch-stats">${stats || '<span class="sch-stat">quiet run</span>'}${r.spend != null ? `<span class="sch-stat spend">$${Number(r.spend).toFixed(2)}</span>` : ''}</div>
+        </div>`;
+      }
+    }
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = `<div class="an-loading">Couldn't load schedule: ${esc(e.message)}</div>`;
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════
 // Maya self-review — the weekly loop's approval surface. Reads
