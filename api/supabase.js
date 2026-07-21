@@ -1116,13 +1116,15 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       };
       const [runLog, automation, agentRows] = await Promise.all([
         getS('cron_run_log'), getS('automation'),
-        fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,is_test,suggested_reply,engagement_tier,campaign_engagement&wa_num=not.is.null`, { headers })
+        fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,is_test,suggested_reply,engagement_tier,samba_alerts_opt_out,campaign_engagement&wa_num=not.is.null`, { headers })
           .then(r => r.json()).catch(() => []),
       ]);
       const A = (Array.isArray(agentRows) ? agentRows : []).filter(a => !a.is_test);
       const pendingWelcomes = A.filter(a => a.campaign_engagement?.samba?.welcome_pending === true);
       const drafts = A.filter(a => { const s = (a.suggested_reply || '').trim(); return s && !s.startsWith('['); });
-      const enrolled = A.filter(a => a.campaign_engagement?.samba?.status === 'enrolled').length;
+      // Broadcast audience = everyone on WhatsApp who hasn't opted out (the Monday
+      // digest goes to all of them; per-thread paused takeovers are excluded live).
+      const audience = A.filter(a => !a.samba_alerts_opt_out).length;
       const dormant = A.filter(a => ['dormant', 'cold'].includes(a.engagement_tier)).length;
       const mode = automation?.mode || 'draft';
 
@@ -1139,22 +1141,21 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
           task: 'Deferred onboarding welcomes', count: pendingWelcomes.length,
           detail: pendingWelcomes.slice(0, 5).map(a => a.name || '#' + a.id).join(', ') + (pendingWelcomes.length > 5 ? '…' : ''),
         } : null,
-        drafts.length ? {
-          task: mode === 'autopilot' ? 'Send overnight draft replies' : `Overnight drafts held for review (mode: ${mode})`,
-          count: drafts.length,
+        (mode === 'autopilot' && drafts.length) ? {
+          task: 'Send overnight draft replies', count: drafts.length,
           detail: drafts.slice(0, 5).map(a => a.name || '#' + a.id).join(', ') + (drafts.length > 5 ? '…' : ''),
         } : null,
         { task: 'Follow-up nudges', detail: 'Listing-stage follow-ups due (every 3 days, max 4, then stalled)' },
         { task: 'Auto-resume cold paused threads', detail: 'Manual-takeover threads quiet for 7+ days return to Maya' },
         dow === 1
-          ? { task: 'Weekly carousel digest', count: enrolled, detail: `6-villa visual digest to all enrolled agents, in 3 waves (9:00 / 9:20 / 9:40)` }
-          : { task: 'Availability event alert (conditional)', detail: `Only fires with 2+ real updates; ${dormant} dormant agents excluded; 3 waves` },
+          ? { task: 'Weekly carousel digest', count: audience, detail: `6-villa visual digest to all agents, in 3 waves (9:00 / 9:20 / 9:40)` }
+          : { task: 'Availability event alert (conditional)', detail: `Only fires with 2+ real updates; ${dormant} dormant agents get Monday only; 3 waves` },
         dow === 0 ? { task: 'Weekly self-review', detail: 'Maya grades her week; staged for your approval + push notification' } : null,
       ].filter(Boolean);
 
       const dayName = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][dow];
       const upcoming = [{ at: next9.toISOString(), label: `Daily 9am run — ${dayName}`, items }];
-      if (dow !== 1) upcoming.push({ at: nextOf(1).toISOString(), label: 'Weekly carousel digest — Monday', items: [{ task: '6-villa carousel to all enrolled agents', count: enrolled }] });
+      if (dow !== 1) upcoming.push({ at: nextOf(1).toISOString(), label: 'Weekly carousel digest — Monday', items: [{ task: '6-villa carousel to all agents', count: audience }] });
       if (dow !== 0) upcoming.push({ at: nextOf(0).toISOString(), label: 'Weekly self-review — Sunday', items: [{ task: 'Self-grade + proposed lessons staged for approval' }] });
       upcoming.sort((a, b) => a.at.localeCompare(b.at));
 
