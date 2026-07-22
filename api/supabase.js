@@ -207,6 +207,50 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(r.status).json(data);
 
+    // ── Owner inbox (villa owners/managers Maya serves in owner-mode) ──
+    } else if (action === 'get_owners') {
+      r = await fetch(SUPABASE_URL + '/rest/v1/owners?select=*&order=last_inbound_at.desc.nullslast', { headers });
+      return res.status(r.status).json(await r.json());
+
+    } else if (action === 'get_owner_messages') {
+      const { ownerId } = payload || {};
+      if (ownerId == null) return res.status(400).json({ error: 'ownerId required' });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${ownerId}&order=timestamp.desc&limit=100`, { headers });
+      return res.status(r.status).json(await r.json());
+
+    } else if (action === 'patch_owner') {
+      const { id, fields } = payload || {};
+      if (id == null) return res.status(400).json({ error: 'id required' });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${id}`, {
+        method: 'PATCH', headers, body: JSON.stringify(fields || {})
+      });
+      if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+      return res.status(r.status).end();
+
+    } else if (action === 'owner_send') {
+      const { id, waNum, message } = payload || {};
+      const text = String(message || '').trim();
+      if (id == null || !waNum || !text) return res.status(400).json({ error: 'id, waNum, message required' });
+      const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!TOKEN || !PHONE_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
+      const num = String(waNum).replace(/\D/g, '');
+      const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: num, type: 'text', text: { body: text } })
+      });
+      const sendData = await send.json().catch(() => ({}));
+      if (!send.ok) return res.status(send.status).json({ error: sendData?.error?.message || 'send failed' });
+      const mid = sendData?.messages?.[0]?.id || null;
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ owner_id: id, wa_num: num, direction: 'outbound', content: text, timestamp: new Date().toISOString(), source: 'api', status: 'sent', wa_message_id: mid })
+      }).catch(() => {});
+      await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${id}`, {
+        method: 'PATCH', headers, body: JSON.stringify({ suggested_reply: '', unread_count: 0 })
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, wa_message_id: mid });
+
     } else if (action === 'upsert_campaign') {
       r = await fetch(SUPABASE_URL + '/rest/v1/campaigns', {
         method: 'POST',

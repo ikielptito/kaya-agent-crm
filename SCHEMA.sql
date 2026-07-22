@@ -208,6 +208,12 @@ create table if not exists owners (
   updated_at     timestamptz default now()
 );
 create index if not exists idx_owners_wa_num on owners (wa_num);
+-- Conversation state for owner-mode (mirrors the agent columns): Maya's pending
+-- draft, unread badge, last-inbound sort key, and a manual takeover switch.
+alter table owners add column if not exists suggested_reply text;
+alter table owners add column if not exists unread_count int default 0;
+alter table owners add column if not exists last_inbound_at timestamptz;
+alter table owners add column if not exists paused boolean default false;
 
 -- Tag inbound/outbound messages that belong to an owner conversation so the
 -- (future) owner inbox can thread them. Nullable and additive — existing agent

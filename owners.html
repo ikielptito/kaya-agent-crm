@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Owner inbox — Maya</title>
+<style>
+  :root{
+    --bg:#f4f5f2; --panel:#ffffff; --ink:#17322c; --ink-2:#4a5f58; --muted:#8a978f;
+    --rule:#e3e6df; --sage:#2c6e5c; --sage-soft:#dcede6; --clay:#b0553a; --gold:#c6822c;
+    --mine:#dcf3e8; --theirs:#ffffff; --unread:#c6822c;
+    --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased;}
+  .wrap{display:grid;grid-template-columns:340px 1fr;height:100vh;}
+  @media(max-width:720px){.wrap{grid-template-columns:1fr;}.wrap.thread-open .list{display:none;}.wrap:not(.thread-open) .thread{display:none;}}
+
+  /* left list */
+  .list{border-right:1px solid var(--rule);background:var(--panel);display:flex;flex-direction:column;min-height:0;}
+  .list-head{padding:16px 18px 12px;border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between;gap:8px;}
+  .list-head h1{font-size:1.05rem;margin:0;letter-spacing:.01em;}
+  .list-head .sub{font-size:.66rem;letter-spacing:.16em;text-transform:uppercase;color:var(--gold);font-weight:600;margin-top:2px;}
+  .icon-btn{background:none;border:1px solid var(--rule);border-radius:8px;color:var(--ink-2);padding:7px 10px;cursor:pointer;font-size:.8rem;}
+  .icon-btn:hover{border-color:var(--sage);color:var(--sage);}
+  .threads{overflow-y:auto;flex:1;}
+  .row{padding:13px 18px;border-bottom:1px solid var(--rule);cursor:pointer;display:flex;gap:11px;align-items:center;}
+  .row:hover{background:var(--bg);}
+  .row.active{background:var(--sage-soft);}
+  .av{width:40px;height:40px;border-radius:50%;flex:none;background:var(--sage-soft);color:var(--sage);display:grid;place-items:center;font-weight:600;font-size:.9rem;}
+  .row .mid{min-width:0;flex:1;}
+  .row .nm{font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row .meta{font-size:.72rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
+  .row .right{display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+  .row .time{font-size:.64rem;color:var(--muted);}
+  .chip{font-size:.6rem;font-weight:700;padding:2px 6px;border-radius:10px;letter-spacing:.03em;}
+  .chip.draft{background:#f0e4ce;color:var(--gold);}
+  .chip.unread{background:var(--unread);color:#fff;min-width:18px;text-align:center;}
+  .chip.paused{background:#eee;color:#888;}
+
+  /* right thread */
+  .thread{display:flex;flex-direction:column;min-height:0;background:var(--bg);}
+  .thread-head{padding:13px 18px;background:var(--panel);border-bottom:1px solid var(--rule);display:flex;align-items:center;gap:12px;}
+  .back{display:none;background:none;border:none;color:var(--sage);font-size:1.3rem;cursor:pointer;padding:0 4px 0 0;}
+  @media(max-width:720px){.back{display:block;}}
+  .thread-head .nm{font-size:.95rem;font-weight:600;}
+  .thread-head .meta{font-size:.72rem;color:var(--muted);margin-top:2px;}
+  .thread-head .spacer{flex:1;}
+  .pause-btn{background:none;border:1px solid var(--rule);border-radius:8px;padding:6px 11px;font-size:.72rem;cursor:pointer;color:var(--ink-2);}
+  .pause-btn.paused{background:var(--clay);border-color:var(--clay);color:#fff;}
+  .msgs{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:8px;}
+  .empty{margin:auto;color:var(--muted);text-align:center;font-size:.85rem;line-height:1.7;}
+  .bubble{max-width:76%;padding:9px 13px;border-radius:13px;font-size:.86rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;box-shadow:0 1px 1px rgba(22,50,44,.06);}
+  .bubble.them{background:var(--theirs);border:1px solid var(--rule);align-self:flex-start;border-bottom-left-radius:4px;}
+  .bubble.me{background:var(--mine);align-self:flex-end;border-bottom-right-radius:4px;}
+  .bubble .t{display:block;font-size:.6rem;color:var(--muted);margin-top:4px;text-align:right;}
+  .composer{border-top:1px solid var(--rule);background:var(--panel);padding:12px 16px;}
+  .draft-note{font-size:.66rem;color:var(--gold);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-bottom:7px;display:flex;align-items:center;gap:6px;}
+  .draft-note.none{color:var(--muted);}
+  .composer .box{display:flex;gap:9px;align-items:flex-end;}
+  textarea{flex:1;resize:none;border:1px solid var(--rule);border-radius:11px;padding:10px 13px;font-family:inherit;font-size:.88rem;color:var(--ink);outline:none;min-height:44px;max-height:140px;background:var(--bg);}
+  textarea:focus{border-color:var(--sage);}
+  .send{background:var(--sage);border:none;color:#fff;border-radius:11px;padding:0 18px;height:44px;font-weight:600;font-size:.85rem;cursor:pointer;font-family:inherit;flex:none;}
+  .send:disabled{opacity:.5;cursor:default;}
+  .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(70px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:.8rem;opacity:0;transition:all .25s;z-index:50;}
+  .toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
+  .loading{padding:30px;text-align:center;color:var(--muted);font-size:.85rem;}
+</style>
+</head>
+<body>
+<div class="wrap" id="wrap">
+  <div class="list">
+    <div class="list-head">
+      <div><h1>Owner inbox</h1><div class="sub">Maya · Samba</div></div>
+      <button class="icon-btn" id="refresh" onclick="load(true)">↻ Refresh</button>
+    </div>
+    <div class="threads" id="threads"><div class="loading">Loading…</div></div>
+  </div>
+  <div class="thread">
+    <div id="thread-body" style="display:flex;flex-direction:column;height:100%;">
+      <div class="empty" id="empty">Select an owner to view the conversation.<br>Villa owners appear here when they message Maya.</div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const state = { owners: [], sel: null, msgs: [] };
+
+async function api(action, payload){
+  const r = await fetch('/api/supabase', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload ? {action,payload} : {action})
+  });
+  if(!r.ok) throw new Error(action+' -> '+r.status);
+  if(r.status===204) return null;
+  const t = await r.text(); if(!t) return null;
+  try{ return JSON.parse(t); }catch{ return null; }
+}
+function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2400); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function initials(o){ const n=(o.name||'').trim(); if(n) return n.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(); return '#'; }
+function fmtTime(iso){ if(!iso) return ''; const d=new Date(iso), now=new Date(); const sameDay=d.toDateString()===now.toDateString(); return sameDay ? d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
+
+async function load(manual){
+  const btn=document.getElementById('refresh'); if(manual) btn.textContent='…';
+  try{
+    const owners = await api('get_owners');
+    state.owners = Array.isArray(owners)?owners:[];
+    renderList();
+    if(state.sel){ const still=state.owners.find(o=>o.id===state.sel.id); if(still){ state.sel=still; await openThread(still,true); } }
+  }catch(e){ toast('Load failed'); }
+  if(manual) btn.textContent='↻ Refresh';
+}
+
+function renderList(){
+  const el=document.getElementById('threads');
+  if(!state.owners.length){ el.innerHTML='<div class="loading">No owners yet.<br>They appear after the daily sync + first message.</div>'; return; }
+  el.innerHTML = state.owners.map(o=>{
+    const nlist=(o.listing_slugs||[]).length;
+    const unread=o.unread_count||0;
+    const meta = `${nlist} listing${nlist===1?'':'s'} · +${esc(o.wa_num)}`;
+    const chips = [
+      o.paused ? '<span class="chip paused">paused</span>' : '',
+      (o.suggested_reply && o.suggested_reply.trim()) ? '<span class="chip draft">draft</span>' : '',
+      unread ? `<span class="chip unread">${unread}</span>` : '',
+    ].filter(Boolean).join('');
+    return `<div class="row ${state.sel&&state.sel.id===o.id?'active':''}" onclick="pick(${o.id})">
+      <div class="av">${esc(initials(o))}</div>
+      <div class="mid"><div class="nm">${esc(o.name||('+'+o.wa_num))}</div><div class="meta">${meta}</div></div>
+      <div class="right"><span class="time">${fmtTime(o.last_inbound_at)}</span>${chips}</div>
+    </div>`;
+  }).join('');
+}
+
+async function pick(id){
+  const o=state.owners.find(x=>x.id===id); if(!o) return;
+  state.sel=o; renderList();
+  document.getElementById('wrap').classList.add('thread-open');
+  await openThread(o);
+}
+
+async function openThread(o, keepScroll){
+  let msgs=[];
+  try{ msgs = await api('get_owner_messages',{ownerId:o.id}); }catch{ msgs=[]; }
+  state.msgs = Array.isArray(msgs)?msgs.slice().reverse():[];
+  const nlist=(o.listing_slugs||[]).length;
+  const body=document.getElementById('thread-body');
+  const draft=(o.suggested_reply||'').trim();
+  body.innerHTML = `
+    <div class="thread-head">
+      <button class="back" onclick="closeThread()">‹</button>
+      <div class="av">${esc(initials(o))}</div>
+      <div><div class="nm">${esc(o.name||('+'+o.wa_num))}</div><div class="meta">+${esc(o.wa_num)} · ${nlist} listing${nlist===1?'':'s'}${o.email?' · '+esc(o.email):''}</div></div>
+      <div class="spacer"></div>
+      <button class="pause-btn ${o.paused?'paused':''}" onclick="togglePause()">${o.paused?'Paused — resume':'Pause Maya'}</button>
+    </div>
+    <div class="msgs" id="msgs">${renderMsgs()}</div>
+    <div class="composer">
+      <div class="draft-note ${draft?'':'none'}" id="draftnote">${draft?'✎ Maya drafted this reply — review &amp; send':'No pending draft — type a reply'}</div>
+      <div class="box">
+        <textarea id="reply" placeholder="Message ${esc((o.name||'owner').split(' ')[0])}…" oninput="autoGrow(this)">${esc(draft)}</textarea>
+        <button class="send" id="sendbtn" onclick="send()">Send</button>
+      </div>
+    </div>`;
+  const m=document.getElementById('msgs'); if(m) m.scrollTop=m.scrollHeight;
+  const ta=document.getElementById('reply'); if(ta) autoGrow(ta);
+}
+function renderMsgs(){
+  if(!state.msgs.length) return '<div class="empty">No messages yet.</div>';
+  return state.msgs.map(m=>{
+    const me=m.direction==='outbound';
+    return `<div class="bubble ${me?'me':'them'}">${esc(m.content||'')}<span class="t">${fmtTime(m.timestamp)}${me?' · Maya':''}</span></div>`;
+  }).join('');
+}
+function autoGrow(t){ t.style.height='auto'; t.style.height=Math.min(t.scrollHeight,140)+'px'; }
+function closeThread(){ state.sel=null; document.getElementById('wrap').classList.remove('thread-open'); document.getElementById('thread-body').innerHTML='<div class="empty" id="empty">Select an owner to view the conversation.</div>'; renderList(); }
+
+async function togglePause(){
+  const o=state.sel; if(!o) return;
+  try{ await api('patch_owner',{id:o.id,fields:{paused:!o.paused}}); o.paused=!o.paused; toast(o.paused?'Maya paused for this owner':'Maya resumed'); await openThread(o); renderList(); }
+  catch{ toast('Could not update'); }
+}
+
+async function send(){
+  const o=state.sel; if(!o) return;
+  const ta=document.getElementById('reply'); const msg=(ta.value||'').trim();
+  if(!msg){ toast('Nothing to send'); return; }
+  const btn=document.getElementById('sendbtn'); btn.disabled=true; btn.textContent='…';
+  try{
+    await api('owner_send',{id:o.id,waNum:o.wa_num,message:msg});
+    o.suggested_reply=''; o.unread_count=0;
+    toast('Sent');
+    await openThread(o); renderList();
+  }catch(e){ toast('Send failed'); btn.disabled=false; btn.textContent='Send'; }
+}
+
+load();
+setInterval(()=>{ if(!document.hidden) load(); }, 15000);
+</script>
+</body>
+</html>

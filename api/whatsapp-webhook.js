@@ -540,6 +540,25 @@ export default async function handler(req, res) {
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
 
+    // ── OWNER-MODE BRANCH ────────────────────────────────────────────
+    // A villa owner/manager (matched by their listing's WhatsApp contact) who
+    // is NOT also an agent: Maya handles this in owner-mode and we return,
+    // leaving the entire agent pipeline below untouched. Someone who is both an
+    // agent and an owner stays in the agent flow (zero regression) — dual-role
+    // routing is refined later. `owner` is only ever set when OWNERS_ENABLED is
+    // on, so this whole branch is dormant until then.
+    if (owner && !agent) {
+      try {
+        await handleOwnerConversation({
+          SUPABASE_URL, sbHeaders, owner, fromNum,
+          inbound: text, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY,
+        });
+      } catch (e) {
+        console.error('owner-mode error:', e.message);
+      }
+      return res.status(200).end();
+    }
+
     if (!agent) {
       // Unknown sender = a brand-new agent's very first message. This used to
       // be a dead end (message logged with no agent_id, so invisible in the
@@ -1511,4 +1530,218 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
     console.warn('generateReply failed:', err.message);
     return { action: 'escalate', reply: '', error: err.message || 'generateReply threw', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
   }
+}
+
+// ══ OWNER-MODE (villa owners/managers, distinct from sales agents) ═════════
+// A completely separate reply path from generateReply. Owners get a warm,
+// non-salesy Maya who can (1) report on their listing's performance and (2)
+// create/update a listing from a natural conversation. Everything routes
+// through the portal's service-authed endpoints; drafts/sends mirror the agent
+// flow but use the owners table + owner_id-tagged messages. (PORTAL_BASE is
+// declared near the top of the file, shared with the availability helpers.)
+
+async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY }) {
+  // Automation mode: global setting, with a per-owner pause override.
+  let globalMode = 'draft';
+  try {
+    const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
+    const sRow = (await sRes.json())?.[0];
+    if (sRow?.value?.mode) globalMode = sRow.value.mode;
+  } catch { /* default draft */ }
+  const mode = owner.paused ? 'paused' : globalMode;
+
+  const patch = { last_inbound_at: timestamp, unread_count: (owner.unread_count || 0) + 1 };
+  if (mode === 'paused' || mode === 'off' || !ANTHROPIC_KEY) {
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
+
+  const thread = await fetchOwnerThread(SUPABASE_URL, sbHeaders, owner.id);
+  const listingSlugs = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
+  const ai = await generateOwnerReply(ANTHROPIC_KEY, owner, inbound, thread, listingSlugs);
+
+  // Count the token spend against the same daily budget as agent replies.
+  if (typeof ai.cost_usd === 'number' && ai.cost_usd > 0) {
+    await incrementTodaySpend(SUPABASE_URL, sbHeaders, ai.cost_usd).catch(() => {});
+  }
+
+  if (ai.error) {
+    patch.suggested_reply = `[Maya (owner) failed: ${ai.error} — reply manually.]`;
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
+  // Draft mode (or hybrid escalation): stage the reply for review, don't send.
+  if (mode === 'draft' || (mode === 'hybrid' && ai.action === 'escalate')) {
+    patch.suggested_reply = ai.reply || '';
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
+  if (ai.action === 'escalate' && !ai.reply) {
+    patch.suggested_reply = '[Maya (owner) escalated silently.]';
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
+  // Autopilot / hybrid(auto): send it.
+  if (ai.reply && WA_TOKEN && WA_PHONE_ID) {
+    const mid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, ai.reply, []);
+    await logOutboundOwner(SUPABASE_URL, sbHeaders, owner.id, fromNum, ai.reply, mid);
+    forwardMayaReply({ name: owner.name || ('+' + owner.wa_num), agency: 'villa owner' }, ai.reply).catch(() => {});
+    patch.suggested_reply = '';
+    patch.unread_count = 0;
+  } else {
+    patch.suggested_reply = ai.reply || '';
+  }
+  await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+}
+
+async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs) {
+  const secret = process.env.LISTING_SYNC_SECRET;
+  const ownerName = owner.name || 'there';
+  const listingsLine = listingSlugs.length ? listingSlugs.join(', ') : '(none yet — this owner has not listed a villa)';
+
+  const system = `You are Maya, listings coordinator for Samba Realty in Bali. You are messaging on WhatsApp with a villa OWNER / property manager — a partner and client, not a sales agent. Be warm, concise, first-name friendly, and never salesy.
+
+Owner: ${ownerName}
+Their current listing slugs: ${listingsLine}
+
+WHAT YOU DO FOR OWNERS:
+1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
+2. Help them LIST a new villa or UPDATE one by gathering the details in conversation, then submitting (action "intake"). New/updated listings go to Ikiel for review before they appear publicly — always say so.
+3. General help. Ikiel oversees everything and steps in when needed.
+
+RULES:
+- To create/update a listing you need at least a villa name. Area, bedrooms/bathrooms, monthly price, a Google Drive photos link, and an iCal availability calendar make it far stronger — ask for what's missing, but don't demand everything in one go.
+- For anything about money owed, payouts, billing, complaints, contracts, or legal: set action "escalate" (Ikiel handles those personally).
+- Keep replies to 1–4 short sentences. This is WhatsApp.
+
+Respond with ONLY a JSON object (no markdown, no prose):
+{
+  "action": "auto" | "escalate" | "report" | "intake",
+  "reply": "message to the owner; leave \\"\\" when action is report or intake",
+  "report_slug": null | "one of their listing slugs",
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "features": [] }
+}
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). Otherwise use "auto" (a normal reply) or "escalate".`;
+
+  const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
+  let llmCalls = 0, costUsd = 0;
+  const MAX = 3;
+  try {
+    for (let hop = 0; hop < MAX; hop++) {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 700, system, messages }),
+      });
+      llmCalls++;
+      const data = await res.json();
+      if (!res.ok || data.type === 'error') {
+        return { action: 'escalate', reply: '', error: data?.error?.message || `HTTP ${res.status}`, llm_calls: llmCalls, cost_usd: costUsd };
+      }
+      costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
+      const raw = data.content?.[0]?.text || '';
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return { action: 'escalate', reply: raw.trim(), llm_calls: llmCalls, cost_usd: costUsd };
+      const parsed = JSON.parse(m[0]);
+
+      if (parsed.action === 'report' && parsed.report_slug && hop < MAX - 1) {
+        const summary = await fetchOwnerReportSummary(parsed.report_slug, secret);
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Performance data for ${parsed.report_slug}:\n${summary}\n\nNow reply to the owner in plain, friendly language with the key numbers (JSON, action "auto").` });
+        continue;
+      }
+      if (parsed.action === 'intake' && parsed.listing && hop < MAX - 1) {
+        const result = await submitOwnerIntake(owner, parsed.listing, secret);
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Listing submission result: ${result}\n\nNow confirm to the owner in one friendly sentence (JSON, action "auto"). If it succeeded, tell them it's gone to Ikiel for review and will appear once approved.` });
+        continue;
+      }
+      return { action: parsed.action === 'auto' ? 'auto' : 'escalate', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd };
+    }
+    return { action: 'escalate', reply: '', llm_calls: llmCalls, cost_usd: costUsd };
+  } catch (e) {
+    return { action: 'escalate', reply: '', error: e.message || 'generateOwnerReply threw', llm_calls: llmCalls, cost_usd: costUsd };
+  }
+}
+
+// Fetch a listing's report from the portal (service secret) and compress it to
+// a few lines Maya can turn into a friendly WhatsApp answer.
+async function fetchOwnerReportSummary(slug, secret) {
+  try {
+    const r = await fetch(`${PORTAL_BASE}/api/portal?action=report&slug=${encodeURIComponent(slug)}`, {
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+    });
+    if (!r.ok) return `(could not load report: HTTP ${r.status})`;
+    const d = await r.json();
+    const mx = d.metrics || {};
+    const line = (label, o) => `${label}: ${o?.now ?? 0} this week (was ${o?.prev ?? 0} last week)`;
+    const occ = d.occupancy
+      ? `Occupancy next 30 nights: ${d.occupancy.pct}% (${d.occupancy.bookedNights} booked, ${d.occupancy.openNights} open)${d.occupancy.openWindows?.[0] ? `; open gap of ${d.occupancy.openWindows[0].nights} nights from ${d.occupancy.openWindows[0].from}` : ''}`
+      : 'Occupancy: no availability calendar connected';
+    const bench = d.benchmark?.percentile != null ? `Benchmark: ${d.benchmark.percentile}th percentile of ${d.benchmark.peerCount} active listings` : '';
+    return [
+      `Villa: ${d.name}${d.area ? ` (${d.area})` : ''}`,
+      line('Listing views', mx.views),
+      line('Enquiries', mx.enquiries),
+      `Agents reached: ${d.agentsReached?.now ?? 0} this week (was ${d.agentsReached?.prev ?? 0})`,
+      line('Photo views', mx.photoViews),
+      occ, bench,
+    ].filter(Boolean).join('\n');
+  } catch (e) {
+    return `(report fetch failed: ${e.message})`;
+  }
+}
+
+// Submit a Maya-collected listing to the portal intake endpoint (service secret).
+async function submitOwnerIntake(owner, listing, secret) {
+  try {
+    const data = {
+      name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
+      bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: listing.monthly,
+      overview: listing.overview, photosLink: listing.photosLink, icalUrl: listing.icalUrl,
+      features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
+    };
+    const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+      body: JSON.stringify({ slug: listing.slug || '', waNumber: owner.wa_num, ownerEmail: owner.email || '', data }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return `failed: ${d.error || `HTTP ${r.status}`}`;
+    return `success: "${d.name}" saved as ${d.status} (slug ${d.slug})`;
+  } catch (e) {
+    return `failed: ${e.message}`;
+  }
+}
+
+async function fetchOwnerThread(url, headers, ownerId) {
+  try {
+    const r = await fetch(`${url}/rest/v1/wa_messages?owner_id=eq.${ownerId}&order=timestamp.desc&limit=30`, { headers });
+    if (!r.ok) return '';
+    const rows = await r.json();
+    if (!Array.isArray(rows) || !rows.length) return '';
+    rows.reverse();
+    return rows.map(m => {
+      const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
+      const who = m.direction === 'outbound' ? 'Maya' : 'Owner';
+      return `[${t}] ${who}: ${humanizeMarker(m.content || '').slice(0, 200)}`;
+    }).join('\n');
+  } catch { return ''; }
+}
+
+async function logOutboundOwner(url, headers, ownerId, waNum, content, waMessageId = null) {
+  await fetch(`${url}/rest/v1/wa_messages`, {
+    method: 'POST', headers,
+    body: JSON.stringify({
+      owner_id: ownerId, wa_num: waNum, direction: 'outbound',
+      content, timestamp: new Date().toISOString(), source: 'api',
+      status: 'sent', wa_message_id: waMessageId,
+    }),
+  }).catch(e => console.warn('logOutboundOwner failed:', e.message));
+}
+
+async function patchOwner(url, headers, ownerId, patch) {
+  await fetch(`${url}/rest/v1/owners?id=eq.${ownerId}`, {
+    method: 'PATCH', headers, body: JSON.stringify(patch),
+  }).catch(e => console.warn('patchOwner failed:', e.message));
 }

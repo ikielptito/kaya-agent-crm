@@ -36,6 +36,8 @@ export default async function handler(req, res) {
     { name: 'wa_messages.deleted_at',  url: '/rest/v1/wa_messages?select=deleted_at&limit=1' },
     { name: 'owners table',            url: '/rest/v1/owners?select=id&limit=1' },
     { name: 'owners.listing_slugs',    url: '/rest/v1/owners?select=listing_slugs&limit=1' },
+    { name: 'owners.suggested_reply',  url: '/rest/v1/owners?select=suggested_reply&limit=1' },
+    { name: 'owners.paused',           url: '/rest/v1/owners?select=paused&limit=1' },
     { name: 'wa_messages.owner_id',    url: '/rest/v1/wa_messages?select=owner_id&limit=1' }
   ];
 
