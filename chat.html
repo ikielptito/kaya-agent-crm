@@ -6,7 +6,7 @@
 <title>Maya</title>
 
 <!-- PWA / iOS homescreen -->
-<meta name="theme-color" content="#B8613F">
+<meta name="theme-color" content="#FAF8F5">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -15,33 +15,45 @@
 <link rel="apple-touch-icon" href="/maya-icon.svg">
 <link rel="icon" href="/maya-icon.svg">
 
+<!-- Samba brand typeface -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+
 <style>
   /* Samba warm palette — WhatsApp ergonomics, Samba brand. Variable names
      keep the wa- prefix so every existing rule picks up the reskin. */
   :root {
-    --wa-green: #B8613F;        /* header / brand (Samba terracotta) */
-    --wa-green-dark: #A85737;
-    --wa-accent: #C46E4B;       /* send button / active */
+    /* Samba brand palette (matches sambarentals.com) — variable names keep the
+       wa- prefix so every existing rule picks up the reskin. */
+    --wa-green: #c8402a;        /* Samba terracotta — brand fills (avatars, active) */
+    --wa-green-dark: #A8341F;
+    --wa-accent: #c8402a;       /* send button / active */
+    --wa-green2: #2a6a3a;       /* Samba forest green — success/confirm */
     --wa-tick: #53bdeb;         /* read ticks stay blue — universal convention */
-    --wa-bg: #F5F1EB;           /* chat wallpaper */
+    --wa-bg: #FAF8F5;           /* chat wallpaper (Samba cream) */
     --wa-panel: #ffffff;
     --wa-panel-2: #FAF8F5;      /* list header / composer bar */
-    --wa-out: #F6E7DE;          /* outgoing bubble (warm peach) */
+    --wa-out: #F7E7DE;          /* outgoing bubble (warm peach) */
     --wa-in: #ffffff;           /* incoming bubble */
     --wa-ink: #1C1917;
-    --wa-ink-2: #7a7268;
-    --wa-rule: #F1ECE7;
-    --wa-unread: #C46E4B;
-    --wa-shadow: 0 1px 1px rgba(28,25,23,0.12);
+    --wa-ink-2: #8a8478;        /* Samba muted */
+    --wa-rule: #F1ECE7;         /* Samba hairline */
+    --wa-unread: #c8402a;
+    --wa-shadow: 0 1px 2px rgba(28,25,23,0.07);
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; padding: 0; height: 100%;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     color: var(--wa-ink);
     background: var(--wa-panel-2);
     overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
   }
+  /* Inline stroke-icon system (replaces emoji chrome) */
+  .ic { display: block; flex-shrink: 0; }
+  .ic-mid { display: inline-block; vertical-align: -4px; }
   body { height: 100dvh; overflow: hidden; }
   button { font-family: inherit; cursor: pointer; }
 
@@ -64,14 +76,18 @@
   .list-head-top { display: flex; align-items: center; gap: 10px; }
   .list-title { font-size: 19px; font-weight: 600; color: var(--wa-ink); flex: 1; }
   .refresh-btn {
-    background: none; border: none; color: var(--wa-ink-2); font-size: 19px;
-    padding: 4px 6px; border-radius: 50%;
+    background: none; border: none; color: var(--wa-ink-2);
+    padding: 6px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center;
+    transition: background 0.12s, color 0.12s;
   }
+  .refresh-btn:active { background: var(--wa-rule); }
+  .refresh-btn .ic { width: 20px; height: 20px; }
   .refresh-btn.spin { animation: spin 0.7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #notifBtn { font-size: 16px; opacity: 0.45; filter: grayscale(1); }
-  #notifBtn.on { opacity: 1; filter: none; }
-  #notifBtn.denied { opacity: 0.3; filter: grayscale(1); }
+  #notifBtn { color: var(--wa-ink-2); opacity: 0.5; }
+  #notifBtn.on { opacity: 1; color: var(--wa-green); }
+  #notifBtn.denied { opacity: 0.3; }
+  .review-btn { position: relative; }
 
   /* Maya mode selector */
   .mode-bar { margin-top: 10px; }
@@ -80,7 +96,7 @@
     color: var(--wa-ink-2); margin-bottom: 5px; display: flex; align-items: center; gap: 6px;
   }
   .mode-dot { width: 7px; height: 7px; border-radius: 50%; background: #c2c9ce; }
-  .mode-dot.live { background: var(--wa-unread); box-shadow: 0 0 0 3px #25d36633; }
+  .mode-dot.live { background: var(--wa-green2); box-shadow: 0 0 0 3px #2a6a3a33; }
   .mode-seg { display: flex; background: #fff; border: 1px solid var(--wa-rule); border-radius: 10px; padding: 3px; gap: 2px; }
   .mode-seg button {
     flex: 1; border: none; background: none; padding: 7px 4px; border-radius: 7px;
@@ -182,7 +198,8 @@
     padding: calc(8px + env(safe-area-inset-top)) 14px 8px;
     border-bottom: 1px solid var(--wa-rule);
   }
-  .back-btn { display: none; background: none; border: none; font-size: 24px; color: var(--wa-ink-2); padding: 0 2px; }
+  .back-btn { display: none; background: none; border: none; color: var(--wa-ink-2); padding: 2px 4px 2px 0; align-items: center; }
+  .back-btn .ic { width: 26px; height: 26px; }
   .thread-head .avatar { width: 40px; height: 40px; font-size: 15px; }
   .thread-head-info { flex: 1; min-width: 0; }
   .thread-head-name { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -258,11 +275,11 @@
     padding: 2px 7px; border-radius: 7px; margin-right: 6px; vertical-align: 1px;
     background: rgba(0,0,0,.08); color: var(--wa-ink-2); }
   .src-tag.you { background: #dcefe2; color: #1e6b46; }
-  .src-tag.maya { background: #e8e2f5; color: #6b4fb3; }
+  .src-tag.maya { background: #e5efe8; color: #2a6a3a; }
   /* Maya typing indicator — shown while an auto/hybrid reply is being generated */
   .bubble.typing { display: inline-flex; align-items: center; gap: 8px; color: var(--wa-ink-2); font-size: 13px; }
   .tdots { display: inline-flex; gap: 3px; }
-  .tdots i { width: 6px; height: 6px; border-radius: 50%; background: #6b4fb3; opacity: .35; animation: tdot 1.2s infinite; }
+  .tdots i { width: 6px; height: 6px; border-radius: 50%; background: #2a6a3a; opacity: .35; animation: tdot 1.2s infinite; }
   .tdots i:nth-child(2) { animation-delay: .2s; }
   .tdots i:nth-child(3) { animation-delay: .4s; }
   @keyframes tdot { 0%,60%,100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
@@ -309,11 +326,14 @@
   .icon-btn {
     width: 44px; height: 44px; border-radius: 50%; border: none; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; font-size: 18px;
-    background: #fff; color: var(--wa-ink-2);
+    background: #fff; color: var(--wa-ink-2); box-shadow: var(--wa-shadow);
   }
-  .send-btn { background: var(--wa-accent); color: #fff; }
+  .icon-btn .ic { width: 22px; height: 22px; }
+  .send-btn { background: var(--wa-accent); color: #fff; box-shadow: none; }
+  .send-btn .ic { width: 20px; height: 20px; margin-left: -1px; }
   .send-btn:disabled { opacity: 0.5; }
   .suggest-btn { background: #fff; color: var(--wa-accent); font-size: 19px; }
+  .suggest-btn .ic { width: 22px; height: 22px; }
   .suggest-btn.loading { animation: spin 0.7s linear infinite; }
 
   /* Lightbox */
@@ -384,7 +404,9 @@
   }
   .sheet-item:active { background: var(--wa-panel-2); }
   .sheet-item.danger { color: #d12; }
-  .sheet-item .ico { font-size: 19px; width: 24px; text-align: center; }
+  .sheet-item .ico { width: 24px; display: inline-flex; align-items: center; justify-content: center; color: var(--wa-ink-2); }
+  .sheet-item.danger .ico { color: #d12; }
+  .sheet-item .ico .ic { width: 21px; height: 21px; }
   .sheet-react { display: flex; justify-content: space-around; padding: 6px 14px 12px; border-bottom: 1px solid var(--wa-rule); }
   .sheet-react button { background: none; border: none; font-size: 27px; cursor: pointer; padding: 2px; }
 
@@ -472,18 +494,18 @@
   .win-banner button { background: #fff; border: 1px solid #ffcd5a; color: #7a5b00; font-size: 11px; font-weight: 600; padding: 5px 10px; border-radius: 6px; white-space: nowrap; }
 
   /* ── Maya Assistant (boss console) ────────────────────── */
-  .conv.assistant-row .avatar { background: linear-gradient(135deg, #6b4fb3, #9b6fd3); font-size: 21px; }
-  .pill-boss { background: #e8e2f5; color: #6b4fb3; }
-  .act-chip { display: inline-block; background: #efe9fa; color: #6b4fb3; font-size: 10.5px; font-weight: 600;
+  .conv.assistant-row .avatar { background: linear-gradient(135deg, #2a6a3a, #3d8a52); font-size: 21px; }
+  .pill-boss { background: #e5efe8; color: #2a6a3a; }
+  .act-chip { display: inline-block; background: #eaf3ec; color: #2a6a3a; font-size: 10.5px; font-weight: 600;
     border-radius: 9px; padding: 3px 9px; margin: 0 4px 4px 0; }
-  .bcast-card { background: #fff; border: 1px solid var(--wa-rule); border-left: 3px solid #6b4fb3;
+  .bcast-card { background: #fff; border: 1px solid var(--wa-rule); border-left: 3px solid #2a6a3a;
     border-radius: 10px; padding: 10px 12px; margin-top: 8px; font-size: 13px; }
   .bcast-msg { background: var(--wa-out); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; margin: 6px 0; font-size: 13.5px; }
   .bcast-tpl-btn { display: block; margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.08);
-    color: #6b4fb3; font-weight: 600; font-size: 12.5px; word-break: break-all; }
+    color: #2a6a3a; font-weight: 600; font-size: 12.5px; word-break: break-all; }
   .bcast-meta { color: var(--wa-ink-2); font-size: 12px; margin-bottom: 6px; line-height: 1.4; }
   .bcast-actions { display: flex; gap: 8px; margin-top: 8px; }
-  .bcast-actions .go { flex: 1; background: #6b4fb3; color: #fff; border: none; border-radius: 8px;
+  .bcast-actions .go { flex: 1; background: #2a6a3a; color: #fff; border: none; border-radius: 8px;
     padding: 11px; font-weight: 600; font-size: 14px; cursor: pointer; }
   .bcast-actions .no { background: #fff; border: 1px solid var(--wa-rule); border-radius: 8px;
     padding: 11px 14px; font-size: 14px; color: var(--wa-ink-2); cursor: pointer; }
@@ -511,7 +533,8 @@
     display: flex; flex-direction: column; }
   .an-head { display: flex; align-items: center; gap: 12px; background: var(--wa-panel-2);
     padding: calc(10px + env(safe-area-inset-top)) 14px 10px; border-bottom: 1px solid var(--wa-rule); }
-  .an-back { background: none; border: none; font-size: 26px; color: var(--wa-ink-2); padding: 0 2px; cursor: pointer; }
+  .an-back { background: none; border: none; color: var(--wa-ink-2); padding: 2px 4px 2px 0; cursor: pointer; display: inline-flex; align-items: center; }
+  .an-back .ic { width: 26px; height: 26px; }
   .an-title { font-size: 18px; font-weight: 700; color: var(--wa-ink); flex: 1; }
   .an-range { border: 1px solid var(--wa-rule); background: #fff; border-radius: 8px; padding: 6px 10px;
     font-size: 13px; color: var(--wa-ink); font-family: inherit; }
@@ -652,14 +675,14 @@
     <div class="list-head">
       <div class="list-head-top">
         <div class="list-title">Maya</div>
-        <button class="refresh-btn" id="quickAddBtn" onclick="openQuickAdd()" title="Add new agent">+</button>
-        <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)">↩</button>
-        <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats">🧲</button>
-        <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics">📊</button>
-        <button class="refresh-btn" id="scheduleBtn" onclick="openSchedule()" title="Maya's scheduled tasks">🗓</button>
-        <button class="refresh-btn review-btn" id="reviewBtn" onclick="openReview()" title="Maya's weekly self-review">🎓<span class="review-dot" id="reviewDot" style="display:none"></span></button>
-        <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications">🔔</button>
-        <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh">⟳</button>
+        <button class="refresh-btn" id="quickAddBtn" onclick="openQuickAdd()" title="Add new agent" aria-label="Add new agent" data-ic="contacts"></button>
+        <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)" aria-label="Answer waiting agents" data-ic="resume"></button>
+        <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats" aria-label="Backfill contacts" data-ic="magnet"></button>
+        <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics" aria-label="Analytics" data-ic="chart"></button>
+        <button class="refresh-btn" id="scheduleBtn" onclick="openSchedule()" title="Maya's scheduled tasks" aria-label="Scheduled tasks" data-ic="calendar"></button>
+        <button class="refresh-btn review-btn" id="reviewBtn" onclick="openReview()" title="Maya's weekly self-review" aria-label="Weekly self-review" data-ic="cap"><span class="review-dot" id="reviewDot" style="display:none"></span></button>
+        <button class="refresh-btn" id="notifBtn" onclick="enableNotifications()" title="Enable notifications" aria-label="Enable notifications" data-ic="bell"></button>
+        <button class="refresh-btn" id="refreshBtn" onclick="refreshAll(true)" title="Refresh" aria-label="Refresh" data-ic="refresh"></button>
       </div>
       <div class="mode-bar">
         <div class="mode-label"><span class="mode-dot" id="modeDot"></span> Maya automation</div>
@@ -692,15 +715,15 @@
     </div>
     <div id="threadView" style="display:none; flex:1; min-height:0; flex-direction:column;">
       <div class="thread-head">
-        <button class="back-btn" onclick="closeConv()">‹</button>
+        <button class="back-btn" onclick="closeConv()" aria-label="Back" data-ic="back" data-ic-size="24"></button>
         <div class="avatar" id="thAvatar"></div>
         <div class="thread-head-info">
           <div class="thread-head-name" id="thName"></div>
           <div class="thread-head-sub" id="thSub"></div>
         </div>
-        <button class="refresh-btn" id="archBtn" onclick="toggleArchive()" title="Archive chat">🗄</button>
-        <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English">🌐</button>
-        <button class="refresh-btn" id="threadSearchBtn" onclick="toggleThreadSearch()" title="Search in chat">🔍</button>
+        <button class="refresh-btn" id="archBtn" onclick="toggleArchive()" title="Archive chat" aria-label="Archive chat" data-ic="archive"></button>
+        <button class="refresh-btn" id="translateBtn" onclick="toggleTranslate()" title="Auto-translate to English" aria-label="Auto-translate" data-ic="globe"></button>
+        <button class="refresh-btn" id="threadSearchBtn" onclick="toggleThreadSearch()" title="Search in chat" aria-label="Search in chat" data-ic="search"></button>
       </div>
       <div class="chat-mode-bar" id="chatModeBar">
         <span class="chat-mode-label">Maya here</span>
@@ -718,7 +741,7 @@
         <span id="threadSearchCount"></span>
         <button onclick="threadSearchStep(-1)" title="Previous">▲</button>
         <button onclick="threadSearchStep(1)" title="Next">▼</button>
-        <button onclick="toggleThreadSearch()" title="Close">✕</button>
+        <button class="refresh-btn" onclick="toggleThreadSearch()" title="Close" aria-label="Close search" data-ic="x"></button>
       </div>
       <div class="thread-body" id="threadBody" onscroll="onThreadScroll()"></div>
       <button class="scroll-fab" id="scrollFab" onclick="scrollThreadToBottom()" style="display:none">⌄</button>
@@ -727,7 +750,7 @@
       <div class="composer">
         <button class="icon-btn" id="attachBtn" onclick="toggleAttachSheet()" title="Attach / actions">＋</button>
         <textarea id="replyBox" rows="1" placeholder="Type a message" oninput="onReplyInput()"></textarea>
-        <button class="icon-btn send-btn" id="sendBtn" onclick="send()" title="Send">➤</button>
+        <button class="icon-btn send-btn" id="sendBtn" onclick="send()" title="Send" aria-label="Send" data-ic="send"></button>
       </div>
       <input type="file" id="fileImage"  accept="image/*" style="display:none" onchange="onFilePicked(this,'image')">
       <input type="file" id="fileCamera" accept="image/*" capture="environment" style="display:none" onchange="onFilePicked(this,'image')">
@@ -743,7 +766,7 @@
 <!-- ── Analytics overlay ─────────────────────────────────── -->
 <div id="analyticsOverlay" class="analytics-overlay" style="display:none">
   <div class="an-head">
-    <button class="an-back" onclick="closeAnalytics()">‹</button>
+    <button class="an-back" onclick="closeAnalytics()" aria-label="Back" data-ic="back"></button>
     <div class="an-title">Analytics</div>
     <select id="anRange" class="an-range" onchange="loadAnalytics()">
       <option value="7">7 days</option>
@@ -757,9 +780,9 @@
 <!-- ── Maya self-review overlay ───────────────────────────── -->
 <div id="reviewOverlay" class="analytics-overlay" style="display:none">
   <div class="an-head">
-    <button class="an-back" onclick="closeReview()">‹</button>
+    <button class="an-back" onclick="closeReview()" aria-label="Back" data-ic="back"></button>
     <div class="an-title">Maya — Weekly Review</div>
-    <button class="refresh-btn" onclick="loadReview()" title="Refresh">⟳</button>
+    <button class="refresh-btn" onclick="loadReview()" title="Refresh" aria-label="Refresh" data-ic="refresh"></button>
   </div>
   <div class="an-body" id="rvBody"><div class="an-loading">Loading…</div></div>
   <div class="rv-applybar" id="rvApplyBar" style="display:none">
@@ -771,9 +794,9 @@
 <!-- ── Maya schedule overlay ─────────────────────────────── -->
 <div id="scheduleOverlay" class="analytics-overlay" style="display:none">
   <div class="an-head">
-    <button class="an-back" onclick="closeSchedule()">‹</button>
+    <button class="an-back" onclick="closeSchedule()" aria-label="Back" data-ic="back"></button>
     <div class="an-title">Maya — Scheduled tasks</div>
-    <button class="refresh-btn" onclick="loadSchedule()" title="Refresh">⟳</button>
+    <button class="refresh-btn" onclick="loadSchedule()" title="Refresh" aria-label="Refresh" data-ic="refresh"></button>
   </div>
   <div class="an-body" id="schBody"><div class="an-loading">Loading…</div></div>
 </div>
@@ -844,7 +867,7 @@ function toggleArchive() {
 function updateArchBtn() {
   const b = document.getElementById('archBtn'); if (!b) return;
   const on = state.activeId && state.archived.has(state.activeId);
-  b.textContent = on ? '📥' : '🗄';
+  b.innerHTML = on ? ic('inbox', 20) : ic('archive', 20);
   b.title = on ? 'Unarchive chat' : 'Archive chat';
 }
 
@@ -878,6 +901,7 @@ async function api(action, payload) {
 
 // ── Init + polling ────────────────────────────────────────────────────
 async function init() {
+  renderIcons();
   state.translations = loadXlateCache();
   setupThreadGestures();
   await registerServiceWorker();
@@ -1121,7 +1145,7 @@ async function resumeUnanswered() {
     : 'generate and SEND replies';
   if (!confirm(`Catch up on agents still waiting (last 4 days)?\n\nFollowing Maya's current mode (${m.toUpperCase()}), she will ${verb}. Respects the daily spend cap.`)) return;
   const btn = document.getElementById('resumeBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  if (btn) { btn.disabled = true; btn.classList.add('spin'); }
   toast('Maya is catching up…');
   try {
     const r = await api('resume_unanswered', {});
@@ -1136,7 +1160,7 @@ async function resumeUnanswered() {
   } catch (e) {
     toast('Catch-up failed — try again');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '↩'; }
+    if (btn) { btn.disabled = false; btn.classList.remove('spin'); }
   }
 }
 
@@ -1145,7 +1169,7 @@ async function resumeUnanswered() {
 async function backfillContacts() {
   if (!confirm('Scan all past chats for numbers agents shared and add the real agent/partner contacts to the CRM?\n\nMaya reviews each number and skips clients / duplicates. Safe to run again.')) return;
   const btn = document.getElementById('backfillBtn');
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  if (btn) { btn.disabled = true; btn.classList.add('spin'); }
   toast('Scanning chat history…');
   try {
     const r = await api('backfill_contacts', {});
@@ -1155,14 +1179,14 @@ async function backfillContacts() {
   } catch (e) {
     toast('Backfill failed — try again');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🧲'; }
+    if (btn) { btn.disabled = false; btn.classList.remove('spin'); }
   }
 }
 
 // ── Quick-add agent ──────────────────────────────────────────────────
 function openQuickAdd() {
   document.getElementById('modalHost').innerHTML =
-    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add Agent</h3><button onclick="closeModal()">✕</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitQuickAdd(event)">
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add Agent</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitQuickAdd(event)">
       <div class="qa-field"><label>Name *</label><input id="qaName" required autocomplete="off"></div>
       <div class="qa-field"><label>WhatsApp number *</label><input id="qaNum" required placeholder="+62 812 3456 7890" inputmode="tel" autocomplete="off"></div>
       <div class="qa-field"><label>Agency</label><input id="qaAgency" autocomplete="off"></div>
@@ -1277,6 +1301,56 @@ function initials(name, agency) {
 }
 function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 
+// ── Inline stroke icons (Lucide-style, currentColor) — replaces emoji chrome ──
+const ICONS = {
+  resume:'<path d="M9 14 4 9l5-5"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>',
+  contacts:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+  chart:'<path d="M3 3v18h18"/><rect x="7" y="11" width="3" height="7" rx="1"/><rect x="12" y="7" width="3" height="11" rx="1"/><rect x="17" y="4" width="3" height="14" rx="1"/>',
+  calendar:'<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
+  cap:'<path d="M22 10 12 5 2 10l10 5 10-5Z"/><path d="M6 12v5c0 1 2.7 3 6 3s6-2 6-3v-5"/>',
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  refresh:'<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+  archive:'<rect x="2" y="4" width="20" height="5" rx="1"/><path d="M4 9v10a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/>',
+  inbox:'<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1Z"/>',
+  globe:'<circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/>',
+  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  send:'<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4Z"/>',
+  back:'<path d="m15 18-6-6 6-6"/>',
+  camera:'<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2Z"/><circle cx="12" cy="13" r="4"/>',
+  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/>',
+  file:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/>',
+  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+  spark:'<path d="M12 2 14.4 9.6 22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4Z"/>',
+  zap:'<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  smile:'<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+  pencil:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+  trash:'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>',
+  pin:'<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0Z"/><circle cx="12" cy="10" r="3"/>',
+  chat:'<path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 8.4 8.4 0 0 1-4-1L3 21l1.5-5.5a8.4 8.4 0 0 1-1-4A8.4 8.4 0 0 1 12 3a8.4 8.4 0 0 1 9 8.5Z"/>',
+  user:'<circle cx="12" cy="7" r="4"/><path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  megaphone:'<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
+  alert:'<path d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3Z"/><path d="M12 9v4M12 17h.01"/>',
+  ban:'<circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/>',
+  magnet:'<path d="M6 4v8a6 6 0 0 0 12 0V4"/><rect x="4" y="3.5" width="4" height="4.5" rx="0.6"/><rect x="16" y="3.5" width="4" height="4.5" rx="0.6"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+};
+function ic(name, size) {
+  size = size || 21;
+  return '<svg class="ic" viewBox="0 0 24 24" width="' + size + '" height="' + size + '" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[name] || '') + '</svg>';
+}
+function icm(name, size) { return ic(name, size).replace('class="ic"', 'class="ic ic-mid"'); }
+// Hydrate static buttons that carry a data-ic attribute (prepend so child spans
+// like the review dot are preserved).
+function renderIcons() {
+  document.querySelectorAll('[data-ic]:not([data-ic-done])').forEach(el => {
+    el.insertAdjacentHTML('afterbegin', ic(el.dataset.ic, el.dataset.icSize ? +el.dataset.icSize : 20));
+    el.setAttribute('data-ic-done', '1');
+  });
+}
+
 function timeAgo(d) {
   const s = Math.floor((Date.now() - d.getTime()) / 1000);
   if (s < 60) return 'now';
@@ -1329,7 +1403,7 @@ function convRow(a) {
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
     const unread = a.unread_count || 0;
     const lastCard = parseCardMarker(m?.lastContent);
-    const lastText = lastCard ? (lastCard.type === 'carousel' ? '🏠 Property carousel' : '🏠 Property listing') : (m?.lastContent || '');
+    const lastText = lastCard ? (icm('home',13) + (lastCard.type === 'carousel' ? ' Property carousel' : ' Property listing')) : (m?.lastContent || '');
     const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + lastText.slice(0, 60) : (a.agency || '');
 
     let pill = '';
@@ -1422,9 +1496,9 @@ function renderBanner(a) {
   } else if (a.suggested_reply && a.suggested_reply.trim()) {
     const nCards = (a.id === state.activeId ? (state.draftCards || []) : draftCardSlugs(a.suggested_reply)).length;
     const cardsBit = nCards
-      ? ` with ${nCards} listing card${nCards > 1 ? 's' : ''} <button onclick="dropDraftCards()" style="margin-left:6px;font-size:11px;border:1px solid currentColor;background:none;border-radius:8px;padding:1px 8px;color:inherit;cursor:pointer">✕ cards</button>`
+      ? ` with ${nCards} listing card${nCards > 1 ? 's' : ''} <button onclick="dropDraftCards()" style="margin-left:6px;font-size:11px;border:1px solid currentColor;background:none;border-radius:8px;padding:1px 8px;color:inherit;cursor:pointer">${icm('x',12)} cards</button>`
       : '';
-    html += `<div class="draft-banner">✦ Maya drafted a reply${cardsBit} — review &amp; send</div>`;
+    html += `<div class="draft-banner">${icm('spark',15)} Maya drafted a reply${cardsBit} — review &amp; send</div>`;
   }
   el.innerHTML = html;
 }
@@ -1486,7 +1560,7 @@ function currentAgentName() {
   return a ? (a.name || a.agency || 'Agent') : 'Agent';
 }
 function quoteSnippet(m) {
-  if (parseCardMarker(m.content)) return '🏠 Listing';
+  if (parseCardMarker(m.content)) return icm('home',13) + ' Listing';
   if (m.media_type) return (MEDIA_LABELS[m.media_type] || 'Attachment');
   return (m.content || '').slice(0, 80);
 }
@@ -1553,7 +1627,7 @@ function renderBubble(m) {
   const isOut = m.direction !== 'inbound';
   const wid = m.wa_message_id || '';
   if (m.deleted_at) {
-    return `<div class="bubble ${isOut ? 'out' : 'in'} deleted">🚫 Message recalled <span class="bubble-time">${t}</span></div>`;
+    return `<div class="bubble ${isOut ? 'out' : 'in'} deleted">${icm('ban',15)} Message recalled <span class="bubble-time">${t}</span></div>`;
   }
   // Quoted reply context
   let quoteHtml = '';
@@ -1580,7 +1654,7 @@ function renderBubble(m) {
   } else {
     inner = media + esc(bodyText).replace(/\n/g, '<br>');
     if (!media && !bodyText.trim()) {
-      inner = `<span class="bubble-missing">📎 Media message — not saved (sent before media support)</span>`;
+      inner = `<span class="bubble-missing">Media message — not saved (sent before media support)</span>`;
     }
   }
   // Who sent an outbound message: Maya (autoresponder), you (manual from this
@@ -1596,7 +1670,7 @@ function renderBubble(m) {
   let xlateHtml = '';
   const xl = !isOut ? state.translations[wid] : null;
   if (xl && !xl.same && xl.translated) {
-    xlateHtml = `<span class="xlate"><span class="xlate-tag">🌐 ${esc(xl.detected || 'translated')}</span>${esc(xl.translated).replace(/\n/g, '<br>')}</span>`;
+    xlateHtml = `<span class="xlate"><span class="xlate-tag">${icm('globe',12)} ${esc(xl.detected || 'translated')}</span>${esc(xl.translated).replace(/\n/g, '<br>')}</span>`;
   }
   return `<div class="bubble ${isOut ? 'out' : 'in'}${m.reaction ? ' has-reaction' : ''}" data-id="${wid}">${quoteHtml}${inner}${xlateHtml}${edited}<span class="bubble-time">${srcTag}${t}${ticks}</span>${reaction}</div>`;
 }
@@ -1608,9 +1682,9 @@ function renderContactCard(label) {
     const [nm, numsRaw] = entry.split(' — ');
     const nums = (numsRaw || '').match(/\d{9,15}/g) || [];
     const btns = nums.map(n =>
-      `<a class="cc-btn" href="https://wa.me/${n}" target="_blank" rel="noopener">💬 +${n}</a>
-       <button class="cc-btn" onclick="navigator.clipboard.writeText('+${n}').then(()=>toast('Number copied'))">⧉ Copy</button>`).join('');
-    return `<span class="contact-card"><span class="cc-name">👤 ${esc(nm.trim())}</span>${
+      `<a class="cc-btn" href="https://wa.me/${n}" target="_blank" rel="noopener">${icm('chat',14)} +${n}</a>
+       <button class="cc-btn" onclick="navigator.clipboard.writeText('+${n}').then(()=>toast('Number copied'))">${icm('file',13)} Copy</button>`).join('');
+    return `<span class="contact-card"><span class="cc-name">${icm('user',14)} ${esc(nm.trim())}</span>${
       btns || '<span class="cc-none">number not captured (sent before contact support — ask them to resend)</span>'
     }</span>`;
   }).join('');
@@ -1622,7 +1696,7 @@ function renderMedia(m) {
   if (!m.media_type) return '';
   const label = MEDIA_LABELS[m.media_type] || 'Attachment';
   // Known media type but no id we can fetch (legacy row) — show a clear chip.
-  if (!m.media_id) return `<span class="bubble-missing">📎 ${label} — not saved</span>`;
+  if (!m.media_id) return `<span class="bubble-missing">${label} — not saved</span>`;
   // media_id is either a permanent URL (archived inbound docs, or our own sent
   // image/doc) — use it directly — or a Meta media id served via the proxy.
   const src = /^https?:\/\//i.test(m.media_id) ? m.media_id
@@ -1639,13 +1713,13 @@ function renderMedia(m) {
     // downloads it to sign and send back. Both stream through the media proxy.
     return `<span class="doc-card">
       <a class="doc-open" href="${src}" target="_blank" rel="noopener" title="Open ${esc(name)}">
-        <span class="doc-ico">📄</span>
+        <span class="doc-ico">${ic('file',22)}</span>
         <span class="doc-meta"><span class="doc-name">${esc(name)}</span><span class="doc-sub">${esc(ext)} · tap to view</span></span>
       </a>
-      <a class="doc-dl" href="${src}" download="${esc(name)}" title="Download ${esc(name)}" aria-label="Download">⬇</a>
+      <a class="doc-dl" href="${src}" download="${esc(name)}" title="Download ${esc(name)}" aria-label="Download">${ic('download',20)}</a>
     </span>`;
   }
-  if (m.media_type === 'location') return `<a class="bubble-loc" href="https://www.google.com/maps?q=${esc(m.media_id)}" target="_blank">📍 Open in Maps</a>`;
+  if (m.media_type === 'location') return `<a class="bubble-loc" href="https://www.google.com/maps?q=${esc(m.media_id)}" target="_blank">${icm('pin',15)} Open in Maps</a>`;
   return '';
 }
 
@@ -1656,7 +1730,7 @@ function mediaFailed(el, src, label) {
   a.className = 'bubble-doc';
   a.style.display = 'flex';  // block-level so any caption wraps below, like a real image
   a.href = src; a.target = '_blank';
-  a.textContent = '🖼 View ' + (label || 'photo').toLowerCase();
+  a.innerHTML = icm('image',15) + ' View ' + esc((label || 'photo').toLowerCase());
   el.replaceWith(a);
 }
 
@@ -1683,12 +1757,12 @@ function openMsgMenu(e, wid) {
   const canRecall = isOut && ageMs < 24 * 3600 * 1000 && !m.deleted_at;
   const reactRow = ['👍', '❤️', '😂', '😮', '🙏', '🔥'].map(em => `<button onclick="sendReaction('${wid}','${em}')">${em}</button>`).join('');
   const items = [
-    `<button class="sheet-item" onclick="startReply('${wid}')"><span class="ico">↩︎</span> Reply</button>`,
-    `<button class="sheet-item" onclick="copyMsg('${wid}')"><span class="ico">⧉</span> Copy text</button>`,
-    `<button class="sheet-item" onclick="translateOne('${wid}')"><span class="ico">🌐</span> Translate</button>`,
+    `<button class="sheet-item" onclick="startReply('${wid}')"><span class="ico">${ic('resume')}</span> Reply</button>`,
+    `<button class="sheet-item" onclick="copyMsg('${wid}')"><span class="ico">${ic('file')}</span> Copy text</button>`,
+    `<button class="sheet-item" onclick="translateOne('${wid}')"><span class="ico">${ic('globe')}</span> Translate</button>`,
   ];
-  if (canEdit) items.push(`<button class="sheet-item" onclick="editMsg('${wid}')"><span class="ico">✏️</span> Edit</button>`);
-  if (canRecall) items.push(`<button class="sheet-item danger" onclick="recallMsg('${wid}')"><span class="ico">🗑</span> Delete for everyone</button>`);
+  if (canEdit) items.push(`<button class="sheet-item" onclick="editMsg('${wid}')"><span class="ico">${ic('pencil')}</span> Edit</button>`);
+  if (canRecall) items.push(`<button class="sheet-item danger" onclick="recallMsg('${wid}')"><span class="ico">${ic('trash')}</span> Delete for everyone</button>`);
   openSheet(`<div class="sheet-react">${reactRow}</div>${items.join('')}`);
   return false;
 }
@@ -1705,7 +1779,7 @@ function renderReplyChip() {
   const el = document.getElementById('replyChip');
   if (!state.replyTarget) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = 'flex';
-  el.innerHTML = `<div class="reply-chip-body"><div class="reply-chip-who">${esc(state.replyTarget.who)}</div><div class="reply-chip-txt">${esc(state.replyTarget.text)}</div></div><button onclick="clearReply()">✕</button>`;
+  el.innerHTML = `<div class="reply-chip-body"><div class="reply-chip-who">${esc(state.replyTarget.who)}</div><div class="reply-chip-txt">${esc(state.replyTarget.text)}</div></div><button onclick="clearReply()" aria-label="Cancel reply">${ic('x',18)}</button>`;
 }
 function copyMsg(wid) {
   closeSheet();
@@ -1753,14 +1827,14 @@ async function recallMsg(wid) {
 // ── Attachments ───────────────────────────────────────────────────────
 function toggleAttachSheet() {
   openSheet(`
-    <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">📷</span> Take photo</button>
-    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">🖼</span> Photo library</button>
-    <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">📄</span> Document</button>
-    <button class="sheet-item" onclick="closeSheet();openListingPicker()"><span class="ico">🏠</span> Send listing (card)</button>
-    <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">✦</span> Maya draft a reply</button>
-    <button class="sheet-item" onclick="closeSheet();openQuickReplies()"><span class="ico">⚡</span> Quick replies</button>
-    <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">😀</span> Emoji</button>
-    <button class="sheet-item" onclick="translateDraft()"><span class="ico">🌐</span> Translate my draft → Indonesian</button>
+    <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">${ic('camera')}</span> Take photo</button>
+    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">${ic('image')}</span> Photo library</button>
+    <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">${ic('file')}</span> Document</button>
+    <button class="sheet-item" onclick="closeSheet();openListingPicker()"><span class="ico">${ic('home')}</span> Send listing (card)</button>
+    <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">${ic('spark')}</span> Maya draft a reply</button>
+    <button class="sheet-item" onclick="closeSheet();openQuickReplies()"><span class="ico">${ic('zap')}</span> Quick replies</button>
+    <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">${ic('smile')}</span> Emoji</button>
+    <button class="sheet-item" onclick="translateDraft()"><span class="ico">${ic('globe')}</span> Translate my draft → Indonesian</button>
   `);
 }
 function pick(inputId) { closeSheet(); document.getElementById(inputId).click(); }
@@ -1825,7 +1899,7 @@ async function openListingPicker() {
   const a = state.agents.find(x => x.id === state.activeId);
   if (!a) { toast('Open a conversation first'); return; }
   document.getElementById('modalHost').innerHTML =
-    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Send a listing</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="lpBody"><div class="empty">Loading listings…</div></div></div></div>`;
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Send a listing</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body" id="lpBody"><div class="empty">Loading listings…</div></div></div></div>`;
   try {
     if (!_listingCache) { const r = await api('list_listings', {}); _listingCache = (r && r.listings) || []; }
     const items = _listingCache;
@@ -1857,7 +1931,7 @@ async function sendListingCard(idx) {
 // ── Template picker (24h window) ──────────────────────────────────────
 async function openTemplatePicker() {
   document.getElementById('modalHost').innerHTML =
-    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Choose a template</h3><button onclick="closeModal()">✕</button></div><div class="modal-body" id="tplList"><div class="empty">Loading templates…</div></div></div></div>`;
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Choose a template</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body" id="tplList"><div class="empty">Loading templates…</div></div></div></div>`;
   try {
     const r = await fetch('/api/whatsapp-templates');
     const data = await r.json();
@@ -2243,7 +2317,7 @@ function assistantRow() {
     : 'Ask me anything, or tell me to message the agents';
   const time = last?.ts ? timeAgo(new Date(last.ts)) : '';
   return `<div class="conv assistant-row ${state.activeId === ASSIST_ID ? 'active' : ''}" onclick="openAssistant()">
-    <div class="avatar">✦</div>
+    <div class="avatar">${ic('spark',20)}</div>
     <div class="conv-mid">
       <div class="conv-name">Maya — Assistant</div>
       <div class="conv-snip">${esc(snip)}</div>
@@ -2262,7 +2336,7 @@ function setAssistantChrome(on) {
     const el = document.getElementById(id);
     if (el) el.style.display = on ? 'none' : '';
   });
-  document.getElementById('thAvatar').style.background = on ? 'linear-gradient(135deg,#6b4fb3,#9b6fd3)' : '';
+  document.getElementById('thAvatar').style.background = on ? 'linear-gradient(135deg,#2a6a3a,#3d8a52)' : '';
 }
 
 function openAssistant() {
@@ -2275,7 +2349,7 @@ function openAssistant() {
   document.getElementById('emojiPop').style.display = 'none';
   document.getElementById('qrPop').style.display = 'none';
   setAssistantChrome(true);
-  document.getElementById('thAvatar').textContent = '✦';
+  document.getElementById('thAvatar').innerHTML = ic('spark', 18);
   document.getElementById('thName').textContent = 'Maya — Assistant';
   document.getElementById('thSub').textContent = 'Private console — agents never see this';
   document.getElementById('threadBanner').innerHTML = '';
@@ -2337,9 +2411,9 @@ function renderBroadcastCard(m, i) {
   const isTpl = !!b.template;
   const getting = isTpl ? all : inW;
   return `<div class="bcast-card">
-    <b>📣 ${esc(b.label || 'Broadcast')} — awaiting your confirmation</b>
-    <div class="bcast-msg">${esc(b.message)}${isTpl && b.template.button ? `<span class="bcast-tpl-btn">🔗 ${esc(b.template.button.text)} → ${esc(b.template.button.url)}</span>` : ''}</div>
-    ${isTpl ? `<div class="bcast-meta">✅ Approved template <b>${esc(b.template.name)}</b> — delivers to all ${all.length} recipients, no 24h-window limit. [first name] is personalized per agent.</div>` : ''}
+    <b>${icm('megaphone',15)} ${esc(b.label || 'Broadcast')} — awaiting your confirmation</b>
+    <div class="bcast-msg">${esc(b.message)}${isTpl && b.template.button ? `<span class="bcast-tpl-btn">${icm('link',13)} ${esc(b.template.button.text)} → ${esc(b.template.button.url)}</span>` : ''}</div>
+    ${isTpl ? `<div class="bcast-meta">${icm('check',13)} Approved template <b>${esc(b.template.name)}</b> — delivers to all ${all.length} recipients, no 24h-window limit. [first name] is personalized per agent.</div>` : ''}
     <div class="bcast-meta">To: ${esc(getting.slice(0, 10).map(r => r.name).join(', '))}${getting.length > 10 ? ` +${getting.length - 10} more` : ''}</div>
     ${!isTpl && outW.length ? `<div class="bcast-meta">⏱ ${outW.length} outside the 24h window will be skipped: ${esc(outW.slice(0, 6).map(r => r.name).join(', '))}${outW.length > 6 ? '…' : ''}</div>` : ''}
     ${(b.excluded || []).length ? `<div class="bcast-meta">Excluded: ${esc(b.excluded.slice(0, 5).map(x => `${x.name} (${x.reason})`).join(', '))}</div>` : ''}
@@ -2687,8 +2761,8 @@ function renderAnalytics(d) {
   // Funnel stages (each as a share of enrolled)
   const stages = [
     ['Enrolled', f.enrolled, '#857b6f'],
-    ['Messaged', f.messaged, '#9b6fd3'],
-    ['Read', f.read, '#6b4fb3'],
+    ['Messaged', f.messaged, '#3d8a52'],
+    ['Read', f.read, '#2a6a3a'],
     ['Replied', f.replied, '#1e6b46'],
     ['Clicked', f.clicked, '#C46E4B'],
     ['Enquired', f.enquired, '#a3502c'],
@@ -2705,7 +2779,7 @@ function renderAnalytics(d) {
   const fmtHtml = (d.by_format || []).map(x => `
     <div class="an-bar">
       <div class="lbl" title="${esc(x.format)}">${esc(x.format.replace(/^samba_/, '').replace(/_/g, ' '))}</div>
-      <div class="track"><div class="fill" style="width:${Math.round(x.sent / maxSent * 100)}%;background:#9b6fd3"></div></div>
+      <div class="track"><div class="fill" style="width:${Math.round(x.sent / maxSent * 100)}%;background:#3d8a52"></div></div>
       <div class="num">${x.read_rate != null ? x.read_rate + '%' : '<span class="an-na">—</span>'}</div>
     </div>`).join('');
 
