@@ -19,7 +19,7 @@ import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
 import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
-import { reconcileAllRentals, pullAgentAnalytics } from '../lib/rental-sync.js';
+import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 
@@ -556,6 +556,16 @@ export default async function handler(req, res) {
       catch (e) { rentalsReconcile = { error: e.message }; }
     }
 
+    // ── OWNER SYNC (daily) ───────────────────────────────────────────
+    // Refresh the owners table from the portal's authed owner-contact feed so
+    // Maya can reach villa owners/managers by their listing's WhatsApp number.
+    // Identity + listing links only; never overwrites owner-managed state.
+    let ownerSync = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      try { ownerSync = await syncOwners({ SUPABASE_URL, headers: sbHeaders }); }
+      catch (e) { ownerSync = { error: e.message }; }
+    }
+
     // ── PORTAL ANALYTICS PULL (daily) ────────────────────────────────
     // Cache per-agent clicks/enquiries + channel totals from the portal into
     // settings.agent_portal_stats so the funnel dashboard + report can join
@@ -721,6 +731,7 @@ export default async function handler(req, res) {
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       rentals_reconcile: rentalsReconcile,
+      owner_sync: ownerSync,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },

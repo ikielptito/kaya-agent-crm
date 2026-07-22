@@ -184,3 +184,33 @@ create table if not exists rentals (
   created_at        timestamptz default now(),
   updated_at        timestamptz default now()
 );
+
+-- ── OWNERS ──────────────────────────────────────────────────────────
+-- Villa owners / managers Maya talks to (distinct from agents — they list
+-- properties and receive weekly reports; they are NOT part of the agent
+-- funnel, broadcasts, or self-review). Keyed by the WhatsApp number that
+-- appears as the listing's booking contact. Populated by the portal owner-sync
+-- (lib/rental-sync.js → syncOwners), which is the source of truth for identity
+-- and listing links. One owner/number can be the contact for several listings.
+create table if not exists owners (
+  id             bigserial primary key,
+  wa_num         text unique not null,        -- digits only, e.g. 6281246357778
+  name           text,                        -- contact name from the listing
+  email          text,                        -- portal Google email, if signed in
+  portal_sub     text,                        -- portal owner:{sub}, if signed in
+  listing_slugs  text[] default '{}',         -- portal slugs this number is contact for
+  opt_in         boolean default false,       -- consented to WhatsApp reports
+  report_enabled boolean default true,        -- master switch per owner
+  active         boolean default true,
+  notes          text,
+  last_synced_at timestamptz,
+  created_at     timestamptz default now(),
+  updated_at     timestamptz default now()
+);
+create index if not exists idx_owners_wa_num on owners (wa_num);
+
+-- Tag inbound/outbound messages that belong to an owner conversation so the
+-- (future) owner inbox can thread them. Nullable and additive — existing agent
+-- threads are untouched, and messages keep their agent_id as today.
+alter table wa_messages add column if not exists owner_id bigint references owners(id);
+create index if not exists idx_wa_messages_owner on wa_messages (owner_id, timestamp desc);

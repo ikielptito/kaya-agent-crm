@@ -468,6 +468,23 @@ export default async function handler(req, res) {
     );
     const agent = (await agentRes.json())?.[0];
 
+    // Find matching owner (villa owner/manager, by listing WhatsApp contact).
+    // Gated by OWNERS_ENABLED so this stays a no-op until the owners-table
+    // migration has been applied — tagging a column that doesn't exist yet
+    // would break message storage on the live line. When on, we only TAG the
+    // message with owner_id; agent routing and creation are unchanged (the
+    // behavioural owner-mode split rides on the owner inbox, built next).
+    let owner = null;
+    if (process.env.OWNERS_ENABLED === '1') {
+      try {
+        const ownerRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${fromNum}&select=id,name&limit=1`,
+          { headers: sbHeaders }
+        );
+        owner = (await ownerRes.json())?.[0] || null;
+      } catch { owner = null; }
+    }
+
     // Handle reactions inline — they're not standalone messages, they
     // annotate a previous outbound. Patch the original row's reactions
     // field instead of storing a new message.
@@ -511,6 +528,7 @@ export default async function handler(req, res) {
         content: dbContent, wa_message_id: waMessageId, timestamp, source: 'webhook',
         media_type: mediaType || null, media_id: storedMediaId || null,
         reply_to: msg.context?.id || null,   // id of the message this one quotes, if any
+        ...(owner ? { owner_id: owner.id } : {}),  // tag owner threads (no-op unless OWNERS_ENABLED)
       })
     });
 

@@ -33,7 +33,10 @@ export default async function handler(req, res) {
     { name: 'rentals.photos_url',      url: '/rest/v1/rentals?select=photos_url&limit=1' },
     { name: 'rentals.maps_url',        url: '/rest/v1/rentals?select=maps_url&limit=1' },
     { name: 'wa_messages.edited_at',   url: '/rest/v1/wa_messages?select=edited_at&limit=1' },
-    { name: 'wa_messages.deleted_at',  url: '/rest/v1/wa_messages?select=deleted_at&limit=1' }
+    { name: 'wa_messages.deleted_at',  url: '/rest/v1/wa_messages?select=deleted_at&limit=1' },
+    { name: 'owners table',            url: '/rest/v1/owners?select=id&limit=1' },
+    { name: 'owners.listing_slugs',    url: '/rest/v1/owners?select=listing_slugs&limit=1' },
+    { name: 'wa_messages.owner_id',    url: '/rest/v1/wa_messages?select=owner_id&limit=1' }
   ];
 
   const results = [];
