@@ -22,6 +22,7 @@ import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from
 import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
+import crypto from 'node:crypto';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -566,6 +567,19 @@ export default async function handler(req, res) {
       catch (e) { ownerSync = { error: e.message }; }
     }
 
+    // ── WEEKLY OWNER REPORTS (Mondays, WITA) ─────────────────────────
+    // Proactively WhatsApp each opted-in owner their weekly performance via the
+    // approved samba_owner_weekly_report template + a signed report link. Once
+    // per week (guarded by day-of-week AND per-owner last_report_sent_at).
+    let weeklyReports = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      const wita = new Date(now.getTime() + 8 * 3600 * 1000);
+      if (wita.getUTCDay() === 1) {
+        try { weeklyReports = await sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID }); }
+        catch (e) { weeklyReports = { error: e.message }; }
+      }
+    }
+
     // ── PORTAL ANALYTICS PULL (daily) ────────────────────────────────
     // Cache per-agent clicks/enquiries + channel totals from the portal into
     // settings.agent_portal_stats so the funnel dashboard + report can join
@@ -732,6 +746,7 @@ export default async function handler(req, res) {
       availability: availabilityResult,
       rentals_reconcile: rentalsReconcile,
       owner_sync: ownerSync,
+      weekly_reports: weeklyReports,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
@@ -846,6 +861,79 @@ async function sendTemplate(phoneId, token, to, tmpl, params) {
     });
     return r.ok;
   } catch (e) { return false; }
+}
+
+// ── Weekly owner report push (Mondays) ───────────────────────────────
+// Signed report token — MUST match api/portal.js verifyReportToken exactly
+// (same LISTING_SYNC_SECRET, HMAC-SHA256, first 16 hex chars).
+function reportToken(slug) {
+  const sig = crypto.createHmac('sha256', process.env.LISTING_SYNC_SECRET || '').update(String(slug)).digest('hex').slice(0, 16);
+  return `${slug}~${sig}`;
+}
+function fmtWeekRange(week) {
+  if (!week?.from || !week?.to) return 'this week';
+  const f = new Date(week.from + 'T00:00:00Z'), t = new Date(week.to + 'T00:00:00Z');
+  const fs = f.toLocaleDateString('en-GB', { day: 'numeric', timeZone: 'UTC' });
+  const ts = t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return `${fs}–${ts}`;
+}
+// Send the approved template with body params + the dynamic URL-button suffix
+// (the report token, appended to the button's https://sambarentals.com/r/ base).
+async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, enquiries, tok }) {
+  try {
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', to, type: 'template',
+        template: {
+          name: 'samba_owner_weekly_report',
+          language: { code: 'en' },
+          components: [
+            { type: 'body', parameters: [name, week, views, enquiries].map(text => ({ type: 'text', text: String(text) })) },
+            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+          ],
+        },
+      }),
+    });
+    return r.ok;
+  } catch (e) { return false; }
+}
+async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID }) {
+  if (!WA_TOKEN || !WA_PHONE_ID) return { skipped: 'no WhatsApp credentials' };
+  const secret = process.env.LISTING_SYNC_SECRET;
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/owners?opt_in=eq.true&report_enabled=eq.true&select=*`, { headers: sbHeaders });
+  if (!r.ok) return { error: `owners fetch ${r.status}` };
+  const owners = await r.json();
+  const list = Array.isArray(owners) ? owners : [];
+  const sixDaysAgo = Date.now() - 6 * 86400000;
+  let sent = 0, skipped = 0, failed = 0;
+  for (const o of list) {
+    const slug = (o.listing_slugs || [])[0];
+    if (!slug) { skipped++; continue; }
+    if (o.last_report_sent_at && new Date(o.last_report_sent_at).getTime() > sixDaysAgo) { skipped++; continue; }
+    let d;
+    try {
+      const rr = await fetch(`${PORTAL_BASE}/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
+      if (!rr.ok) { failed++; continue; }
+      d = await rr.json();
+    } catch { failed++; continue; }
+    const firstName = String(o.name || 'there').split(/\s+/)[0];
+    const views = String(d.metrics?.views?.now ?? 0);
+    const enquiries = String(d.metrics?.enquiries?.now ?? 0);
+    const tok = reportToken(slug);
+    const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(d.week), views, enquiries, tok });
+    if (!ok) { failed++; continue; }
+    sent++;
+    await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({ owner_id: o.id, wa_num: o.wa_num, direction: 'outbound', content: `[Weekly report sent — ${views} views, ${enquiries} enquiries]`, timestamp: new Date().toISOString(), source: 'cron', status: 'sent' }),
+    }).catch(() => {});
+    await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
+      method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ last_report_sent_at: new Date().toISOString() }),
+    }).catch(() => {});
+  }
+  return { considered: list.length, sent, skipped, failed };
 }
 
 // Merge an engagement into ONE pipeline bucket, preserving the other pipeline's

@@ -1621,7 +1621,8 @@ function renderOwnerBanner(o) {
     if (o.suggested_reply && o.suggested_reply.trim()) {
       html += `<div class="draft-banner">${icm('spark',15)} Maya drafted a reply — review &amp; send</div>`;
     }
-    html += `<div class="win-banner"><span>Villa owner — Maya answers performance questions and takes listings here.</span><button onclick="setOwnerPaused(${o.id}, true)">Pause Maya</button></div>`;
+    const optBtn = `<button onclick="setOwnerOptIn(${o.id}, ${!o.opt_in})">${o.opt_in ? '✓ Weekly report on' : 'Weekly report off'}</button>`;
+    html += `<div class="win-banner"><span>Villa owner — Maya answers questions &amp; takes listings.</span>${optBtn}<button onclick="setOwnerPaused(${o.id}, true)">Pause Maya</button></div>`;
   }
   el.innerHTML = html;
 }
@@ -1631,6 +1632,13 @@ function setOwnerPaused(id, paused) {
   o.paused = paused;
   api('patch_owner', { id, fields: { paused } }).catch(() => toast('Could not update'));
   renderOwnerBanner(o); renderList();
+}
+function setOwnerOptIn(id, on) {
+  const o = state.owners.find(x => x.id === id); if (!o) return;
+  o.opt_in = on;
+  api('patch_owner', { id, fields: { opt_in: on } }).catch(() => toast('Could not update'));
+  renderOwnerBanner(o);
+  toast(on ? 'Weekly report on — Maya sends it Mondays' : 'Weekly report off');
 }
 
 async function sendOwner(o) {

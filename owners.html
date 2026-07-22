@@ -153,6 +153,7 @@ async function openThread(o, keepScroll){
       <div class="av">${esc(initials(o))}</div>
       <div><div class="nm">${esc(o.name||('+'+o.wa_num))}</div><div class="meta">+${esc(o.wa_num)} · ${nlist} listing${nlist===1?'':'s'}${o.email?' · '+esc(o.email):''}</div></div>
       <div class="spacer"></div>
+      <button class="pause-btn" onclick="toggleOptIn()" style="${o.opt_in?'background:var(--pos-soft,#dcede6);border-color:var(--sage);color:var(--sage)':''}">${o.opt_in?'✓ Weekly report':'Weekly report off'}</button>
       <button class="pause-btn ${o.paused?'paused':''}" onclick="togglePause()">${o.paused?'Paused — resume':'Pause Maya'}</button>
     </div>
     <div class="msgs" id="msgs">${renderMsgs()}</div>
@@ -179,6 +180,11 @@ function closeThread(){ state.sel=null; document.getElementById('wrap').classLis
 async function togglePause(){
   const o=state.sel; if(!o) return;
   try{ await api('patch_owner',{id:o.id,fields:{paused:!o.paused}}); o.paused=!o.paused; toast(o.paused?'Maya paused for this owner':'Maya resumed'); await openThread(o); renderList(); }
+  catch{ toast('Could not update'); }
+}
+async function toggleOptIn(){
+  const o=state.sel; if(!o) return;
+  try{ await api('patch_owner',{id:o.id,fields:{opt_in:!o.opt_in}}); o.opt_in=!o.opt_in; toast(o.opt_in?'Weekly report on — Maya sends it Mondays':'Weekly report off'); await openThread(o); }
   catch{ toast('Could not update'); }
 }
 

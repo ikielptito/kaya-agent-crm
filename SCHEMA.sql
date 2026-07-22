@@ -214,6 +214,8 @@ alter table owners add column if not exists suggested_reply text;
 alter table owners add column if not exists unread_count int default 0;
 alter table owners add column if not exists last_inbound_at timestamptz;
 alter table owners add column if not exists paused boolean default false;
+-- Last weekly-report send (dedupe so the Monday cron sends at most once/week).
+alter table owners add column if not exists last_report_sent_at timestamptz;
 
 -- Tag inbound/outbound messages that belong to an owner conversation so the
 -- (future) owner inbox can thread them. Nullable and additive — existing agent
