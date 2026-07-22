@@ -1,0 +1,253 @@
+/* ==========================================================================
+   SAMBA — Brand Design System  (v1.0, 2026)
+   Single source of truth for colour, type, spacing, radius, elevation and
+   the core component primitives shared across every Samba touchpoint.
+
+   Palette, ratios and type scale are taken verbatim from the
+   "Samba Visual Identity Guidelines v1.0".
+
+   Usage:  <link rel="stylesheet" href="/brand.css">
+   Then delete the page's own :root colour/font block — it inherits from here.
+   Component primitives are namespaced `.sb-*` to avoid collisions.
+   ========================================================================== */
+
+/* --- Fonts -----------------------------------------------------------------
+   Satoshi (primary display/UI) via Fontshare; Inter (secondary) via Google.
+   Pages should also add, in <head> for speed:
+     <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+--------------------------------------------------------------------------- */
+@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root{
+  /* ---- Brand palette (raw) ---- */
+  --sb-terracotta:#E2572B;   /* primary accent  */
+  --sb-terracotta-600:#CE4A20;/* hover/pressed  */
+  --sb-terracotta-700:#B23E19;
+  --sb-terracotta-050:#FBEDE7;/* tint / soft bg */
+  --sb-terracotta-100:#F6DCD0;
+
+  --sb-green:#131A17;        /* deep green — primary text & key surfaces */
+  --sb-green-800:#1E2823;
+  --sb-green-700:#2C3A33;
+
+  --sb-sand:#E9E2D6;         /* secondary / supporting surface */
+  --sb-olive:#6F7A5A;        /* secondary accent */
+  --sb-sage:#B9C1A6;         /* secondary accent light */
+
+  /* ---- Neutrals ---- */
+  --sb-charcoal:#1F2422;
+  --sb-gray-700:#4A4F4D;
+  --sb-gray-500:#8A8F8D;
+  --sb-gray-300:#DADADA;
+  --sb-offwhite:#F4F1ED;
+  --sb-white:#FFFFFF;
+
+  /* ---- Semantic / UI ---- */
+  --sb-success:#22C55E;
+  --sb-info:#3B82F6;
+  --sb-warning:#F59E0B;
+  --sb-error:#EF4444;
+  --sb-disabled:#E5E7EB;
+  --sb-success-bg:#E4F2E9; --sb-success-fg:#1B7A44;
+  --sb-error-bg:#FBE4E1;   --sb-error-fg:#B3271A;
+
+  /* ---- Semantic roles (light theme = default) ---- */
+  --sb-bg:var(--sb-offwhite);        /* 60% off-white foundation */
+  --sb-surface:var(--sb-white);
+  --sb-surface-2:#FBF9F5;
+  --sb-surface-sunken:var(--sb-sand);
+  --sb-border:#E7E1D8;
+  --sb-hairline:rgba(19,26,23,.08);
+  --sb-text:var(--sb-green);         /* 25% deep green — primary text */
+  --sb-text-2:#3B443E;
+  --sb-muted:#6E756F;
+  --sb-subtle:#9AA09A;
+  --sb-accent:var(--sb-terracotta);  /* 10% terracotta — sparingly */
+  --sb-accent-contrast:#FFFFFF;
+  --sb-on-green:#F4F1ED;             /* text on deep-green surfaces */
+
+  /* ---- Radii ---- */
+  --sb-r-xs:6px; --sb-r-sm:10px; --sb-r-md:14px; --sb-r-lg:20px;
+  --sb-r-xl:28px; --sb-r-pill:999px;
+
+  /* ---- Elevation (soft, warm-tinted) ---- */
+  --sb-shadow-xs:0 1px 2px rgba(19,26,23,.05);
+  --sb-shadow-sm:0 1px 2px rgba(19,26,23,.05), 0 4px 10px rgba(19,26,23,.05);
+  --sb-shadow-md:0 2px 4px rgba(19,26,23,.06), 0 10px 24px rgba(19,26,23,.07);
+  --sb-shadow-lg:0 8px 24px rgba(19,26,23,.10), 0 24px 60px rgba(19,26,23,.10);
+  --sb-shadow-accent:0 6px 18px rgba(226,87,43,.28);
+
+  /* ---- Spacing scale (4pt) ---- */
+  --sb-1:4px; --sb-2:8px; --sb-3:12px; --sb-4:16px; --sb-5:20px;
+  --sb-6:24px; --sb-8:32px; --sb-10:40px; --sb-12:48px; --sb-16:64px; --sb-20:80px;
+
+  /* ---- Type ---- */
+  --sb-font-display:'Satoshi','Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --sb-font-ui:'Inter','Satoshi',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --sb-font-mono:'JetBrains Mono','SF Mono',ui-monospace,monospace;
+
+  /* type scale (size / line-height / weight) from guidelines */
+  --sb-h1:700 clamp(34px,6vw,48px)/1.08 var(--sb-font-display);
+  --sb-h2:700 clamp(26px,4vw,32px)/1.15 var(--sb-font-display);
+  --sb-h3:500 24px/1.33 var(--sb-font-display);
+  --sb-h4:500 20px/1.4 var(--sb-font-display);
+  --sb-body:400 16px/1.5 var(--sb-font-ui);
+  --sb-small:400 14px/1.43 var(--sb-font-ui);
+  --sb-caption:400 12px/1.33 var(--sb-font-ui);
+
+  /* ---- Motion ---- */
+  --sb-ease:cubic-bezier(.2,.8,.2,1);
+  --sb-ease-out:cubic-bezier(.16,1,.3,1);
+  --sb-t-fast:.12s var(--sb-ease);
+  --sb-t:.22s var(--sb-ease);
+  --sb-t-slow:.4s var(--sb-ease-out);
+
+  /* ---- Legacy aliases: pages consume these once local :root block is removed ---- */
+  --bg:var(--sb-bg); --surface:var(--sb-surface); --surface2:var(--sb-surface-sunken);
+  --border:var(--sb-border); --hairline:1px solid var(--sb-hairline);
+  --text:var(--sb-text); --text-2:var(--sb-text-2); --muted:var(--sb-muted); --subtle:var(--sb-subtle);
+  --primary:var(--sb-terracotta); --primary-2:var(--sb-terracotta-600); --primary-3:var(--sb-terracotta-700);
+  --primary-soft:var(--sb-terracotta-050); --accent:var(--sb-terracotta);
+  --avail:var(--sb-success-bg); --avail-text:var(--sb-success-fg); --avail-border:#BFDBC9;
+  --booked:var(--sb-error-bg); --booked-text:var(--sb-error-fg); --booked-border:#E7C3BC;
+  --today-ring:var(--sb-terracotta); --today-bg:var(--sb-terracotta-050);
+  --shadow:var(--sb-shadow-sm); --shadow-float:var(--sb-shadow-md); --shadow-btn:var(--sb-shadow-xs);
+  --ease:var(--sb-ease); --rep-serif:var(--sb-font-display);
+}
+
+/* ---- Dark theme -------------------------------------------------------- */
+:root[data-theme="dark"]{
+  --sb-bg:#0E1310; --sb-surface:#161D19; --sb-surface-2:#1B231E;
+  --sb-surface-sunken:#10160F; --sb-border:#28322C; --sb-hairline:rgba(255,255,255,.08);
+  --sb-text:#EDEAE2; --sb-text-2:#C5C9C1; --sb-muted:#8F958D; --sb-subtle:#6B716A;
+  --sb-on-green:#EDEAE2;
+  --sb-shadow-sm:0 1px 2px rgba(0,0,0,.4),0 4px 10px rgba(0,0,0,.3);
+  --sb-shadow-md:0 2px 4px rgba(0,0,0,.4),0 10px 24px rgba(0,0,0,.35);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --sb-bg:#0E1310; --sb-surface:#161D19; --sb-surface-2:#1B231E;
+    --sb-surface-sunken:#10160F; --sb-border:#28322C; --sb-hairline:rgba(255,255,255,.08);
+    --sb-text:#EDEAE2; --sb-text-2:#C5C9C1; --sb-muted:#8F958D; --sb-subtle:#6B716A;
+    --sb-on-green:#EDEAE2;
+  }
+}
+
+/* ==========================================================================
+   Base primitives
+   ========================================================================== */
+.sb-scope{ color:var(--sb-text); font:var(--sb-body); background:var(--sb-bg);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+
+.sb-h1{font:var(--sb-h1); letter-spacing:-.02em; color:var(--sb-text); margin:0;}
+.sb-h2{font:var(--sb-h2); letter-spacing:-.02em; color:var(--sb-text); margin:0;}
+.sb-h3{font:var(--sb-h3); letter-spacing:-.01em; color:var(--sb-text); margin:0;}
+.sb-h4{font:var(--sb-h4); color:var(--sb-text); margin:0;}
+.sb-body{font:var(--sb-body); color:var(--sb-text-2);}
+.sb-small{font:var(--sb-small); color:var(--sb-muted);}
+.sb-caption{font:var(--sb-caption); color:var(--sb-subtle); letter-spacing:.02em;}
+.sb-eyebrow{font:600 12px/1 var(--sb-font-ui); letter-spacing:.14em;
+  text-transform:uppercase; color:var(--sb-accent);}
+
+/* ---- Buttons ---- */
+.sb-btn{--_bg:var(--sb-terracotta); --_fg:#fff;
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  font:600 15px/1 var(--sb-font-ui); letter-spacing:.005em;
+  padding:13px 20px; border-radius:var(--sb-r-md); border:1px solid transparent;
+  background:var(--_bg); color:var(--_fg); cursor:pointer;
+  transition:transform var(--sb-t-fast), background var(--sb-t), box-shadow var(--sb-t);
+  box-shadow:var(--sb-shadow-accent); user-select:none; text-decoration:none;}
+.sb-btn:hover{background:var(--sb-terracotta-600); transform:translateY(-1px);}
+.sb-btn:active{background:var(--sb-terracotta-700); transform:translateY(0);}
+.sb-btn:disabled,.sb-btn[aria-disabled="true"]{background:var(--sb-disabled);
+  color:var(--sb-gray-500); box-shadow:none; cursor:not-allowed; transform:none;}
+.sb-btn--secondary{--_bg:var(--sb-sand); --_fg:var(--sb-green); box-shadow:none;
+  border-color:var(--sb-border);}
+.sb-btn--secondary:hover{--_bg:#DED6C7; background:#DED6C7;}
+.sb-btn--ghost{--_bg:transparent; --_fg:var(--sb-text); box-shadow:none;
+  border-color:var(--sb-border);}
+.sb-btn--ghost:hover{--_bg:var(--sb-surface-2); background:var(--sb-surface-2);}
+.sb-btn--dark{--_bg:var(--sb-green); --_fg:var(--sb-on-green); box-shadow:var(--sb-shadow-sm);}
+.sb-btn--dark:hover{--_bg:var(--sb-green-700); background:var(--sb-green-700);}
+.sb-btn--sm{padding:9px 14px; font-size:13px; border-radius:var(--sb-r-sm);}
+.sb-btn--lg{padding:16px 26px; font-size:16px; border-radius:var(--sb-r-lg);}
+.sb-btn--block{width:100%;}
+
+/* ---- Cards ---- */
+.sb-card{background:var(--sb-surface); border:1px solid var(--sb-border);
+  border-radius:var(--sb-r-lg); box-shadow:var(--sb-shadow-sm); overflow:hidden;
+  transition:box-shadow var(--sb-t), transform var(--sb-t), border-color var(--sb-t);}
+.sb-card--interactive{cursor:pointer;}
+.sb-card--interactive:hover{box-shadow:var(--sb-shadow-md); transform:translateY(-2px);
+  border-color:#DCD4C7;}
+
+/* ---- Pills / badges ---- */
+.sb-pill{display:inline-flex; align-items:center; gap:6px;
+  font:600 12px/1 var(--sb-font-ui); letter-spacing:.01em;
+  padding:7px 11px; border-radius:var(--sb-r-pill); background:var(--sb-surface);
+  color:var(--sb-text); box-shadow:var(--sb-shadow-xs); border:1px solid var(--sb-hairline);}
+.sb-pill--avail{background:var(--sb-success-bg); color:var(--sb-success-fg); border:none;}
+.sb-pill--busy{background:var(--sb-error-bg); color:var(--sb-error-fg); border:none;}
+.sb-pill--accent{background:var(--sb-terracotta-050); color:var(--sb-terracotta-700); border:none;}
+.sb-pill--olive{background:#E7EADE; color:#49543A; border:none;}
+.sb-pill--dot::before{content:""; width:6px; height:6px; border-radius:50%;
+  background:currentColor; display:inline-block;}
+
+/* ---- Inputs ---- */
+.sb-input,.sb-select,.sb-textarea{
+  font:var(--sb-body); color:var(--sb-text); background:var(--sb-surface);
+  border:1px solid var(--sb-border); border-radius:var(--sb-r-md);
+  padding:12px 14px; width:100%; transition:border-color var(--sb-t), box-shadow var(--sb-t);}
+.sb-input:focus,.sb-select:focus,.sb-textarea:focus{outline:none;
+  border-color:var(--sb-terracotta); box-shadow:0 0 0 3px var(--sb-terracotta-050);}
+.sb-input::placeholder{color:var(--sb-subtle);}
+.sb-label{font:600 13px/1.4 var(--sb-font-ui); color:var(--sb-text-2);
+  display:block; margin-bottom:6px;}
+
+/* ---- Tabs / segmented nav (e.g. All Villas · Canggu · Ubud) ---- */
+.sb-tabs{display:flex; gap:4px; align-items:center; overflow-x:auto; scrollbar-width:none;}
+.sb-tabs::-webkit-scrollbar{display:none;}
+.sb-tab{font:500 15px/1 var(--sb-font-ui); color:var(--sb-muted);
+  padding:10px 4px; background:none; border:none; cursor:pointer; position:relative;
+  white-space:nowrap; transition:color var(--sb-t);}
+.sb-tab:hover{color:var(--sb-text);}
+.sb-tab[aria-selected="true"],.sb-tab.is-active{color:var(--sb-terracotta); font-weight:600;}
+.sb-tab[aria-selected="true"]::after,.sb-tab.is-active::after{content:"";
+  position:absolute; left:2px; right:2px; bottom:0; height:2px; border-radius:2px;
+  background:var(--sb-terracotta);}
+
+/* ---- Feature icon tile (rounded tinted square) ---- */
+.sb-feature-ico{width:56px; height:56px; border-radius:var(--sb-r-md);
+  display:grid; place-items:center; background:var(--sb-terracotta-050);
+  color:var(--sb-terracotta);}
+.sb-feature-ico--olive{background:#E7EADE; color:var(--sb-olive);}
+.sb-feature-ico--green{background:#DDE7E0; color:var(--sb-green);}
+
+/* ---- Top navigation shell ---- */
+.sb-nav{display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:14px 20px; background:color-mix(in srgb,var(--sb-bg) 82%, transparent);
+  backdrop-filter:saturate(1.4) blur(12px); -webkit-backdrop-filter:saturate(1.4) blur(12px);
+  border-bottom:1px solid var(--sb-hairline); position:sticky; top:0; z-index:50;}
+.sb-brand{display:inline-flex; align-items:center; gap:10px; text-decoration:none;
+  color:var(--sb-text);}
+.sb-brand svg,.sb-brand img{height:30px; width:auto; display:block;}
+.sb-brand-word{font:900 22px/1 var(--sb-font-display); letter-spacing:-.01em;
+  color:var(--sb-text);}
+
+/* ---- Empty state ---- */
+.sb-empty{display:grid; place-items:center; text-align:center; gap:14px;
+  padding:56px 24px; color:var(--sb-muted);}
+.sb-empty .sb-empty__ico{width:72px; height:72px; border-radius:var(--sb-r-lg);
+  display:grid; place-items:center; background:var(--sb-surface-sunken);
+  color:var(--sb-olive);}
+.sb-empty h3{font:var(--sb-h4); color:var(--sb-text);}
+.sb-empty p{font:var(--sb-small); max-width:34ch; margin:0 auto;}
+
+/* ---- Section container ---- */
+.sb-container{width:100%; max-width:1120px; margin-inline:auto; padding-inline:20px;}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition-duration:.001ms !important; animation-duration:.001ms !important;}
+}

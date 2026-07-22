@@ -4,9 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
 <title>Maya</title>
+<link rel="stylesheet" href="/brand.css">
 
 <!-- PWA / iOS homescreen -->
-<meta name="theme-color" content="#FAF8F5">
+<meta name="theme-color" content="#F4F1ED">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -18,7 +19,7 @@
 <!-- Samba brand typeface -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Satoshi_off:wght@400;500;600;700&display=swap" rel="stylesheet">
 
 <style>
   /* Samba warm palette — WhatsApp ergonomics, Samba brand. Variable names
@@ -31,9 +32,9 @@
     --wa-accent: #c8402a;       /* send button / active */
     --wa-green2: #2a6a3a;       /* Samba forest green — success/confirm */
     --wa-tick: #53bdeb;         /* read ticks stay blue — universal convention */
-    --wa-bg: #FAF8F5;           /* chat wallpaper (Samba cream) */
+    --wa-bg: #F4F1ED;           /* chat wallpaper (Samba cream) */
     --wa-panel: #ffffff;
-    --wa-panel-2: #FAF8F5;      /* list header / composer bar */
+    --wa-panel-2: #F4F1ED;      /* list header / composer bar */
     --wa-out: #F7E7DE;          /* outgoing bubble (warm peach) */
     --wa-in: #ffffff;           /* incoming bubble */
     --wa-ink: #1C1917;
@@ -45,7 +46,7 @@
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body {
     margin: 0; padding: 0; height: 100%;
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
     color: var(--wa-ink);
     background: var(--wa-panel-2);
     overscroll-behavior: none;
@@ -556,7 +557,7 @@
   .an-frow { display: grid; grid-template-columns: 92px 1fr 92px; align-items: center; gap: 10px; }
   .an-fname { font-size: 13px; color: var(--wa-ink-2); }
   .an-ftrack { height: 30px; border-radius: 7px; background: var(--wa-panel-2); overflow: hidden; }
-  .an-ffill { height: 100%; border-radius: 7px; background: linear-gradient(90deg, #C46E4B99, #C46E4B); min-width: 3px; transition: width .5s ease; }
+  .an-ffill { height: 100%; border-radius: 7px; background: linear-gradient(90deg, #E2572B99, #E2572B); min-width: 3px; transition: width .5s ease; }
   .an-fval { font-size: 12.5px; font-weight: 700; color: var(--wa-ink); font-variant-numeric: tabular-nums; text-align: right; }
   .an-fval small { color: var(--wa-ink-2); font-weight: 500; }
 
@@ -616,7 +617,7 @@
   /* ── Maya self-review overlay ──────────────────────────── */
   .review-btn { position: relative; }
   .review-dot { position: absolute; top: 3px; right: 3px; width: 9px; height: 9px; border-radius: 50%;
-    background: #C46E4B; border: 1.5px solid var(--wa-panel-2); }
+    background: #E2572B; border: 1.5px solid var(--wa-panel-2); }
   .rv-scorecard { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 14px;
     padding: 15px 16px; box-shadow: var(--wa-shadow); display: flex; align-items: center; gap: 14px; }
   .rv-grade { font-size: 2.1rem; font-weight: 800; width: 58px; height: 58px; flex: none; border-radius: 14px;
@@ -2948,7 +2949,7 @@ function renderAnalytics(d) {
     ['Messaged', f.messaged, '#3d8a52'],
     ['Read', f.read, '#2a6a3a'],
     ['Replied', f.replied, '#1e6b46'],
-    ['Clicked', f.clicked, '#C46E4B'],
+    ['Clicked', f.clicked, '#E2572B'],
     ['Enquired', f.enquired, '#a3502c'],
   ];
   const funnelHtml = stages.map(([name, n, col]) => `
@@ -2968,7 +2969,7 @@ function renderAnalytics(d) {
     </div>`).join('');
 
   // Tiers
-  const tierColors = { champion: '#C46E4B', active: '#3f8f63', warm: '#c9a227', dormant: '#9a9a9a', new: '#4d7fd6', unset: '#bbb' };
+  const tierColors = { champion: '#E2572B', active: '#3f8f63', warm: '#c9a227', dormant: '#9a9a9a', new: '#4d7fd6', unset: '#bbb' };
   const tierMax = Math.max(...Object.values(d.tiers || {}), 1);
   const tierHtml = Object.entries(d.tiers || {}).sort((a, b) => b[1] - a[1]).map(([t, n]) => `
     <div class="an-bar">

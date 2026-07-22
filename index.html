@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Agent CRM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://api.fontshare.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/brand.css">
+<link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<meta name="theme-color" content="#F4F1ED">
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,7 +48,7 @@
   --radius-sm: 7px;
 }
 
-body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--ink); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(--ink); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 
 /* HEADER */
 .header { background: white; border-bottom: 1px solid var(--sand3); padding: 0 24px; display: flex; align-items: center; gap: 16px; height: 56px; position: sticky; top: 0; z-index: 100; }
@@ -55,7 +60,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 
 /* PIPELINE TOGGLE */
 .pipeline-toggle { display: flex; background: var(--sand); border-radius: 8px; padding: 3px; gap: 2px; flex-shrink: 0; }
-.pipeline-btn { padding: 5px 14px; border-radius: 6px; border: none; font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--ink3); background: transparent; }
+.pipeline-btn { padding: 5px 14px; border-radius: 6px; border: none; font-family: 'Satoshi', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.15s; color: var(--ink3); background: transparent; }
 .pipeline-btn.active-all { background: var(--ink); color: white; }
 .pipeline-btn.active-kaya { background: var(--kaya); color: white; }
 .pipeline-btn.active-samba { background: var(--samba); color: white; }
@@ -64,16 +69,16 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .header-controls { display: flex; align-items: center; gap: 8px; flex: 1; }
 .search-wrap { flex: 1; max-width: 260px; position: relative; }
 .search-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--ink4); font-size: 13px; pointer-events: none; }
-.search { width: 100%; height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 7px; padding: 0 10px 0 30px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s, background 0.15s; }
+.search { width: 100%; height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 7px; padding: 0 10px 0 30px; font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s, background 0.15s; }
 .search:focus { background: white; border-color: var(--accent-mid); }
 .search::placeholder { color: var(--ink4); }
 
-.btn-discover { height: 34px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; transition: all 0.12s; flex-shrink: 0; }
+.btn-discover { height: 34px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; font-family: 'Satoshi', sans-serif; font-size: 12px; font-weight: 500; color: var(--accent); cursor: pointer; transition: all 0.12s; flex-shrink: 0; }
 .btn-discover:hover { background: var(--accent); color: white; }
 .btn-discover.samba-mode { background: var(--samba-light); border-color: var(--samba-mid); color: var(--samba); }
 .btn-discover.samba-mode:hover { background: var(--samba); color: white; }
 
-.btn-add { height: 34px; padding: 0 14px; background: var(--accent); border: none; border-radius: 7px; font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
+.btn-add { height: 34px; padding: 0 14px; background: var(--accent); border: none; border-radius: 7px; font-family: 'Satoshi', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
 .btn-add:hover { opacity: 0.88; }
 .btn-add.samba-mode { background: var(--samba); }
 
@@ -87,14 +92,14 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 /* QUICK ADD BAR */
 .quick-add-bar { background: white; border-bottom: 1px solid var(--sand3); padding: 8px 24px; display: flex; align-items: center; gap: 8px; }
 .quick-add-label { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink4); white-space: nowrap; flex-shrink: 0; }
-.quick-add-input { height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 0 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s; }
+.quick-add-input { height: 34px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 0 10px; font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.15s; }
 .quick-add-input:focus { background: white; border-color: var(--accent-mid); }
 .quick-add-input::placeholder { color: var(--ink4); }
 .quick-add-input.wa { width: 175px; }
 .quick-add-input.name { width: 150px; }
 .quick-add-input.agency { width: 160px; }
 .quick-add-sep { font-size: 11px; color: var(--ink4); flex-shrink: 0; }
-.quick-add-btn { height: 34px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
+.quick-add-btn { height: 34px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; flex-shrink: 0; }
 .quick-add-btn:hover { opacity: 0.88; }
 .quick-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .quick-add-feedback { font-size: 12px; color: var(--accent-mid); flex-shrink: 0; opacity: 0; transition: opacity 0.2s; }
@@ -180,10 +185,10 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .card-summary-body { padding: 0 14px 10px; display: none; }
 .card-summary-body.open { display: block; }
 .card-summary-text { font-size: 11px; color: var(--ink2); line-height: 1.6; margin-bottom: 8px; }
-.card-chat-log { max-height: 200px; overflow-y: auto; background: var(--sand); border-radius: 6px; padding: 8px 10px; font-size: 10px; color: var(--ink3); line-height: 1.6; white-space: pre-wrap; font-family: Geist, monospace; margin-top: 6px; display: none; }
+.card-chat-log { max-height: 200px; overflow-y: auto; background: var(--sand); border-radius: 6px; padding: 8px 10px; font-size: 10px; color: var(--ink3); line-height: 1.6; white-space: pre-wrap; font-family: Satoshi, monospace; margin-top: 6px; display: none; }
 .card-chat-log.open { display: block; }
 .card-summary-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-.card-sum-btn { font-size: 10px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--sand3); background: white; color: var(--accent); cursor: pointer; font-family: Geist, sans-serif; font-weight: 500; }
+.card-sum-btn { font-size: 10px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--sand3); background: white; color: var(--accent); cursor: pointer; font-family: Satoshi, sans-serif; font-weight: 500; }
 .card-sum-btn:hover { background: var(--kaya-light); }
 
 /* TAGS */
@@ -234,7 +239,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px; }
 .form-full { grid-column: 1 / -1; }
 .field-label { font-size: 11px; color: var(--ink3); margin-bottom: 4px; font-weight: 500; }
-.field-input, .field-select, .field-textarea { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 7px 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.12s; }
+.field-input, .field-select, .field-textarea { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 7px 10px; font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink); outline: none; transition: border-color 0.12s; }
 .field-input:focus, .field-select:focus, .field-textarea:focus { background: white; border-color: var(--accent-mid); }
 .field-select { appearance: none; cursor: pointer; }
 .field-textarea { resize: vertical; min-height: 60px; }
@@ -246,7 +251,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .proj-table-row:hover { background: var(--sand); }
 .proj-table-name { font-size: 12px; font-weight: 500; color: var(--ink2); display: flex; align-items: center; gap: 5px; }
 .personal-badge { font-size: 9px; background: var(--sand2); color: var(--ink4); padding: 1px 5px; border-radius: 4px; }
-.proj-table-status select { background: none; border: none; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink2); cursor: pointer; outline: none; width: 100%; }
+.proj-table-status select { background: none; border: none; font-family: 'Satoshi', sans-serif; font-size: 12px; color: var(--ink2); cursor: pointer; outline: none; width: 100%; }
 .proj-table-link { display: flex; align-items: center; justify-content: center; color: var(--ink4); font-size: 13px; cursor: pointer; border-radius: 4px; transition: color 0.12s; }
 .proj-table-link:hover { color: var(--kaya); }
 .url-row { display: none; padding: 0 12px 9px; border-bottom: 1px solid var(--sand2); background: var(--sand); }
@@ -254,19 +259,19 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .url-row:last-child { border-bottom: none; }
 
 /* Samba status */
-.samba-status-select { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 8px 10px; font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink); outline: none; appearance: none; cursor: pointer; margin-bottom: 10px; }
+.samba-status-select { width: 100%; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 8px 10px; font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink); outline: none; appearance: none; cursor: pointer; margin-bottom: 10px; }
 .samba-status-select:focus { background: white; border-color: var(--samba-mid); }
 
 /* WA section */
 .wa-section { background: var(--sand); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 14px; }
-.wa-msg-preview { font-size: 12px; color: var(--ink2); line-height: 1.65; white-space: pre-wrap; font-family: 'Geist', sans-serif; }
-.wa-open-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 7px 13px; background: var(--wa); color: white; border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: opacity 0.12s; }
+.wa-msg-preview { font-size: 12px; color: var(--ink2); line-height: 1.65; white-space: pre-wrap; font-family: 'Satoshi', sans-serif; }
+.wa-open-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 10px; padding: 7px 13px; background: var(--wa); color: white; border: none; border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: opacity 0.12s; }
 .wa-open-btn:hover { opacity: 0.88; }
 .wa-open-btn.disabled { background: var(--sand3); color: var(--ink3); pointer-events: none; }
 
-.btn-secondary { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; transition: border-color 0.12s; }
+.btn-secondary { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; transition: border-color 0.12s; }
 .btn-secondary:hover { border-color: var(--ink3); }
-.btn-primary { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
+.btn-primary { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
 .btn-primary:hover { opacity: 0.88; }
 .btn-primary.samba { background: var(--samba); }
 
@@ -299,7 +304,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .group-select-all { font-size: 11px; color: var(--accent-mid); cursor: pointer; text-decoration: underline; margin-bottom: 8px; display: inline-block; }
 
 .days-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; font-size: 12px; color: var(--ink2); }
-.days-select { height: 30px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 5px; padding: 0 8px; font-family: Geist,sans-serif; font-size: 12px; color: var(--ink); outline: none; appearance: none; cursor: pointer; }
+.days-select { height: 30px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 5px; padding: 0 8px; font-family: Satoshi,sans-serif; font-size: 12px; color: var(--ink); outline: none; appearance: none; cursor: pointer; }
 
 /* DISCOVER PANEL */
 .discover-overlay { display: none; position: fixed; inset: 0; background: rgba(26,24,20,0.45); z-index: 300; align-items: flex-start; justify-content: flex-end; backdrop-filter: blur(2px); }
@@ -318,7 +323,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .area-card-title { font-size: 13px; font-weight: 500; color: var(--ink); }
 .area-card-sub { font-size: 11px; color: var(--ink3); margin-top: 2px; }
 
-.discover-run-btn { width: 100%; height: 38px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; margin-bottom: 16px; }
+.discover-run-btn { width: 100%; height: 38px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; margin-bottom: 16px; }
 .discover-run-btn:hover { opacity: 0.88; }
 .discover-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .discover-run-btn.samba { background: var(--samba); }
@@ -344,11 +349,11 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .result-dup-badge { font-size: 10px; background: var(--sand2); color: var(--ink3); padding: 2px 7px; border-radius: 10px; flex-shrink: 0; }
 
 .discover-footer { padding: 12px 22px; border-top: 1px solid var(--sand2); display: flex; gap: 8px; align-items: center; position: sticky; bottom: 0; background: white; }
-.discover-import-btn { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
+.discover-import-btn { height: 34px; padding: 0 18px; background: var(--accent); border: none; border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; }
 .discover-import-btn:hover { opacity: 0.88; }
 .discover-import-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .discover-import-btn.samba { background: var(--samba); }
-.discover-cancel-btn { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Geist', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; }
+.discover-cancel-btn { height: 34px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: 'Satoshi', sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; }
 .discover-cancel-btn:hover { border-color: var(--ink3); }
 .discover-select-all { font-size: 12px; color: var(--accent-mid); cursor: pointer; text-decoration: underline; margin-left: auto; }
 
@@ -363,29 +368,29 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .msg-modal-body { padding: 16px 20px; }
 
 .msg-tabs { display: flex; gap: 4px; margin-bottom: 14px; flex-wrap: wrap; }
-.msg-tab { padding: 5px 11px; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: pointer; border: 1.5px solid var(--sand3); color: var(--ink3); background: white; transition: all 0.12s; font-family: Geist,sans-serif; }
+.msg-tab { padding: 5px 11px; border-radius: 20px; font-size: 11px; font-weight: 500; cursor: pointer; border: 1.5px solid var(--sand3); color: var(--ink3); background: white; transition: all 0.12s; font-family: Satoshi,sans-serif; }
 .msg-tab:hover { border-color: var(--accent-mid); color: var(--ink); }
 .msg-tab.active { background: var(--accent); border-color: var(--accent); color: white; }
 .msg-tab.active.samba { background: var(--samba); border-color: var(--samba); }
 
-.msg-textarea { width: 100%; min-height: 160px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 12px 14px; font-family: Geist,sans-serif; font-size: 13px; color: var(--ink); line-height: 1.6; resize: vertical; outline: none; transition: border-color 0.12s; }
+.msg-textarea { width: 100%; min-height: 160px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 12px 14px; font-family: Satoshi,sans-serif; font-size: 13px; color: var(--ink); line-height: 1.6; resize: vertical; outline: none; transition: border-color 0.12s; }
 .msg-textarea:focus { background: white; border-color: var(--accent-mid); }
 
 .msg-modal-footer { padding: 12px 20px; border-top: 1px solid var(--sand2); display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
-.msg-send-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 18px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; text-decoration: none; transition: opacity 0.12s; }
+.msg-send-btn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 18px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: Satoshi,sans-serif; font-size: 13px; font-weight: 500; color: white; cursor: pointer; text-decoration: none; transition: opacity 0.12s; }
 .msg-send-btn:hover { opacity: 0.88; }
 .msg-send-btn.disabled { background: var(--sand3); color: var(--ink3); pointer-events: none; }
-.msg-cancel-btn { height: 36px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; }
+.msg-cancel-btn { height: 36px; padding: 0 14px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: Satoshi,sans-serif; font-size: 13px; color: var(--ink2); cursor: pointer; }
 .msg-cancel-btn:hover { border-color: var(--ink3); }
 
 /* WA contact button on card */
-.wa-contact-btn { display: inline-flex; align-items: center; gap: 3px; padding: 4px 8px; background: var(--wa-light); color: var(--wa); border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; border: none; font-family: Geist,sans-serif; transition: background 0.12s; flex-shrink: 0; }
+.wa-contact-btn { display: inline-flex; align-items: center; gap: 3px; padding: 4px 8px; background: var(--wa-light); color: var(--wa); border-radius: 6px; font-size: 11px; font-weight: 500; cursor: pointer; border: none; font-family: Satoshi,sans-serif; transition: background 0.12s; flex-shrink: 0; }
 .wa-contact-btn:hover { background: #d4eddf; }
 .wa-contact-btn svg { width: 11px; height: 11px; }
 
 
 /* AI GENERATE BUTTON */
-.ai-gen-btn { height: 34px; padding: 0 12px; background: linear-gradient(135deg, #2d5a3d, #4a8a5e); border: none; border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; display: flex; align-items: center; gap: 5px; }
+.ai-gen-btn { height: 34px; padding: 0 12px; background: linear-gradient(135deg, #2d5a3d, #4a8a5e); border: none; border-radius: var(--radius-sm); font-family: Satoshi,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; transition: opacity 0.12s; display: flex; align-items: center; gap: 5px; }
 .ai-gen-btn:hover { opacity: 0.88; }
 .ai-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ai-gen-btn .ai-icon { font-size: 13px; }
@@ -414,20 +419,20 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .campaign-agent-name { font-size: 13px; font-weight: 600; color: var(--ink); }
 .campaign-agent-meta { font-size: 11px; color: var(--ink3); margin-top: 1px; }
 .campaign-agent-body { padding: 14px 16px; }
-.campaign-msg-area { width: 100%; min-height: 130px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 10px 12px; font-family: Geist,sans-serif; font-size: 12px; color: var(--ink); line-height: 1.65; resize: vertical; outline: none; transition: border-color 0.12s; margin-bottom: 10px; }
+.campaign-msg-area { width: 100%; min-height: 130px; background: var(--sand); border: 1px solid var(--sand3); border-radius: var(--radius-sm); padding: 10px 12px; font-family: Satoshi,sans-serif; font-size: 12px; color: var(--ink); line-height: 1.65; resize: vertical; outline: none; transition: border-color 0.12s; margin-bottom: 10px; }
 .campaign-msg-area:focus { background: white; border-color: var(--accent-mid); }
 .campaign-msg-area.samba:focus { border-color: var(--samba-mid); }
 .campaign-actions { display: flex; align-items: center; gap: 8px; }
-.campaign-skip-btn { height: 32px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; color: var(--ink3); cursor: pointer; }
+.campaign-skip-btn { height: 32px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: var(--radius-sm); font-family: Satoshi,sans-serif; font-size: 12px; color: var(--ink3); cursor: pointer; }
 .campaign-skip-btn:hover { border-color: var(--ink3); color: var(--ink2); }
-.campaign-send-btn { height: 32px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.12s; }
+.campaign-send-btn { height: 32px; padding: 0 14px; background: var(--wa); border: none; border-radius: var(--radius-sm); font-family: Satoshi,sans-serif; font-size: 12px; font-weight: 500; color: white; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; transition: opacity 0.12s; }
 .campaign-send-btn:hover { opacity: 0.88; }
 .campaign-send-btn.disabled { background: var(--sand3); color: var(--ink3); pointer-events: none; }
 .campaign-done-card { text-align: center; padding: 60px 20px; color: var(--ink3); }
 .campaign-done-card h3 { font-size: 16px; color: var(--ink); margin-bottom: 8px; }
 
 /* Campaign button in header */
-.btn-campaign { height: 34px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: 7px; font-family: Geist,sans-serif; font-size: 12px; font-weight: 500; color: var(--ink2); cursor: pointer; transition: all 0.12s; flex-shrink: 0; display: flex; align-items: center; gap: 5px; }
+.btn-campaign { height: 34px; padding: 0 12px; background: white; border: 1px solid var(--sand3); border-radius: 7px; font-family: Satoshi,sans-serif; font-size: 12px; font-weight: 500; color: var(--ink2); cursor: pointer; transition: all 0.12s; flex-shrink: 0; display: flex; align-items: center; gap: 5px; }
 .btn-campaign:hover { border-color: var(--accent-mid); color: var(--accent); }
 
 /* INBOX */
@@ -453,7 +458,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .conv-status-replied { color: #1c7c44; background: #d6f0de; }
 .conv-status-paused { color: var(--ink3); background: var(--sand); }
 .inbox-search-row { display: flex; align-items: center; gap: 4px; padding: 8px 10px 6px; border-bottom: 1px solid var(--sand2); background: white; position: sticky; top: 0; z-index: 2; }
-.inbox-search-input { flex: 1; height: 30px; padding: 0 10px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 6px; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink); outline: none; }
+.inbox-search-input { flex: 1; height: 30px; padding: 0 10px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 6px; font-family: 'Satoshi', sans-serif; font-size: 12px; color: var(--ink); outline: none; }
 .inbox-search-input:focus { background: white; border-color: var(--accent-mid); }
 .inbox-search-clear { height: 30px; padding: 0 8px; background: none; border: none; color: var(--ink3); cursor: pointer; font-size: 14px; line-height: 1; border-radius: 6px; }
 .inbox-search-clear:hover { color: var(--ink); background: var(--sand); }
@@ -484,20 +489,20 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .bubble.out.bubble-deleted { background: var(--sand); color: var(--ink3); }
 .inbox-reply { background: white; border-top: 1px solid var(--sand3); padding: 12px 16px; flex-shrink: 0; }
 .inbox-reply-row { display: flex; gap: 8px; align-items: flex-end; }
-.inbox-reply textarea { flex: 1; min-height: 38px; max-height: 120px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 8px; padding: 9px 12px; font-family: 'Geist',sans-serif; font-size: 13px; color: var(--ink); resize: vertical; outline: none; }
+.inbox-reply textarea { flex: 1; min-height: 38px; max-height: 120px; background: var(--sand); border: 1px solid var(--sand3); border-radius: 8px; padding: 9px 12px; font-family: 'Satoshi',sans-serif; font-size: 13px; color: var(--ink); resize: vertical; outline: none; }
 .inbox-reply textarea:focus { background: white; border-color: var(--accent-mid); }
-.inbox-suggest-btn { height: 38px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 8px; color: var(--accent); font-family: 'Geist',sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+.inbox-suggest-btn { height: 38px; padding: 0 12px; background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 8px; color: var(--accent); font-family: 'Satoshi',sans-serif; font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
 .inbox-icon-btn { height: 38px; padding: 0 10px; border: 1px solid var(--sand3); border-radius: 8px; background: white; color: var(--ink2); cursor: pointer; flex-shrink: 0; font-size: 16px; }
 .inbox-icon-btn:hover { background: var(--sand); }
 .inbox-popover { position: absolute; bottom: 56px; left: 16px; right: 16px; max-width: 360px; background: white; border: 1px solid var(--sand3); border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.12); padding: 10px; z-index: 50; max-height: 280px; overflow-y: auto; }
 .emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; }
 .emoji-grid button { width: 30px; height: 30px; border: none; background: none; font-size: 20px; cursor: pointer; border-radius: 5px; padding: 0; }
 .emoji-grid button:hover { background: var(--sand); }
-.quick-reply-item { display: block; width: 100%; text-align: left; padding: 8px 10px; background: none; border: none; border-radius: 6px; cursor: pointer; font-family: 'Geist', sans-serif; font-size: 12px; color: var(--ink); }
+.quick-reply-item { display: block; width: 100%; text-align: left; padding: 8px 10px; background: none; border: none; border-radius: 6px; cursor: pointer; font-family: 'Satoshi', sans-serif; font-size: 12px; color: var(--ink); }
 .quick-reply-item:hover, .quick-reply-item.focused { background: var(--accent-light); }
 .quick-reply-item .qr-key { font-size: 11px; color: var(--accent); font-weight: 600; margin-right: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
 .quick-reply-item .qr-preview { color: var(--ink3); display: block; margin-top: 2px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.inbox-send-btn { height: 38px; padding: 0 16px; background: var(--wa); border: none; border-radius: 8px; color: white; font-family: 'Geist',sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
+.inbox-send-btn { height: 38px; padding: 0 16px; background: var(--wa); border: none; border-radius: 8px; color: white; font-family: 'Satoshi',sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; flex-shrink: 0; }
 .inbox-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .inbox-draft-banner { background: var(--accent-light); border: 1px solid var(--accent-mid); border-radius: 7px; padding: 8px 11px; margin-bottom: 8px; font-size: 11px; color: var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .btn-campaign.samba-mode:hover { border-color: var(--samba-mid); color: var(--samba); }
@@ -515,7 +520,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 .more-btn:hover { border-color: var(--accent-mid); color: var(--accent); }
 .more-menu { display: none; position: absolute; right: 0; top: 38px; background: white; border: 1px solid var(--sand3); border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 180px; z-index: 110; overflow: hidden; }
 .more-menu.open { display: block; }
-.more-menu-item { padding: 9px 14px; font-size: 12px; color: var(--ink2); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.1s; font-family: Geist, sans-serif; border: none; background: none; width: 100%; text-align: left; }
+.more-menu-item { padding: 9px 14px; font-size: 12px; color: var(--ink2); cursor: pointer; display: flex; align-items: center; gap: 8px; transition: background 0.1s; font-family: Satoshi, sans-serif; border: none; background: none; width: 100%; text-align: left; }
 .more-menu-item:hover { background: var(--sand); }
 .more-menu-item + .more-menu-item { border-top: 1px solid var(--sand2); }
 
@@ -717,7 +722,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 
 <div class="results-bar">
   <span class="results-count" id="resultsCount"></span>
-  <select id="sortSelect" onchange="render()" style="height:28px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
+  <select id="sortSelect" onchange="render()" style="height:28px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Satoshi,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
     <option value="default">Sort: Default</option>
     <option value="activity">Sort: Most active</option>
     <option value="name">Sort: Name A-Z</option>
@@ -732,7 +737,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div id="overdueBanner" class="overdue-banner" style="display:none;margin:0 0 8px">
   <span class="overdue-banner-text"></span>
   <span class="overdue-banner-agents"></span>
-  <button onclick="activeStatusFilter='';activeTagFilter='';activeNoNumberFilter=false;render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap">View all</button>
+  <button onclick="activeStatusFilter='';activeTagFilter='';activeNoNumberFilter=false;render()" style="font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid #f09595;background:white;color:#791f1f;cursor:pointer;font-family:Satoshi,sans-serif;white-space:nowrap">View all</button>
 </div>
 <div class="card-grid" id="cardGrid"></div>
 </div><!-- /pipelineView -->
@@ -743,14 +748,14 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
     <div style="display:flex;align-items:center;gap:10px">
       <span style="font-size:13px;font-weight:600;color:var(--ink)">Inbox</span>
       <div style="display:flex;gap:0;border:1px solid var(--sand3);border-radius:6px;overflow:hidden">
-        <button id="inboxSegAgents" onclick="setInboxSeg('agents')" style="font-size:11px;padding:4px 12px;border:none;background:var(--ink);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:600">Agents</button>
-        <button id="inboxSegOwners" onclick="setInboxSeg('owners')" style="font-size:11px;padding:4px 12px;border:none;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif;font-weight:600">Owners</button>
+        <button id="inboxSegAgents" onclick="setInboxSeg('agents')" style="font-size:11px;padding:4px 12px;border:none;background:var(--ink);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:600">Agents</button>
+        <button id="inboxSegOwners" onclick="setInboxSeg('owners')" style="font-size:11px;padding:4px 12px;border:none;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif;font-weight:600">Owners</button>
       </div>
-      <button onclick="refreshInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
+      <button onclick="refreshInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">↻ Refresh</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-size:11px;font-weight:600;letter-spacing:0.04em;color:var(--ink3);text-transform:uppercase">Claude automation</span>
-      <select id="automationMode" onchange="setAutomationMode(this.value)" style="height:30px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
+      <select id="automationMode" onchange="setAutomationMode(this.value)" style="height:30px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 8px;font-family:Satoshi,sans-serif;font-size:12px;color:var(--ink2);outline:none;cursor:pointer">
         <option value="off">Off — log only</option>
         <option value="draft">Draft — Claude suggests, you send</option>
         <option value="hybrid">Hybrid — auto-answer FAQs, escalate rest</option>
@@ -772,13 +777,13 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div id="projectsView" style="display:none">
   <div class="inbox-bar">
     <div style="display:flex;align-items:center;gap:10px">
-      <button onclick="closeProjectsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+      <button onclick="closeProjectsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">← Back</button>
       <span style="font-size:13px;font-weight:600;color:var(--ink)">Projects</span>
       <span id="projectsCount" style="font-size:11px;color:var(--ink3)"></span>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <button onclick="seedProjectsOneTime()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="One-time: populate with current 5 projects from code">⚙ Seed defaults</button>
-      <button onclick="openProjectEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">+ New project</button>
+      <button onclick="seedProjectsOneTime()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif" title="One-time: populate with current 5 projects from code">⚙ Seed defaults</button>
+      <button onclick="openProjectEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">+ New project</button>
     </div>
   </div>
   <div id="projectsBody" style="padding:24px;max-width:1400px;margin:0 auto">
@@ -790,13 +795,13 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
 <div id="rentalsView" style="display:none">
   <div class="inbox-bar">
     <div style="display:flex;align-items:center;gap:10px">
-      <button onclick="closeRentalsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+      <button onclick="closeRentalsView()" style="font-size:13px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">← Back</button>
       <span style="font-size:13px;font-weight:600;color:var(--ink)">Rentals (Samba Realty)</span>
       <span id="rentalsCount" style="font-size:11px;color:var(--ink3)"></span>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <button onclick="syncRentalsFromPortal()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="Live-fetch latest rentals from sambarentals.vercel.app and upsert">↻ Sync from portal</button>
-      <button onclick="openRentalEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">+ New rental</button>
+      <button onclick="syncRentalsFromPortal()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif" title="Live-fetch latest rentals from sambarentals.vercel.app and upsert">↻ Sync from portal</button>
+      <button onclick="openRentalEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">+ New rental</button>
     </div>
   </div>
   <div id="rentalsBody" style="padding:24px;max-width:1400px;margin:0 auto">
@@ -820,7 +825,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         </div>
       </div>
       <div style="padding:16px">
-        <button onclick="showCampaignSetup()" style="width:100%;height:42px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Geist,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s;margin-bottom:16px" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">+ New campaign</button>
+        <button onclick="showCampaignSetup()" style="width:100%;height:42px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Satoshi,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s;margin-bottom:16px" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">+ New campaign</button>
         <div id="campaignHistoryList" style="display:flex;flex-direction:column;gap:8px">
           <div style="text-align:center;padding:20px;color:var(--ink4);font-size:12px">Loading campaigns...</div>
         </div>
@@ -836,7 +841,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
             <div class="campaign-sub">Configure your audience and Claude will personalise a message for each agent</div>
           </div>
           <div style="display:flex;gap:8px;align-items:center">
-            <button onclick="showCampaignList()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">← Back</button>
+            <button onclick="showCampaignList()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">← Back</button>
             <button class="drawer-close" onclick="closeCampaignPanel()">✕</button>
           </div>
         </div>
@@ -845,7 +850,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <!-- Name -->
         <div>
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CAMPAIGN NAME</div>
-          <input id="cbName" type="text" placeholder="e.g. May KAYA outreach" style="width:100%;height:36px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'" oninput="updateCampaignPreview()">
+          <input id="cbName" type="text" placeholder="e.g. May KAYA outreach" style="width:100%;height:36px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Satoshi,sans-serif;font-size:13px;color:var(--ink);outline:none;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'" oninput="updateCampaignPreview()">
         </div>
         <!-- Pipeline -->
         <div>
@@ -866,8 +871,8 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <div>
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:8px">AUDIENCE</div>
           <div style="display:flex;gap:2px;background:var(--sand);border-radius:8px;padding:2px;width:fit-content">
-            <button id="cbAudienceFilter" onclick="setCampaignAudienceMode('filter')" style="padding:6px 14px;border-radius:6px;border:none;font-family:Geist,sans-serif;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;background:white;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,0.08)">Filter by status</button>
-            <button id="cbAudienceManual" onclick="setCampaignAudienceMode('manual')" style="padding:6px 14px;border-radius:6px;border:none;font-family:Geist,sans-serif;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;background:transparent;color:var(--ink3)">Select agents</button>
+            <button id="cbAudienceFilter" onclick="setCampaignAudienceMode('filter')" style="padding:6px 14px;border-radius:6px;border:none;font-family:Satoshi,sans-serif;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;background:white;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,0.08)">Filter by status</button>
+            <button id="cbAudienceManual" onclick="setCampaignAudienceMode('manual')" style="padding:6px 14px;border-radius:6px;border:none;font-family:Satoshi,sans-serif;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.15s;background:transparent;color:var(--ink3)">Select agents</button>
           </div>
         </div>
         <!-- Status filter (filter mode) -->
@@ -879,7 +884,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
           <!-- Exclude recently contacted -->
           <div style="margin-top:16px">
             <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">EXCLUDE RECENTLY MESSAGED</div>
-            <select id="cbExcludeDays" onchange="updateCampaignPreview()" style="height:34px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);outline:none">
+            <select id="cbExcludeDays" onchange="updateCampaignPreview()" style="height:34px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Satoshi,sans-serif;font-size:13px;color:var(--ink);outline:none">
               <option value="0">Don't exclude anyone</option>
               <option value="7">Exclude messaged in last 7 days</option>
               <option value="14" selected>Exclude messaged in last 14 days</option>
@@ -889,10 +894,10 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         </div>
         <!-- Manual agent picker (manual mode) -->
         <div id="cbManualSection" style="display:none">
-          <input id="cbAgentSearch" type="text" placeholder="Search agents..." oninput="renderCampaignAgentPicker()" style="width:100%;height:34px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);outline:none;margin-bottom:8px;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'">
+          <input id="cbAgentSearch" type="text" placeholder="Search agents..." oninput="renderCampaignAgentPicker()" style="width:100%;height:34px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:0 10px;font-family:Satoshi,sans-serif;font-size:12px;color:var(--ink);outline:none;margin-bottom:8px;transition:border-color 0.15s" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'">
           <div style="display:flex;gap:8px;margin-bottom:8px">
-            <button onclick="toggleAllCampaignAgents(true)" style="font-size:11px;padding:3px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Select all</button>
-            <button onclick="toggleAllCampaignAgents(false)" style="font-size:11px;padding:3px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Clear</button>
+            <button onclick="toggleAllCampaignAgents(true)" style="font-size:11px;padding:3px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Select all</button>
+            <button onclick="toggleAllCampaignAgents(false)" style="font-size:11px;padding:3px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Clear</button>
           </div>
           <div id="cbAgentList" style="max-height:220px;overflow-y:auto;border:1px solid var(--sand3);border-radius:var(--radius-sm);background:white"></div>
         </div>
@@ -934,7 +939,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <div id="cbTemplateWrap">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px;display:flex;align-items:center;justify-content:space-between">
             <span>TEMPLATE SEQUENCE <span style="font-weight:400;color:var(--ink4)">(initial + follow-ups if no reply)</span> <span id="cbSequenceFilterHint" style="font-weight:400;color:var(--ink4)"></span></span>
-            <button onclick="loadWaTemplates(true)" style="font-size:10px;padding:2px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
+            <button onclick="loadWaTemplates(true)" style="font-size:10px;padding:2px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">↻ Refresh</button>
           </div>
           <div id="cbSequenceEditor" style="background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:10px;font-size:12px;color:var(--ink3)">
             <div style="text-align:center;color:var(--ink4);font-size:11px">Loading templates from Meta...</div>
@@ -943,12 +948,12 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <!-- Context for Claude (assisted + autopilot modes) -->
         <div id="cbContextWrap">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">CONTEXT FOR CLAUDE <span style="font-weight:400;color:var(--ink4)">(background notes — Claude uses these as info to draw on, not as the message body)</span></div>
-          <textarea id="campaignContext" placeholder="e.g. 'Focus on Tropicana Valley -- construction wrapped, 4 units left' or 'Mention 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+          <textarea id="campaignContext" placeholder="e.g. 'Focus on Tropicana Valley -- construction wrapped, 4 units left' or 'Mention 8% commission promo this month'" style="width:100%;min-height:60px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Satoshi,sans-serif;font-size:11px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
         </div>
         <!-- Broadcast message (broadcast mode) -->
         <div id="cbBroadcastWrap" style="display:none">
           <div style="font-size:10px;font-weight:600;letter-spacing:0.05em;color:var(--ink3);margin-bottom:5px">BROADCAST MESSAGE</div>
-          <textarea id="cbBroadcastMsg" placeholder="Write the message to send to all agents... Use {{name}} for the agent's first name." style="width:100%;min-height:100px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Geist,sans-serif;font-size:13px;color:var(--ink);line-height:1.6;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
+          <textarea id="cbBroadcastMsg" placeholder="Write the message to send to all agents... Use {{name}} for the agent's first name." style="width:100%;min-height:100px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm);padding:8px 10px;font-family:Satoshi,sans-serif;font-size:13px;color:var(--ink);line-height:1.6;resize:vertical;outline:none;transition:border-color 0.12s;" onfocus="this.style.borderColor='var(--accent-mid)'" onblur="this.style.borderColor='var(--sand3)'"></textarea>
         </div>
         <!-- Attachments -->
         <div>
@@ -957,7 +962,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
           </div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px" id="cbAttachmentChips"></div>
           <input type="file" id="cbFileInput" accept=".pdf,.doc,.docx,.xlsx,.png,.jpg" style="display:none" onchange="handleCampaignFileUpload(this)">
-          <button onclick="document.getElementById('cbFileInput').click()" style="font-size:11px;padding:5px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;transition:border-color 0.12s" onmouseover="this.style.borderColor='var(--accent-mid)'" onmouseout="this.style.borderColor='var(--sand3)'">+ Upload custom file</button>
+          <button onclick="document.getElementById('cbFileInput').click()" style="font-size:11px;padding:5px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif;transition:border-color 0.12s" onmouseover="this.style.borderColor='var(--accent-mid)'" onmouseout="this.style.borderColor='var(--sand3)'">+ Upload custom file</button>
         </div>
         <!-- Resend toggle (for testing / re-running campaigns) -->
         <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink3);cursor:pointer;padding:8px 12px;background:var(--sand);border:1px solid var(--sand3);border-radius:var(--radius-sm)">
@@ -967,7 +972,7 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
         <!-- Preview count + CTA -->
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--sand);border-radius:var(--radius-sm);border:1px solid var(--sand3)">
           <div id="cbPreviewCount" style="font-size:13px;color:var(--ink2)">— agents match</div>
-          <button onclick="startCampaign()" style="height:36px;padding:0 20px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Geist,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">Start campaign →</button>
+          <button onclick="startCampaign()" style="height:36px;padding:0 20px;background:var(--accent);border:none;border-radius:var(--radius-sm);font-family:Satoshi,sans-serif;font-size:13px;font-weight:500;color:white;cursor:pointer;transition:opacity 0.12s" onmouseover="this.style.opacity='0.88'" onmouseout="this.style.opacity='1'">Start campaign →</button>
         </div>
       </div>
     </div>
@@ -1393,10 +1398,10 @@ function showSchemaBanner(missing) {
   if (document.getElementById('schemaBanner')) return;
   const banner = document.createElement('div');
   banner.id = 'schemaBanner';
-  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#fef3c7;border-bottom:1px solid #fbbf24;padding:10px 16px;font-size:12px;color:#78350f;display:flex;align-items:center;justify-content:space-between;gap:12px;font-family:Geist,sans-serif';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#fef3c7;border-bottom:1px solid #fbbf24;padding:10px 16px;font-size:12px;color:#78350f;display:flex;align-items:center;justify-content:space-between;gap:12px;font-family:Satoshi,sans-serif';
   banner.innerHTML = `
     <span><strong>⚠ Schema out of date.</strong> Missing: ${missing.slice(0,3).join(', ')}${missing.length>3?` + ${missing.length-3} more`:''}. Run <code style="background:white;padding:2px 5px;border-radius:3px">SCHEMA.sql</code> in Supabase SQL Editor.</span>
-    <button onclick="document.getElementById('schemaBanner').remove()" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Dismiss</button>
+    <button onclick="document.getElementById('schemaBanner').remove()" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Dismiss</button>
   `;
   document.body.appendChild(banner);
   document.body.style.paddingTop = '38px';
@@ -1626,7 +1631,7 @@ function renderCards() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
             Message
           </button>
-          <button onclick="openWaApp(${a.id}, event)" title="Open in WhatsApp app" style="font-size:9px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;display:flex;align-items:center;gap:4px">
+          <button onclick="openWaApp(${a.id}, event)" title="Open in WhatsApp app" style="font-size:9px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif;display:flex;align-items:center;gap:4px">
             <svg viewBox="0 0 24 24" fill="currentColor" style="width:9px;height:9px"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
             WhatsApp
           </button>
@@ -1819,7 +1824,7 @@ function openDrawer(id) {
       <div class="field-label" style="margin-bottom:4px">Listing URL ${proj.url && proj.url.startsWith('http') ? `<a href="${proj.url}" target="_blank" style="color:var(--accent);font-size:10px;margin-left:6px">↗ View listing</a>` : ''}</div>
       <div style="display:flex;gap:6px;align-items:center">
         <input class="field-input" type="text" id="pu_${k}" value="${proj.url && proj.url !== 'nan' ? proj.url : ''}" placeholder="https://" style="font-size:12px;flex:1">
-        <button onclick="scanForUrl('${k}', '${p}')" style="font-size:10px;padding:4px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--accent);cursor:pointer;white-space:nowrap;font-family:Geist,sans-serif">⟳ Scan chat</button>
+        <button onclick="scanForUrl('${k}', '${p}')" style="font-size:10px;padding:4px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--accent);cursor:pointer;white-space:nowrap;font-family:Satoshi,sans-serif">⟳ Scan chat</button>
       </div>
     </div>`;
   }).join('');
@@ -1843,7 +1848,7 @@ function openDrawer(id) {
           <input type="checkbox" id="df_is_test" ${a.is_test ? 'checked' : ''}>
           <span><strong>🧪 Test contact</strong> — flag to enable bulk reset from the more menu</span>
         </label>
-        <button onclick="resetAgentConversation(${a.id})" style="font-size:11px;padding:6px 12px;border:1px solid #d99850;border-radius:6px;background:white;color:#8a5a1a;cursor:pointer;font-family:Geist,sans-serif;font-weight:500;white-space:nowrap" title="Wipe all conversation history, unread state, and campaign-sent flags so you can re-test from scratch">↺ Reset conversation</button>
+        <button onclick="resetAgentConversation(${a.id})" style="font-size:11px;padding:6px 12px;border:1px solid #d99850;border-radius:6px;background:white;color:#8a5a1a;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500;white-space:nowrap" title="Wipe all conversation history, unread state, and campaign-sent flags so you can re-test from scratch">↺ Reset conversation</button>
       </div>
       ${renderCampaignEngagement(a)}
     </div>
@@ -1933,13 +1938,13 @@ function renderStageInfo(projectName, proj) {
   // Action buttons by stage
   const actions = [];
   if (['agreement_requested', 'agreement_received'].includes(stage)) {
-    actions.push(`<button onclick="markProjectSigned(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;font-weight:500">✓ Mark signed</button>`);
+    actions.push(`<button onclick="markProjectSigned(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">✓ Mark signed</button>`);
   }
   if (['agreement_requested', 'signed'].includes(stage) && proj.next_followup_at) {
-    actions.push(`<button onclick="skipNextFollowup(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif" title="Push the next follow-up out by 7 days">⏭ Skip next</button>`);
+    actions.push(`<button onclick="skipNextFollowup(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif" title="Push the next follow-up out by 7 days">⏭ Skip next</button>`);
   }
   if (stage === 'stalled') {
-    actions.push(`<button onclick="restartFollowups(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif">↻ Restart follow-ups</button>`);
+    actions.push(`<button onclick="restartFollowups(${editingId}, '${escAttr(projectName)}')" style="font-size:10px;padding:3px 8px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Satoshi,sans-serif">↻ Restart follow-ups</button>`);
   }
 
   return { badge, detail, actions: actions.join('') };
@@ -2007,9 +2012,9 @@ function renderEngagementStrip(a, pl, eng) {
 
   const actions = [];
   if (eng.status === 'pending') {
-    actions.push(`<button onclick="sendNextSequenceNow(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif" title="Fires the next template immediately, bypassing the wait schedule">▶ Send next now</button>`);
-    actions.push(`<button onclick="skipNextSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">⏭ Skip next</button>`);
-    actions.push(`<button onclick="stopSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Stop</button>`);
+    actions.push(`<button onclick="sendNextSequenceNow(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--accent);border-radius:5px;background:white;color:var(--accent);cursor:pointer;font-family:Satoshi,sans-serif" title="Fires the next template immediately, bypassing the wait schedule">▶ Send next now</button>`);
+    actions.push(`<button onclick="skipNextSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif">⏭ Skip next</button>`);
+    actions.push(`<button onclick="stopSequence(${a.id},'${pl}')" style="font-size:10px;padding:3px 8px;border:1px solid #f5c0c0;border-radius:5px;background:white;color:#c00;cursor:pointer;font-family:Satoshi,sans-serif">✕ Stop</button>`);
   }
 
   return `
@@ -2941,9 +2946,9 @@ async function renderCampaignAgentTargeted() {
       '</div>' +
       '<div style="display:flex;gap:8px">' +
       '<button onclick="campaignIndex++;updateCampaignProgress();renderCampaignAgentTargeted()" ' +
-        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">Skip →</button>' +
+        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">Skip →</button>' +
       '<button onclick="var ag=agents.find(function(x){return x.id===' + a.id + ';});delete ag.last_campaign_sent;saveAgents();renderCampaignAgentTargeted();" ' +
-        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3)">Send again</button>' +
+        'style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink3)">Send again</button>' +
       '</div>';
     body.innerHTML = '';
     body.appendChild(sentCard);
@@ -2973,7 +2978,7 @@ async function renderCampaignAgentTargeted() {
           <span>CONVERSATION HISTORY</span>
           <div style="display:flex;align-items:center;gap:8px">
             ${historyMeta}
-            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
+            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Satoshi,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
           </div>
         </div>
         <div style="background:var(--sand);border-radius:6px;max-height:180px;overflow-y:auto;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7" id="campHistoryBody">
@@ -3257,13 +3262,13 @@ function renderSequenceEditor() {
     const exampleBody = tmpl ? tmpl.body.replace(/\{\{1\}\}/g, 'Sarah').replace(/\{\{(\d+)\}\}/g, (m,n)=>`[${n}]`) : '(template not found)';
     const dayLabel = idx === 0 ? 'Day 0 (immediately on campaign start)' : `Day ${cumulativeDays(idx)} (if no reply)`;
     return `
-      ${idx > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px 12px;color:var(--ink4);font-size:11px"><span>↓ wait</span><input type="number" min="1" max="14" value="${step.wait_days || 1}" onchange="updateSequenceStep(${idx}, 'wait_days', parseInt(this.value) || 1)" style="width:50px;height:24px;background:white;border:1px solid var(--sand3);border-radius:4px;padding:0 6px;font-family:Geist,sans-serif;font-size:11px;text-align:center"> <span>day(s)</span></div>` : ''}
+      ${idx > 0 ? `<div style="display:flex;align-items:center;gap:8px;margin:6px 0 6px 12px;color:var(--ink4);font-size:11px"><span>↓ wait</span><input type="number" min="1" max="14" value="${step.wait_days || 1}" onchange="updateSequenceStep(${idx}, 'wait_days', parseInt(this.value) || 1)" style="width:50px;height:24px;background:white;border:1px solid var(--sand3);border-radius:4px;padding:0 6px;font-family:Satoshi,sans-serif;font-size:11px;text-align:center"> <span>day(s)</span></div>` : ''}
       <div style="background:white;border:1px solid var(--sand3);border-radius:6px;padding:10px;margin-bottom:4px">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
           <div style="font-size:10px;font-weight:600;color:var(--accent);letter-spacing:0.04em;text-transform:uppercase">${dayLabel}</div>
-          ${campaignSequence.length > 1 ? `<button onclick="removeSequenceStep(${idx})" style="font-size:10px;padding:2px 8px;border:1px solid #f5c0c0;border-radius:4px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">✕ Remove</button>` : ''}
+          ${campaignSequence.length > 1 ? `<button onclick="removeSequenceStep(${idx})" style="font-size:10px;padding:2px 8px;border:1px solid #f5c0c0;border-radius:4px;background:white;color:#c00;cursor:pointer;font-family:Satoshi,sans-serif">✕ Remove</button>` : ''}
         </div>
-        <select onchange="updateSequenceStep(${idx}, 'template_name', this.value)" style="width:100%;height:30px;background:white;border:1px solid var(--sand3);border-radius:5px;padding:0 8px;font-family:Geist,sans-serif;font-size:11px;color:var(--ink);outline:none;margin-bottom:6px">
+        <select onchange="updateSequenceStep(${idx}, 'template_name', this.value)" style="width:100%;height:30px;background:white;border:1px solid var(--sand3);border-radius:5px;padding:0 8px;font-family:Satoshi,sans-serif;font-size:11px;color:var(--ink);outline:none;margin-bottom:6px">
           ${approved.map(t => `<option value="${t.name}" ${t.name === step.template_name ? 'selected' : ''}>${t.name} (${t.category}, ${t.language})</option>`).join('')}
         </select>
         <div style="font-size:10px;color:var(--ink3);line-height:1.4;background:var(--sand);border-radius:4px;padding:6px 8px;white-space:pre-wrap">${exampleBody.replace(/</g,'&lt;')}</div>
@@ -3273,7 +3278,7 @@ function renderSequenceEditor() {
 
   editor.innerHTML = `
     ${html}
-    <button onclick="addSequenceStep()" style="margin-top:8px;font-size:11px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;width:100%">+ Add follow-up step</button>
+    <button onclick="addSequenceStep()" style="margin-top:8px;font-size:11px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif;width:100%">+ Add follow-up step</button>
     <div style="margin-top:8px;font-size:10px;color:var(--ink4);line-height:1.4">
       Each step is sent ONLY if the agent hasn't replied yet. Any inbound reply stops the sequence immediately. After all steps run, the agent is marked as <code>no_response</code> and follow-ups stop.
     </div>
@@ -3546,8 +3551,8 @@ function showCampaignSummary(c) {
     <h3 style="margin-bottom:4px">Campaign complete</h3>
     <p style="font-size:13px;color:var(--ink3);margin-bottom:16px">${c.sent_count || 0} sent · ${c.skip_count || 0} skipped · ${c.fail_count || 0} failed</p>
     <div style="display:flex;gap:8px;justify-content:center">
-      <button onclick="showCampaignSetup(campaignsList.find(x=>x.id==='${c.id}'))" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">Duplicate & edit</button>
-      <button onclick="showCampaignList()" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">← Back</button>
+      <button onclick="showCampaignSetup(campaignsList.find(x=>x.id==='${c.id}'))" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">Duplicate & edit</button>
+      <button onclick="showCampaignList()" style="font-size:12px;padding:7px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">← Back</button>
     </div>
   </div>`;
 }
@@ -3944,11 +3949,11 @@ async function renderCampaignAgent() {
       </div>
       <div style="display:flex;gap:8px">
         <button onclick="campaignIndex++;updateCampaignProgress();renderCampaignAgent()" 
-          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">
           Skip →
         </button>
         <button onclick="delete agents.find(x=>x.id===${a.id}).last_campaign_sent;saveAgents();renderCampaignAgent()"
-          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3)">
+          style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink3)">
           Send again
         </button>
       </div>`;
@@ -4011,7 +4016,7 @@ async function renderCampaignAgent() {
           <span>CONVERSATION HISTORY</span>
           <div style="display:flex;align-items:center;gap:8px">
             ${a.conversation_history?.total_messages ? `<span style="font-weight:400;color:var(--ink4)">${a.conversation_history.total_messages} msgs · ${a.conversation_history.first_contact || ''} → ${a.conversation_history.last_contact || ''}</span>` : ''}
-            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Geist,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
+            <button onclick="summariseConversation(${a.id})" style="font-size:10px;font-weight:500;padding:2px 8px;border-radius:5px;border:1px solid var(--sand3);background:white;color:var(--accent);cursor:pointer;font-family:Satoshi,sans-serif;white-space:nowrap" id="campSumBtn">✦ AI summary</button>
           </div>
         </div>
         <div style="background:var(--sand);border-radius:var(--radius-sm);max-height:180px;overflow-y:auto;padding:10px 12px;font-size:11px;color:var(--ink2);line-height:1.7" id="campHistoryBody">
@@ -4288,9 +4293,9 @@ async function runAutopilotCampaign() {
           <div style="font-size:14px;font-weight:600;color:var(--ink)">Autopilot running</div>
           <div style="display:flex;gap:8px">
             <button onclick="autopilotPaused=!autopilotPaused;this.textContent=autopilotPaused?'Resume':'Pause'"
-              style="font-size:11px;padding:5px 12px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">${autopilotPaused ? 'Resume' : 'Pause'}</button>
+              style="font-size:11px;padding:5px 12px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">${autopilotPaused ? 'Resume' : 'Pause'}</button>
             <button onclick="autopilotRunning=false"
-              style="font-size:11px;padding:5px 12px;border:1px solid #e57373;border-radius:6px;background:#fce4ec;cursor:pointer;font-family:Geist,sans-serif;color:#c62828">Stop</button>
+              style="font-size:11px;padding:5px 12px;border:1px solid #e57373;border-radius:6px;background:#fce4ec;cursor:pointer;font-family:Satoshi,sans-serif;color:#c62828">Stop</button>
           </div>
         </div>
         <div style="display:flex;gap:16px;margin-bottom:16px">
@@ -4921,12 +4926,12 @@ function openInboxAttachMenu(agentId) {
   }
   // Build menu with brochure shortcuts + file upload
   const brochures = BROCHURE_LIST.map(b =>
-    `<button onclick="addInboxBrochure('${b.key}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink2)">📄 ${b.label}</button>`
+    `<button onclick="addInboxBrochure('${b.key}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink2)">📄 ${b.label}</button>`
   ).join('');
   menu.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;width:100%">
     <div style="font-size:10px;font-weight:600;color:var(--ink3);letter-spacing:0.05em">QUICK ATTACH</div>
     <div style="display:flex;flex-wrap:wrap;gap:5px">${brochures}</div>
-    <button onclick="document.getElementById('inboxFileInput').click()" style="font-size:11px;padding:4px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Geist,sans-serif;color:var(--ink3);align-self:flex-start">+ Upload custom file</button>
+    <button onclick="document.getElementById('inboxFileInput').click()" style="font-size:11px;padding:4px 10px;border:1px dashed var(--sand3);border-radius:6px;background:white;cursor:pointer;font-family:Satoshi,sans-serif;color:var(--ink3);align-self:flex-start">+ Upload custom file</button>
   </div>`;
   menu.style.display = '';
 }
@@ -5094,15 +5099,15 @@ async function openOwnerConversation(id) {
           <div style="font-weight:600;font-size:13px;color:var(--ink)">${(o.name || '+' + o.wa_num).replace(/</g,'&lt;')} <span style="font-size:10px;font-weight:600;color:#1d5c46;background:#e3efe8;border-radius:4px;padding:1px 6px;margin-left:4px">OWNER</span></div>
           <div style="font-size:11px;color:var(--ink3)">+${o.wa_num} · ${nList} listing${nList === 1 ? '' : 's'}${(o.listing_slugs || []).length ? ' · ' + o.listing_slugs.join(', ') : ''}</div>
         </div>
-        <button onclick="toggleOwnerOptIn(${o.id})" style="font-size:11px;padding:4px 10px;border:1px solid ${o.opt_in ? 'var(--kaya, #2a6a3a)' : 'var(--sand3)'};border-radius:6px;background:${o.opt_in ? '#e3efe8' : 'white'};color:${o.opt_in ? '#1d5c46' : 'var(--ink2)'};cursor:pointer;font-family:Geist,sans-serif">${o.opt_in ? '✓ Weekly report' : 'Weekly report off'}</button>
-        <button onclick="toggleOwnerPause(${o.id})" style="font-size:11px;padding:4px 10px;border:1px solid ${o.paused ? 'var(--accent)' : 'var(--sand3)'};border-radius:6px;background:${o.paused ? 'var(--accent)' : 'white'};color:${o.paused ? 'white' : 'var(--ink2)'};cursor:pointer;font-family:Geist,sans-serif">${o.paused ? 'Paused — resume' : 'Pause Maya'}</button>
+        <button onclick="toggleOwnerOptIn(${o.id})" style="font-size:11px;padding:4px 10px;border:1px solid ${o.opt_in ? 'var(--kaya, #2a6a3a)' : 'var(--sand3)'};border-radius:6px;background:${o.opt_in ? '#e3efe8' : 'white'};color:${o.opt_in ? '#1d5c46' : 'var(--ink2)'};cursor:pointer;font-family:Satoshi,sans-serif">${o.opt_in ? '✓ Weekly report' : 'Weekly report off'}</button>
+        <button onclick="toggleOwnerPause(${o.id})" style="font-size:11px;padding:4px 10px;border:1px solid ${o.paused ? 'var(--accent)' : 'var(--sand3)'};border-radius:6px;background:${o.paused ? 'var(--accent)' : 'white'};color:${o.paused ? 'white' : 'var(--ink2)'};cursor:pointer;font-family:Satoshi,sans-serif">${o.paused ? 'Paused — resume' : 'Pause Maya'}</button>
       </div>
       <div id="ownerThreadMsgs" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading…</div></div>
       <div style="border-top:1px solid var(--sand3);padding:10px 14px">
         ${draft ? '<div style="font-size:10px;font-weight:700;letter-spacing:.05em;color:#8a6d00;margin-bottom:6px">✎ MAYA DRAFTED THIS REPLY — REVIEW &amp; SEND</div>' : ''}
         <div style="display:flex;gap:8px;align-items:flex-end">
-          <textarea id="ownerReplyBox" rows="2" style="flex:1;resize:none;border:1px solid var(--sand3);border-radius:8px;padding:8px 10px;font-family:Geist,sans-serif;font-size:12.5px;outline:none">${draft.replace(/</g,'&lt;')}</textarea>
-          <button id="ownerSendBtn" onclick="sendOwnerInboxReply(${o.id})" style="height:36px;padding:0 16px;border:none;border-radius:8px;background:var(--accent);color:white;font-weight:600;font-size:12px;cursor:pointer;font-family:Geist,sans-serif">Send</button>
+          <textarea id="ownerReplyBox" rows="2" style="flex:1;resize:none;border:1px solid var(--sand3);border-radius:8px;padding:8px 10px;font-family:Satoshi,sans-serif;font-size:12.5px;outline:none">${draft.replace(/</g,'&lt;')}</textarea>
+          <button id="ownerSendBtn" onclick="sendOwnerInboxReply(${o.id})" style="height:36px;padding:0 16px;border:none;border-radius:8px;background:var(--accent);color:white;font-weight:600;font-size:12px;cursor:pointer;font-family:Satoshi,sans-serif">Send</button>
         </div>
       </div>
     </div>`;
@@ -5281,11 +5286,11 @@ async function openConversation(agentId) {
         <div style="font-size:13px;font-weight:600;color:var(--ink)">${a.name || a.agency || 'Unknown'}</div>
         <div style="font-size:11px;color:var(--ink3)">+${a.wa_num}${a.agency ? ' · ' + a.agency : ''}</div>
       </div>
-      <button onclick="openDrawer(${a.id})" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">View profile</button>
+      <button onclick="openDrawer(${a.id})" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">View profile</button>
     </div>
     <div class="inbox-thread-msgs" id="threadMsgs"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading messages...</div></div>
     <div class="inbox-reply">
-      ${a.automation_override === 'paused' ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#78350f"><span>⏸ Maya is paused for this conversation. You're in control.</span><button onclick="resumeMaya(${a.id})" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Resume Maya</button></div>` : ''}
+      ${a.automation_override === 'paused' ? `<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;font-size:12px;color:#78350f"><span>⏸ Maya is paused for this conversation. You're in control.</span><button onclick="resumeMaya(${a.id})" style="font-size:11px;padding:4px 10px;border:1px solid #fbbf24;border-radius:5px;background:white;color:#78350f;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Resume Maya</button></div>` : ''}
       ${a.suggested_reply && a.suggested_reply.trim() ? `<div class="inbox-draft-banner"><span>✦ Maya drafted a reply${draftCardSlugs(a.suggested_reply).length ? ` + ${draftCardSlugs(a.suggested_reply).length} listing card(s)` : ''} — review and send</span></div>` : ''}
       <div id="inboxAttachChips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px"></div>
       <div class="inbox-reply-row">
@@ -5888,7 +5893,7 @@ function renderProjectsList() {
       <td style="padding:12px 10px;text-align:center">${brochureBadge}</td>
       <td style="padding:12px 10px;font-size:11px;color:var(--ink3)">${updatedDate}</td>
       <td style="padding:12px 10px;text-align:right">
-        <button onclick="openProjectEditor('${p.id}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Edit</button>
+        <button onclick="openProjectEditor('${p.id}')" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Edit</button>
       </td>
     </tr>`;
   }).join('');
@@ -5971,12 +5976,12 @@ function renderProjectEditor() {
   body.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--sand3)">
       <div>
-        <button onclick="loadProjectsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;margin-bottom:8px">← Back to list</button>
+        <button onclick="loadProjectsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif;margin-bottom:8px">← Back to list</button>
         <h2 style="margin:0;font-size:20px;color:var(--ink)">${isNew ? 'New project' : 'Edit project: ' + escapeHtml(p.name || '(unnamed)')}</h2>
       </div>
       <div style="display:flex;gap:8px">
-        ${!isNew ? `<button onclick="archiveProject('${p.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">Archive</button>` : ''}
-        <button onclick="saveProject()" id="saveProjectBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+        ${!isNew ? `<button onclick="archiveProject('${p.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Satoshi,sans-serif">Archive</button>` : ''}
+        <button onclick="saveProject()" id="saveProjectBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Save changes</button>
       </div>
     </div>
 
@@ -6035,7 +6040,7 @@ function renderProjectEditor() {
         ${['Code','Beds','Baths','sqm','Floor','Price USD','Price IDR','Status','Notes',''].map(h=>`<div style="font-size:10px;font-weight:600;letter-spacing:0.04em;color:var(--ink3);text-transform:uppercase">${h}</div>`).join('')}
       </div>
       <div id="unitsContainer">${unitsHtml}</div>
-      <button onclick="addUnitRow()" style="margin-top:8px;font-size:12px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif">+ Add unit</button>
+      <button onclick="addUnitRow()" style="margin-top:8px;font-size:12px;padding:6px 12px;border:1px dashed var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif">+ Add unit</button>
     `)}
 
     ${section('Description & features', `
@@ -6058,15 +6063,15 @@ function renderProjectEditor() {
     `)}
 
     <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--sand3);display:flex;justify-content:flex-end;gap:8px">
-      <button onclick="loadProjectsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Cancel</button>
-      <button onclick="saveProject()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+      <button onclick="loadProjectsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Cancel</button>
+      <button onclick="saveProject()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--accent);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Save changes</button>
     </div>
   `;
 }
 
 // Editor helpers (defined as global functions referenced in templates)
-const inputStyle = 'width:100%;height:34px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);outline:none';
-const textareaStyle = 'width:100%;min-height:60px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:8px 10px;font-family:Geist,sans-serif;font-size:12px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;';
+const inputStyle = 'width:100%;height:34px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:0 10px;font-family:Satoshi,sans-serif;font-size:12px;color:var(--ink);outline:none';
+const textareaStyle = 'width:100%;min-height:60px;background:white;border:1px solid var(--sand3);border-radius:6px;padding:8px 10px;font-family:Satoshi,sans-serif;font-size:12px;color:var(--ink);line-height:1.5;resize:vertical;outline:none;';
 
 function section(title, content) {
   return `<div style="background:white;border:1px solid var(--sand3);border-radius:8px;padding:16px;margin-bottom:16px">
@@ -6250,7 +6255,7 @@ function renderRentalsList() {
             <td style="padding:10px 12px">${rate}</td>
             <td style="padding:10px 12px">${occ}</td>
             <td style="padding:10px 12px;text-align:right;color:var(--ink3);font-size:11px">${r.updated_at ? new Date(r.updated_at).toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'2-digit'}) : '—'}</td>
-            <td style="padding:6px 10px;text-align:right"><button onclick="openRentalEditor('${r.id}')" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Edit</button></td>
+            <td style="padding:6px 10px;text-align:right"><button onclick="openRentalEditor('${r.id}')" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Edit</button></td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -6273,12 +6278,12 @@ function renderRentalEditor() {
   body.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--sand3)">
       <div>
-        <button onclick="loadRentalsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Geist,sans-serif;margin-bottom:8px">← Back to list</button>
+        <button onclick="loadRentalsList()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:5px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif;margin-bottom:8px">← Back to list</button>
         <h2 style="margin:0;font-size:20px;color:var(--ink)">${isNew ? 'New rental' : 'Edit rental: ' + escapeHtml(r.name || '(unnamed)')}</h2>
       </div>
       <div style="display:flex;gap:8px">
-        ${!isNew ? `<button onclick="archiveRental('${r.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Geist,sans-serif">Archive</button>` : ''}
-        <button onclick="saveRental()" id="saveRentalBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+        ${!isNew ? `<button onclick="archiveRental('${r.id}')" style="font-size:12px;padding:8px 14px;border:1px solid #f5c0c0;border-radius:6px;background:white;color:#c00;cursor:pointer;font-family:Satoshi,sans-serif">Archive</button>` : ''}
+        <button onclick="saveRental()" id="saveRentalBtn" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Save changes</button>
       </div>
     </div>
 
@@ -6362,8 +6367,8 @@ function renderRentalEditor() {
     `)}
 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;padding-top:16px;border-top:1px solid var(--sand3)">
-      <button onclick="loadRentalsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">Cancel</button>
-      <button onclick="saveRental()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:500">Save changes</button>
+      <button onclick="loadRentalsList()" style="font-size:12px;padding:8px 14px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Satoshi,sans-serif">Cancel</button>
+      <button onclick="saveRental()" style="font-size:12px;padding:8px 14px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">Save changes</button>
     </div>
   `;
 }
