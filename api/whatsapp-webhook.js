@@ -478,7 +478,7 @@ export default async function handler(req, res) {
     if (process.env.OWNERS_ENABLED === '1') {
       try {
         const ownerRes = await fetch(
-          `${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${fromNum}&select=id,name&limit=1`,
+          `${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${fromNum}&select=*&limit=1`,
           { headers: sbHeaders }
         );
         owner = (await ownerRes.json())?.[0] || null;
@@ -534,7 +534,7 @@ export default async function handler(req, res) {
 
     // Push a notification to the Maya chat PWA (fire-and-forget).
     sendPushNotifications(SUPABASE_URL, sbHeaders, {
-      title: agent?.name || agent?.agency || ('+' + fromNum),
+      title: agent?.name || agent?.agency || (owner?.name ? `${owner.name} (owner)` : '+' + fromNum),
       body: (dbContent || text || 'New message').slice(0, 160),
       agentId: agent ? agent.id : null,
       badgeCount: (agent?.unread_count || 0) + 1,

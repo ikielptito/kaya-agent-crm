@@ -172,6 +172,13 @@
     border-radius: 5px; text-transform: uppercase;
   }
   .pill-draft  { background: #fff3cd; color: #8a6d00; }
+  /* Agents / Owners segment under the search bar */
+  .people-seg { display: flex; gap: 6px; padding: 0 12px 8px; background: var(--wa-panel-2); }
+  .people-seg button { flex: 1; border: 1px solid var(--wa-rule); background: var(--wa-panel); color: var(--wa-ink-2); border-radius: 16px; padding: 6px 0; font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  .people-seg button.on { background: var(--wa-green); border-color: var(--wa-green); color: #fff; }
+  .seg-badge { background: var(--wa-unread); color: #fff; border-radius: 10px; font-size: 10px; min-width: 16px; padding: 1px 4px; line-height: 1.3; }
+  .people-seg button.on .seg-badge { background: rgba(255,255,255,.28); }
+  .pill-owner { background: #e3efe8; color: #1d5c46; }
   .pill-needs  { background: #ffe0e0; color: #b42318; }
   .pill-wait   { background: #e7f0ff; color: #1d4ed8; }
   .pill-paused { background: #ececec; color: #555; }
@@ -698,6 +705,10 @@
     <div class="search-wrap">
       <input id="searchInput" type="text" placeholder="Search" oninput="state.query=this.value; renderList()">
     </div>
+    <div class="people-seg" id="peopleSeg">
+      <button id="segAgents" onclick="setSeg('agents')">Agents</button>
+      <button id="segOwners" onclick="setSeg('owners')">Owners<span class="seg-badge" id="ownerSegBadge" style="display:none">0</span></button>
+    </div>
     <div class="conv-list" id="convList">
       <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
       <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
@@ -828,6 +839,8 @@ const MODE_HINTS = {
 
 const state = {
   agents: [],          // all agent records
+  owners: [],          // villa owners/managers (owner-mode threads)
+  seg: localStorage.getItem('maya_seg') === 'owners' ? 'owners' : 'agents',
   msgMap: {},          // agent_id -> { lastTimestamp, lastContent, direction }
   activeId: null,
   query: '',
@@ -853,6 +866,18 @@ try { state.assist.history = JSON.parse(localStorage.getItem('maya_assistant_his
 // The pinned boss-console pseudo-conversation. Not an agent — most
 // agent-thread code must ignore it (guards check activeId === ASSIST_ID).
 const ASSIST_ID = 'assistant';
+
+// Owner threads live in a separate id namespace ('o' + owners.id, same trick
+// as ASSIST_ID): every agent-specific code path does
+// state.agents.find(x => x.id === id), finds nothing for an owner key, and
+// bails — so owner threads can never trip agent-only actions.
+function ownerIdOf(activeId) {
+  return (typeof activeId === 'string' && activeId[0] === 'o') ? +activeId.slice(1) : null;
+}
+function activeOwner() {
+  const oid = ownerIdOf(state.activeId);
+  return oid == null ? null : state.owners.find(o => o.id === oid);
+}
 
 // ── Archiving (device-local — this is a single-operator inbox) ────────
 function saveArchived() {
@@ -1019,11 +1044,16 @@ async function refreshAll(manual) {
   const btn = document.getElementById('refreshBtn');
   if (manual && btn) btn.classList.add('spin');
   try {
-    const [agents, allMsgs] = await Promise.all([
+    const [agents, allMsgs, owners] = await Promise.all([
       api('get_agents'),
       api('get_messages'),     // no agentId → recent across everyone
+      // Owners fetch fails soft (pre-migration deploys, table missing) so it
+      // can never take the agent inbox down with it.
+      api('get_owners').catch(() => null),
     ]);
     if (Array.isArray(agents)) state.agents = agents;
+    if (Array.isArray(owners)) state.owners = owners;
+    updateSegBadge();
     const newInboundAgents = [];
     if (Array.isArray(allMsgs)) {
       const map = {};
@@ -1075,7 +1105,8 @@ async function refreshAll(manual) {
 
 // ── App-icon badge + arrival ping ─────────────────────────────────────
 function totalUnread() {
-  return state.agents.reduce((n, a) => n + (a.unread_count || 0), 0);
+  return state.agents.reduce((n, a) => n + (a.unread_count || 0), 0)
+       + state.owners.reduce((n, o) => n + (o.unread_count || 0), 0);
 }
 function updateBadge() {
   const n = totalUnread();
@@ -1360,7 +1391,57 @@ function timeAgo(d) {
   return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit' });
 }
 
+function setSeg(seg) {
+  state.seg = seg === 'owners' ? 'owners' : 'agents';
+  try { localStorage.setItem('maya_seg', state.seg); } catch (_) {}
+  renderList();
+}
+function updateSegBadge() {
+  const sa = document.getElementById('segAgents'), so = document.getElementById('segOwners');
+  if (sa) sa.classList.toggle('on', state.seg === 'agents');
+  if (so) so.classList.toggle('on', state.seg === 'owners');
+  const b = document.getElementById('ownerSegBadge');
+  if (b) {
+    const n = state.owners.reduce((s, o) => s + (o.unread_count || 0), 0)
+            + state.owners.filter(o => o.suggested_reply && o.suggested_reply.trim() && !o.unread_count).length;
+    b.textContent = n; b.style.display = n ? '' : 'none';
+  }
+}
+function ownerRow(o) {
+  const oid = 'o' + o.id;
+  const time = o.last_inbound_at ? timeAgo(new Date(o.last_inbound_at)) : '';
+  const hasDraft = o.suggested_reply && o.suggested_reply.trim();
+  const unread = o.unread_count || 0;
+  const nList = (o.listing_slugs || []).length;
+  const snip = hasDraft ? 'Maya: ' + o.suggested_reply.slice(0, 60)
+             : `${nList} listing${nList === 1 ? '' : 's'}` + (o.email ? ' · ' + o.email : '');
+  let pill = '<span class="pill pill-owner">Owner</span>';
+  if (o.paused) pill += '<span class="pill pill-paused">Paused</span>';
+  else if (hasDraft) pill += '<span class="pill pill-draft">Draft</span>';
+  return `<div class="conv ${oid === state.activeId ? 'active' : ''}" onclick="openOwnerConv(${o.id})">
+    <div class="avatar">${esc(initials(o.name, ''))}</div>
+    <div class="conv-mid">
+      <div class="conv-name">${esc(o.name || '+' + (o.wa_num || ''))}</div>
+      <div class="conv-snip">${esc(snip)}</div>
+    </div>
+    <div class="conv-right">
+      <span class="conv-time ${unread ? 'unread-time' : ''}">${time}</span>
+      <div class="conv-badges">${pill}${unread ? `<span class="unread-pill">${unread}</span>` : ''}</div>
+    </div>
+  </div>`;
+}
 function renderList() {
+  updateSegBadge();
+  if (state.seg === 'owners') {
+    const el = document.getElementById('convList');
+    const q = state.query.trim().toLowerCase();
+    const rows = state.owners
+      .filter(o => !q || `${o.name || ''} ${o.wa_num || ''} ${o.email || ''} ${(o.listing_slugs || []).join(' ')}`.toLowerCase().includes(q))
+      .sort((a, b) => new Date(b.last_inbound_at || 0) - new Date(a.last_inbound_at || 0));
+    el.innerHTML = rows.length ? rows.map(ownerRow).join('')
+      : `<div class="empty">${q ? 'No owners match “' + esc(q) + '”' : 'No villa owners yet.<br>They appear after the daily portal sync, and their messages to Maya land here.'}</div>`;
+    return;
+  }
   const el = document.getElementById('convList');
   const convs = state.agents
     .filter(a => state.msgMap[a.id] || a.last_inbound_at || a.unread_count || a.suggested_reply)
@@ -1482,6 +1563,96 @@ function closeConv() {
   renderList();
 }
 
+// ── Owner threads (villa owners/managers — 'o'+id namespace) ─────────
+function openOwnerConv(id) {
+  const o = state.owners.find(x => x.id === id);
+  if (!o) return;
+  state.activeId = 'o' + id;
+  document.getElementById('app').classList.add('show-thread');
+  document.getElementById('threadEmpty').style.display = 'none';
+  document.getElementById('threadView').style.display = 'flex';
+  // Owner threads reuse the assistant-chrome switch: it hides exactly the
+  // agent-only controls (per-chat mode picker, archive/translate/search).
+  // Undo the assistant avatar gradient it also applies.
+  setAssistantChrome(true);
+  document.getElementById('thAvatar').style.background = '';
+
+  // Reset per-conversation UI state (mirrors openConv).
+  state.replyTarget = null; renderReplyChip();
+  state.search = { q: '', matches: [], idx: 0 };
+  document.getElementById('threadSearch').style.display = 'none';
+  document.getElementById('emojiPop').style.display = 'none';
+  document.getElementById('qrPop').style.display = 'none';
+  state.threadMsgs = []; state.msgIndex = {};
+  state.threadLastRead = localStorage.getItem('maya_read_o' + id) || null;
+  state.translateOn = false;
+  updateTranslateBtn();
+  state.draftCards = [];
+
+  const nList = (o.listing_slugs || []).length;
+  document.getElementById('thAvatar').textContent = initials(o.name, '');
+  document.getElementById('thName').textContent = o.name || '+' + (o.wa_num || '');
+  document.getElementById('thSub').textContent = '+' + (o.wa_num || '') + ` · Owner · ${nList} listing${nList === 1 ? '' : 's'}`;
+  document.getElementById('replyBox').value = (o.suggested_reply || '').trim() || localStorage.getItem('maya_draft_o' + id) || '';
+  autoGrow(document.getElementById('replyBox'));
+  document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
+  renderOwnerBanner(o);
+  renderList();
+
+  if (o.unread_count) {
+    o.unread_count = 0;
+    api('patch_owner', { id, fields: { unread_count: 0 } }).catch(() => {});
+    updateBadge();
+  }
+  refreshThread(true);
+}
+
+function renderOwnerBanner(o) {
+  const el = document.getElementById('threadBanner');
+  let html = '';
+  const li = o.last_inbound_at ? new Date(o.last_inbound_at).getTime() : 0;
+  if (!li || (Date.now() - li) > 24 * 3600 * 1000) {
+    html += `<div class="win-banner"><span>⏱ Outside the 24-hour window — a plain message may not deliver.</span></div>`;
+  }
+  if (o.paused) {
+    html += `<div class="pause-banner"><span>⏸ Maya is paused for this owner — you're in control.</span>
+      <button onclick="setOwnerPaused(${o.id}, false)">Resume Maya</button></div>`;
+  } else {
+    if (o.suggested_reply && o.suggested_reply.trim()) {
+      html += `<div class="draft-banner">${icm('spark',15)} Maya drafted a reply — review &amp; send</div>`;
+    }
+    html += `<div class="win-banner"><span>Villa owner — Maya answers performance questions and takes listings here.</span><button onclick="setOwnerPaused(${o.id}, true)">Pause Maya</button></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function setOwnerPaused(id, paused) {
+  const o = state.owners.find(x => x.id === id); if (!o) return;
+  o.paused = paused;
+  api('patch_owner', { id, fields: { paused } }).catch(() => toast('Could not update'));
+  renderOwnerBanner(o); renderList();
+}
+
+async function sendOwner(o) {
+  const box = document.getElementById('replyBox');
+  const msg = box.value.trim();
+  if (!msg) return;
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  try {
+    await api('owner_send', { id: o.id, waNum: o.wa_num, message: msg });
+    box.value = ''; autoGrow(box);
+    localStorage.removeItem('maya_draft_o' + o.id);
+    o.suggested_reply = ''; o.unread_count = 0;
+    renderOwnerBanner(o);
+    await refreshThread(true);
+    refreshAll();
+  } catch (e) {
+    toast('Send failed: ' + e.message);
+  }
+  btn.disabled = false;
+}
+
 function renderBanner(a) {
   const el = document.getElementById('threadBanner');
   let html = '';
@@ -1506,9 +1677,12 @@ function renderBanner(a) {
 async function refreshThread(scroll) {
   const id = state.activeId;
   if (!id || id === ASSIST_ID) return;   // assistant thread renders locally
+  const oid = ownerIdOf(id);
   let msgs;
   try {
-    msgs = await api('get_messages', { agentId: id });
+    msgs = oid != null
+      ? await api('get_owner_messages', { ownerId: oid })
+      : await api('get_messages', { agentId: id });
   } catch (e) { return; }
   if (id !== state.activeId) return; // user switched away mid-fetch
   const body = document.getElementById('threadBody');
@@ -2211,6 +2385,8 @@ async function suggest() {
 async function send() {
   const id = state.activeId; if (!id) return;
   if (id === ASSIST_ID) return sendAssistant();
+  const owner = activeOwner();
+  if (owner) return sendOwner(owner);
   const a = state.agents.find(x => x.id === id); if (!a) return;
   const box = document.getElementById('replyBox');
   const msg = box.value.trim();

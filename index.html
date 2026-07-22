@@ -742,6 +742,10 @@ body { font-family: 'Geist', sans-serif; background: var(--sand); color: var(--i
   <div class="inbox-bar">
     <div style="display:flex;align-items:center;gap:10px">
       <span style="font-size:13px;font-weight:600;color:var(--ink)">Inbox</span>
+      <div style="display:flex;gap:0;border:1px solid var(--sand3);border-radius:6px;overflow:hidden">
+        <button id="inboxSegAgents" onclick="setInboxSeg('agents')" style="font-size:11px;padding:4px 12px;border:none;background:var(--ink);color:white;cursor:pointer;font-family:Geist,sans-serif;font-weight:600">Agents</button>
+        <button id="inboxSegOwners" onclick="setInboxSeg('owners')" style="font-size:11px;padding:4px 12px;border:none;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif;font-weight:600">Owners</button>
+      </div>
       <button onclick="refreshInbox()" style="font-size:11px;padding:4px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink2);cursor:pointer;font-family:Geist,sans-serif">↻ Refresh</button>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
@@ -5010,21 +5014,143 @@ async function refreshInbox() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'get_agents' }),
     }).then(r => r.ok ? r.json() : null);
-    // 2. Invalidate message cache so renderInbox does a fresh fetch
+    // 2. Invalidate message + owner caches so renderInbox does a fresh fetch
     window._inboxMsgAgentIds = null;
+    window._ownersCache = null;
     const fresh = await agentsPromise;
     if (Array.isArray(fresh) && fresh.length) agents = fresh;
   } catch (e) { console.warn('refreshInbox: agents reload failed', e.message); }
   await renderInbox();
   // 3. If a conversation is open, reload its thread so new inbound msgs appear
-  if (activeConvId != null) {
+  if (window._inboxSeg === 'owners' && window._activeOwnerId != null) {
+    await openOwnerConversation(window._activeOwnerId);
+  } else if (activeConvId != null) {
     const stillThere = agents.find(a => a.id === activeConvId);
     if (stillThere) await openConversation(activeConvId);
   }
 }
 
+// ── Owner inbox segment (villa owners/managers, Maya owner-mode) ─────
+window._inboxSeg = 'agents';
+window._ownersCache = null;
+window._activeOwnerId = null;
+
+function setInboxSeg(seg) {
+  window._inboxSeg = seg === 'owners' ? 'owners' : 'agents';
+  const on = 'var(--ink)', off = 'white';
+  const a = document.getElementById('inboxSegAgents'), o = document.getElementById('inboxSegOwners');
+  if (a) { a.style.background = seg === 'agents' ? on : off; a.style.color = seg === 'agents' ? 'white' : 'var(--ink2)'; }
+  if (o) { o.style.background = seg === 'owners' ? on : off; o.style.color = seg === 'owners' ? 'white' : 'var(--ink2)'; }
+  document.getElementById('inboxThread').innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--ink3);font-size:13px">Select a conversation</div>';
+  window._activeOwnerId = null; activeConvId = null;
+  renderInbox();
+}
+
+async function renderOwnerInbox(list) {
+  if (!window._ownersCache) {
+    try {
+      const r = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_owners' }) });
+      window._ownersCache = r.ok ? await r.json() : [];
+    } catch (e) { window._ownersCache = []; }
+  }
+  const owners = Array.isArray(window._ownersCache) ? window._ownersCache : [];
+  if (!owners.length) {
+    list.innerHTML = '<div style="padding:30px 16px;text-align:center;color:var(--ink3);font-size:12px">No villa owners yet. The daily portal sync fills this list; owner messages to Maya appear here.</div>';
+    return;
+  }
+  list.innerHTML = owners
+    .slice()
+    .sort((a, b) => new Date(b.last_inbound_at || 0) - new Date(a.last_inbound_at || 0))
+    .map(o => {
+      const nList = (o.listing_slugs || []).length;
+      const time = o.last_inbound_at ? timeAgo(new Date(o.last_inbound_at)) : '';
+      const hasDraft = o.suggested_reply && o.suggested_reply.trim();
+      let pill = '';
+      if (o.paused) pill = '<span class="conv-status conv-status-paused">PAUSED</span>';
+      else if (hasDraft) pill = '<span class="conv-status conv-status-draft">DRAFT</span>';
+      return `<div class="inbox-conv ${o.id === window._activeOwnerId ? 'active' : ''}" onclick="openOwnerConversation(${o.id})" style="cursor:pointer">
+        <div class="inbox-conv-avatar">${initials(o.name, '')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="display:flex;justify-content:space-between;gap:8px"><span style="font-weight:600;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${(o.name || '+' + o.wa_num).replace(/</g,'&lt;')}</span><span style="font-size:10px;color:var(--ink3);flex-shrink:0">${time}</span></div>
+          <div style="display:flex;justify-content:space-between;gap:8px;margin-top:2px"><span style="font-size:11px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${nList} listing${nList === 1 ? '' : 's'} · +${o.wa_num}</span><span style="display:flex;gap:4px;align-items:center">${pill}${o.unread_count ? `<span class="inbox-unread">${o.unread_count}</span>` : ''}</span></div>
+        </div>
+      </div>`;
+    }).join('');
+}
+
+async function openOwnerConversation(id) {
+  const o = (window._ownersCache || []).find(x => x.id === id);
+  if (!o) return;
+  window._activeOwnerId = id; activeConvId = null;
+  renderInbox(true);
+  const panel = document.getElementById('inboxThread');
+  const nList = (o.listing_slugs || []).length;
+  const draft = (o.suggested_reply || '').trim();
+  panel.innerHTML = `
+    <div style="display:flex;flex-direction:column;height:100%">
+      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--sand3)">
+        <div class="inbox-conv-avatar">${initials(o.name, '')}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;color:var(--ink)">${(o.name || '+' + o.wa_num).replace(/</g,'&lt;')} <span style="font-size:10px;font-weight:600;color:#1d5c46;background:#e3efe8;border-radius:4px;padding:1px 6px;margin-left:4px">OWNER</span></div>
+          <div style="font-size:11px;color:var(--ink3)">+${o.wa_num} · ${nList} listing${nList === 1 ? '' : 's'}${(o.listing_slugs || []).length ? ' · ' + o.listing_slugs.join(', ') : ''}</div>
+        </div>
+        <button onclick="toggleOwnerPause(${o.id})" style="font-size:11px;padding:4px 10px;border:1px solid ${o.paused ? 'var(--accent)' : 'var(--sand3)'};border-radius:6px;background:${o.paused ? 'var(--accent)' : 'white'};color:${o.paused ? 'white' : 'var(--ink2)'};cursor:pointer;font-family:Geist,sans-serif">${o.paused ? 'Paused — resume' : 'Pause Maya'}</button>
+      </div>
+      <div id="ownerThreadMsgs" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:6px"><div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">Loading…</div></div>
+      <div style="border-top:1px solid var(--sand3);padding:10px 14px">
+        ${draft ? '<div style="font-size:10px;font-weight:700;letter-spacing:.05em;color:#8a6d00;margin-bottom:6px">✎ MAYA DRAFTED THIS REPLY — REVIEW &amp; SEND</div>' : ''}
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <textarea id="ownerReplyBox" rows="2" style="flex:1;resize:none;border:1px solid var(--sand3);border-radius:8px;padding:8px 10px;font-family:Geist,sans-serif;font-size:12.5px;outline:none">${draft.replace(/</g,'&lt;')}</textarea>
+          <button id="ownerSendBtn" onclick="sendOwnerInboxReply(${o.id})" style="height:36px;padding:0 16px;border:none;border-radius:8px;background:var(--accent);color:white;font-weight:600;font-size:12px;cursor:pointer;font-family:Geist,sans-serif">Send</button>
+        </div>
+      </div>
+    </div>`;
+  // Load thread + clear unread.
+  try {
+    const r = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'get_owner_messages', payload: { ownerId: id } }) });
+    const msgs = await r.json();
+    const box = document.getElementById('ownerThreadMsgs');
+    if (!box || window._activeOwnerId !== id) return;
+    box.innerHTML = (Array.isArray(msgs) && msgs.length)
+      ? msgs.slice().reverse().map(m => renderMessageBubble(m)).join('')
+      : '<div style="text-align:center;color:var(--ink3);font-size:12px;padding:20px">No messages yet.</div>';
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { /* leave loading note */ }
+  if (o.unread_count) {
+    o.unread_count = 0;
+    fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'patch_owner', payload: { id, fields: { unread_count: 0 } } }) }).catch(() => {});
+  }
+}
+
+async function toggleOwnerPause(id) {
+  const o = (window._ownersCache || []).find(x => x.id === id); if (!o) return;
+  o.paused = !o.paused;
+  await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'patch_owner', payload: { id, fields: { paused: o.paused } } }) }).catch(() => {});
+  openOwnerConversation(id);
+}
+
+async function sendOwnerInboxReply(id) {
+  const o = (window._ownersCache || []).find(x => x.id === id); if (!o) return;
+  const box = document.getElementById('ownerReplyBox');
+  const msg = (box?.value || '').trim();
+  if (!msg) return;
+  const btn = document.getElementById('ownerSendBtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const r = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'owner_send', payload: { id, waNum: o.wa_num, message: msg } }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) throw new Error(d.error || 'send failed');
+    o.suggested_reply = ''; o.unread_count = 0;
+    openOwnerConversation(id);
+  } catch (e) {
+    alert('Send failed: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+  }
+}
+
 async function renderInbox(silent) {
   const list = document.getElementById('inboxList');
+  if (window._inboxSeg === 'owners') return renderOwnerInbox(list);
 
   // Fetch the list of agent_ids that have any messages (inbound OR outbound)
   if (!silent || !window._inboxMsgAgentIds) {
