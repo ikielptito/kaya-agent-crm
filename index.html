@@ -2254,24 +2254,44 @@ function qaValidate() {
   document.getElementById('qaBtn').disabled = wa.length < 8;
 }
 function qaKeydown(e) { if (e.key === 'Enter') quickAdd(); }
-function quickAdd() {
+function qaFlash(msg, color) {
+  const fb = document.getElementById('qaFeedback');
+  fb.textContent = msg; fb.style.color = color;
+  fb.classList.add('show'); setTimeout(() => fb.classList.remove('show'), 2200);
+}
+async function quickAdd() {
   const waRaw = document.getElementById('qaWa').value.replace(/\D/g,'');
   if (waRaw.length < 8) return;
   const name = document.getElementById('qaName').value.trim();
   const agency = document.getElementById('qaAgency').value.trim();
   const exists = agents.find(a => a.wa_num === waRaw);
-  const fb = document.getElementById('qaFeedback');
-  if (exists) {
-    fb.textContent = 'Already in CRM'; fb.style.color = 'var(--ink3)';
-    fb.classList.add('show'); setTimeout(() => fb.classList.remove('show'), 2000); return;
+  if (exists) { qaFlash('Already in CRM', 'var(--ink3)'); return; }
+  document.getElementById('qaBtn').disabled = true;
+  // With a name, route through quick_add_agent so the contact is enrolled in Samba
+  // and gets Maya's onboarding welcome (deferred to 9am WITA if added off-hours).
+  // Without a name the welcome template can't be personalised — fall back to a
+  // plain insert (no onboarding), same as the blank "+ Add agent" drawer.
+  if (name) {
+    try {
+      const r = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'quick_add_agent', payload: { name, wa_num: waRaw, agency } }) });
+      const d = await r.json().catch(() => ({}));
+      if (r.status === 409) { qaFlash('Already in CRM', 'var(--ink3)'); return; }
+      if (!r.ok || !d.agent) { qaFlash('Add failed', 'var(--danger, #c0392b)'); document.getElementById('qaBtn').disabled = false; return; }
+      agents.push(d.agent);
+      qaFlash(d.welcome_deferred ? 'Added — welcome sends 9am' : (d.welcome_sent ? 'Added + welcomed!' : 'Added!'), 'var(--accent-mid)');
+    } catch (e) { qaFlash('Add failed', 'var(--danger, #c0392b)'); document.getElementById('qaBtn').disabled = false; return; }
+  } else {
+    const newId = Math.max(0, ...agents.map(x => x.id)) + 1;
+    const newAgent = { id: newId, name, agency, wa_url: 'https://wa.me/'+waRaw, wa_num: waRaw, alt_contact: '', notes: '',
+      projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
+      samba: { status: 'Not contacted', notes: '' }
+    };
+    agents.push(newAgent);
+    saveOneAgent(newAgent);
+    qaFlash('Added!', 'var(--accent-mid)');
   }
-  const newId = Math.max(0, ...agents.map(x => x.id)) + 1;
-  const newAgent = { id: newId, name, agency, wa_url: 'https://wa.me/'+waRaw, wa_num: waRaw, alt_contact: '', notes: '',
-    projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
-    samba: { status: 'Not contacted', notes: '' }
-  };
-  agents.push(newAgent);
-  saveOneAgent(newAgent); render();
+  render();
   // Slide-in animation on the newly added card
   setTimeout(() => {
     const firstCard = document.querySelector('.agent-card');
@@ -2280,9 +2300,6 @@ function quickAdd() {
   document.getElementById('qaWa').value = '';
   document.getElementById('qaName').value = '';
   document.getElementById('qaAgency').value = '';
-  document.getElementById('qaBtn').disabled = true;
-  fb.textContent = 'Added!'; fb.style.color = 'var(--accent-mid)';
-  fb.classList.add('show'); setTimeout(() => fb.classList.remove('show'), 2000);
   document.getElementById('qaWa').focus();
 }
 
@@ -4812,20 +4829,34 @@ function updateImportBtn() {
   btn.disabled = count === 0;
 }
 
-function importSelected() {
+async function importSelected() {
   const existingPhones = new Set(agents.map(a => a.wa_num).filter(Boolean));
   let nextId = Math.max(0, ...agents.map(x => x.id)) + 1;
-  let imported = 0;
-  selectedResults.forEach(i => {
+  let imported = 0, welcomed = 0;
+  for (const i of selectedResults) {
     const r = discoverResults[i];
-    if (!r || r.isDuplicate) return;
-    if (r.phone && existingPhones.has(r.phone)) return;
+    if (!r || r.isDuplicate) continue;
+    if (r.phone && existingPhones.has(r.phone)) continue;
     if (r.phone) existingPhones.add(r.phone);
     const agentName = r.source === 'Facebook' ? r.name : '';
     const agencyName = r.source === 'Facebook' ? '' : r.name;
     const notes = r.source === 'Facebook'
       ? 'Source: Facebook | ' + (r.snippet || '').slice(0,80)
       : (r.website ? 'Website: ' + r.website : '');
+    // Named contacts (Facebook results) go through quick_add_agent so they're
+    // enrolled in Samba and get Maya's onboarding welcome (deferred to 9am WITA
+    // if off-hours). Nameless Google Maps businesses can't be personalised in the
+    // welcome template, so they get a plain insert (no onboarding).
+    if (agentName && r.phone) {
+      try {
+        const resp = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'quick_add_agent', payload: { name: agentName, wa_num: r.phone, notes } }) });
+        const d = await resp.json().catch(() => ({}));
+        if (resp.status === 409) continue;
+        if (resp.ok && d.agent) { agents.push(d.agent); imported++; if (d.welcome_sent || d.welcome_deferred) welcomed++; }
+      } catch (e) { /* skip on failure */ }
+      continue;
+    }
     const newAgent = { id: nextId++, name: agentName, agency: agencyName, wa_url: r.phone?'https://wa.me/'+r.phone:'',
       wa_num: r.phone||'', alt_contact: '', notes,
       projects: Object.fromEntries(KAYA_PROJECTS.map(p => [p, { status: 'Not contacted', url: '' }])),
@@ -4834,7 +4865,7 @@ function importSelected() {
     agents.push(newAgent);
     saveOneAgent(newAgent);
     imported++;
-  });
+  }
   closeDiscoverPanel(); render();
   discoverResults = []; selectedResults = new Set();
   document.getElementById('discoverResults').innerHTML = '';
@@ -4842,7 +4873,7 @@ function importSelected() {
   document.getElementById('discoverStatus').classList.remove('show');
   document.getElementById('discoverRunBtn').disabled = false;
   document.getElementById('discoverRunBtn').textContent = 'Search Google Maps';
-  if (imported > 0) alert(imported + ' new agents imported!');
+  if (imported > 0) alert(imported + ' new agents imported!' + (welcomed ? ' ' + welcomed + ' onboarded by Maya.' : ''));
 }
 
 function downloadExcel() {

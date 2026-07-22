@@ -1,8 +1,8 @@
-import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate, isWithinWitaHours } from '../lib/kb.js';
+import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, isWithinWitaHours } from '../lib/kb.js';
 import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
-import { baseAgentFields, createAgentRow } from '../lib/agents.js';
+import { baseAgentFields, createAgentRow, sendWelcomeTemplate } from '../lib/agents.js';
 import { getPlaybook, renderPlaybookBlock, applyDecisions, runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 // Portal listings → card objects { slug, title, subtitle, image, url, badge }
@@ -1033,51 +1033,53 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!created.ok) return res.status(500).json({ error: 'insert failed: ' + created.error });
       const row = created.row;
       let welcome_sent = false;
-      const TOKEN = process.env.META_WA_TOKEN;
-      const PHONE_ID = process.env.META_WA_PHONE_ID;
-      if (!deferWelcome && row?.id && TOKEN && PHONE_ID) {
-        try {
-          const WABA_ID = process.env.META_WABA_ID;
-          if (WABA_ID) {
-            const tr = await fetch(`https://graph.facebook.com/v19.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
-              headers: { 'Authorization': 'Bearer ' + TOKEN }
-            });
-            const td = await tr.json();
-            const welcomeTpl = pickWelcomeTemplate(td.data);
-            if (welcomeTpl) {
-              const bodyComp = (welcomeTpl.components || []).find(c => c.type === 'BODY');
-              const fName = String(name).trim().split(/\s+/)[0] || 'there';
-              const components = [{ type: 'body', parameters: [{ type: 'text', text: fName }] }];
-              const btnComp = (welcomeTpl.components || []).find(c => c.type === 'BUTTONS');
-              const urlBtn = (btnComp?.buttons || []).find(b => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || ''));
-              if (urlBtn) components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: '' }] });
-              const sr = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
-                method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  messaging_product: 'whatsapp', to: wa, type: 'template',
-                  template: { name: welcomeTpl.name, language: { code: welcomeTpl.language || 'en' }, components }
-                })
-              });
-              const sd = await sr.json();
-              if (sr.ok) {
-                welcome_sent = true;
-                const rendered = (bodyComp?.text || '').replace(/\{\{1\}\}/g, fName);
-                await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-                  method: 'POST', headers,
-                  body: JSON.stringify({
-                    agent_id: row.id, wa_num: wa, direction: 'outbound',
-                    content: rendered, wa_message_id: sd.messages?.[0]?.id,
-                    timestamp: new Date().toISOString(), source: 'api',
-                    category: 'onboarding', status: 'sent', template_name: welcomeTpl.name
-                  })
-                }).catch(() => {});
-              }
-            }
-          }
-        } catch (e) { console.warn('welcome template send failed:', e.message); }
+      if (!deferWelcome && row?.id) {
+        const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: row.id, name, wa, source: 'api' });
+        welcome_sent = wr.sent;
+        if (!wr.sent && wr.reason) console.warn('welcome template send failed:', wr.reason, wr.detail || '');
       }
       return res.status(200).json({ success: true, agent: row, welcome_sent, welcome_deferred: deferWelcome });
+
+    } else if (action === 'onboard_existing_agents') {
+      // Backfill onboarding for agents that were added via a path which didn't
+      // enroll or welcome them (the in-app add paths before they routed through
+      // quick_add_agent). Enrolls each in Samba and sends the welcome template
+      // now — or defers to the 9am cron if we're outside 9am-9pm WITA. Skips
+      // anyone already enrolled or already sent an onboarding message, and anyone
+      // without a name (the template needs a first name). Idempotent + safe to
+      // re-run. Gated behind the same admin secret as template creation.
+      const secret = req.headers['x-admin-secret'] || (payload || {}).admin_secret;
+      const expected = process.env.TEMPLATE_ADMIN_SECRET || process.env.LISTING_SYNC_SECRET;
+      if (!expected || secret !== expected) return res.status(401).json({ error: 'unauthorized' });
+      const ids = Array.isArray((payload || {}).agent_ids) ? payload.agent_ids.map(Number).filter(Boolean) : [];
+      if (!ids.length) return res.status(400).json({ error: 'agent_ids required' });
+      const dryRun = (payload || {}).dry_run === true;
+      const rows = await (await fetch(`${SUPABASE_URL}/rest/v1/agents?id=in.(${ids.join(',')})&select=id,name,wa_num,campaign_engagement`, { headers })).json();
+      const already = await (await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=in.(${ids.join(',')})&category=eq.onboarding&select=agent_id`, { headers })).json();
+      const welcomedIds = new Set((Array.isArray(already) ? already : []).map(m => m.agent_id));
+      const deferWelcome = !isWithinWitaHours();
+      const results = [];
+      for (const a of (Array.isArray(rows) ? rows : [])) {
+        const wa = String(a.wa_num || '').replace(/\D/g, '');
+        const name = String(a.name || '').trim();
+        if (!wa || wa.length < 9) { results.push({ id: a.id, status: 'skipped_no_number' }); continue; }
+        if (!name) { results.push({ id: a.id, status: 'skipped_no_name' }); continue; }
+        if (a.campaign_engagement?.samba?.status === 'enrolled' || welcomedIds.has(a.id)) {
+          results.push({ id: a.id, status: 'skipped_already_onboarded' }); continue;
+        }
+        if (dryRun) { results.push({ id: a.id, name, status: deferWelcome ? 'would_defer' : 'would_send' }); continue; }
+        // Enroll (mark pending when deferring so the 9am cron drains it).
+        const samba = { status: 'enrolled', source: 'quick_add', ...(deferWelcome ? { welcome_pending: true } : {}) };
+        const prev = a.campaign_engagement || {};
+        await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, {
+          method: 'PATCH', headers,
+          body: JSON.stringify({ campaign_engagement: { ...prev, samba: { ...(prev.samba || {}), ...samba } } })
+        }).catch(() => {});
+        if (deferWelcome) { results.push({ id: a.id, name, status: 'deferred' }); continue; }
+        const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: a.id, name, wa, source: 'api' });
+        results.push({ id: a.id, name, status: wr.sent ? 'sent' : 'send_failed', reason: wr.reason || null });
+      }
+      return res.status(200).json({ success: true, deferred: deferWelcome, dry_run: dryRun, results });
 
     } else if (action === 'assistant') {
       // Maya's boss console — agentic tool loop over the CRM (lib/assistant.js)
