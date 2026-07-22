@@ -1403,7 +1403,7 @@ function convRow(a) {
     const hasDraft = a.suggested_reply && a.suggested_reply.trim();
     const unread = a.unread_count || 0;
     const lastCard = parseCardMarker(m?.lastContent);
-    const lastText = lastCard ? (icm('home',13) + (lastCard.type === 'carousel' ? ' Property carousel' : ' Property listing')) : (m?.lastContent || '');
+    const lastText = lastCard ? (lastCard.type === 'carousel' ? 'Property carousel' : 'Property listing') : (m?.lastContent || '');
     const snip = m?.lastContent ? (m.direction === 'outbound' ? 'You: ' : '') + lastText.slice(0, 60) : (a.agency || '');
 
     let pill = '';
@@ -1560,7 +1560,7 @@ function currentAgentName() {
   return a ? (a.name || a.agency || 'Agent') : 'Agent';
 }
 function quoteSnippet(m) {
-  if (parseCardMarker(m.content)) return icm('home',13) + ' Listing';
+  if (parseCardMarker(m.content)) return 'Property listing';
   if (m.media_type) return (MEDIA_LABELS[m.media_type] || 'Attachment');
   return (m.content || '').slice(0, 80);
 }
