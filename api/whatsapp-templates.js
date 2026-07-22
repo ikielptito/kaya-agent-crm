@@ -197,12 +197,21 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && req.body?.action === 'send_report_test') {
       const tests = Array.isArray(req.body.tests) ? req.body.tests : [];
       if (!tests.length) return res.status(400).json({ error: 'tests[] required' });
+      const dryRun = !!req.body.dryRun;
       const secret = process.env.LISTING_SYNC_SECRET;
+      // Resolve recipient from each listing's own contact number (what the
+      // production weekly cron sends to) unless an explicit `to` is given.
+      const slugToWa = {};
+      try {
+        const of = await fetch('https://sambarentals.com/api/dashboard?owner_sync=1', { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
+        if (of.ok) { const oj = await of.json(); (oj.owners || []).forEach(o => { if (o.slug && o.waNumber) slugToWa[o.slug] = o.waNumber; }); }
+      } catch { /* fall back to explicit `to` only */ }
       const results = [];
       for (const t of tests) {
-        const to = String(t.to || '').replace(/\D/g, '');
         const slug = String(t.slug || '');
-        if (!to || !slug) { results.push({ to: t.to, slug, ok: false, error: 'missing to/slug' }); continue; }
+        const to = String(t.to || slugToWa[slug] || '').replace(/\D/g, '');
+        if (!slug) { results.push({ to, slug, ok: false, error: 'missing slug' }); continue; }
+        if (!to) { results.push({ to: '', slug, ok: false, error: 'no contact number on this listing' }); continue; }
         let d;
         try {
           const rr = await fetch(`https://sambarentals.com/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
@@ -214,6 +223,8 @@ export default async function handler(req, res) {
         const views = String(d.metrics?.views?.now ?? 0);
         const enq = String(d.metrics?.enquiries?.now ?? 0);
         const tok = mkReportToken(slug);
+        const masked = to.length > 4 ? '···' + to.slice(-4) : to;
+        if (dryRun) { results.push({ to: masked, slug, name, views, enq, reportUrl: `https://sambarentals.com/r/${tok}`, dryRun: true }); continue; }
         const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
           method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -228,7 +239,7 @@ export default async function handler(req, res) {
           }),
         });
         const sd = await send.json().catch(() => ({}));
-        results.push({ to, slug, name, ok: send.ok, id: sd?.messages?.[0]?.id, reportUrl: `https://sambarentals.com/r/${tok}`, error: send.ok ? undefined : (sd?.error?.message || `send HTTP ${send.status}`) });
+        results.push({ to: masked, slug, name, ok: send.ok, id: sd?.messages?.[0]?.id, reportUrl: `https://sambarentals.com/r/${tok}`, error: send.ok ? undefined : (sd?.error?.message || `send HTTP ${send.status}`) });
       }
       return res.status(200).json({ results });
     }
