@@ -2,6 +2,7 @@
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
 import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, createMediaTemplate, heroImageForSlug } from '../lib/wa-carousel.js';
+import crypto from 'node:crypto';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -188,6 +189,50 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, id: created.id, status: created.status, name });
     }
 
+    // One-shot test send of the weekly owner report. Body: { action:'send_report_test',
+    // tests:[{ to, slug, name }] }. Fetches each listing's live report, fills the
+    // approved samba_owner_weekly_report template (+ signed report-link button),
+    // and sends. Fails per-item if the template isn't approved yet — everything
+    // else (report fetch, token) still reports so the pipeline is verifiable.
+    if (req.method === 'POST' && req.body?.action === 'send_report_test') {
+      const tests = Array.isArray(req.body.tests) ? req.body.tests : [];
+      if (!tests.length) return res.status(400).json({ error: 'tests[] required' });
+      const secret = process.env.LISTING_SYNC_SECRET;
+      const results = [];
+      for (const t of tests) {
+        const to = String(t.to || '').replace(/\D/g, '');
+        const slug = String(t.slug || '');
+        if (!to || !slug) { results.push({ to: t.to, slug, ok: false, error: 'missing to/slug' }); continue; }
+        let d;
+        try {
+          const rr = await fetch(`https://sambarentals.com/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
+          if (!rr.ok) { results.push({ to, slug, ok: false, error: `report HTTP ${rr.status}` }); continue; }
+          d = await rr.json();
+        } catch (e) { results.push({ to, slug, ok: false, error: 'report fetch: ' + e.message }); continue; }
+        const name = String(t.name || d.ownerName || 'there').split(/\s+/)[0];
+        const week = fmtReportWeek(d.week);
+        const views = String(d.metrics?.views?.now ?? 0);
+        const enq = String(d.metrics?.enquiries?.now ?? 0);
+        const tok = mkReportToken(slug);
+        const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            messaging_product: 'whatsapp', to, type: 'template',
+            template: {
+              name: 'samba_owner_weekly_report', language: { code: 'en' },
+              components: [
+                { type: 'body', parameters: [name, week, views, enq].map(x => ({ type: 'text', text: String(x) })) },
+                { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+              ],
+            },
+          }),
+        });
+        const sd = await send.json().catch(() => ({}));
+        results.push({ to, slug, name, ok: send.ok, id: sd?.messages?.[0]?.id, reportUrl: `https://sambarentals.com/r/${tok}`, error: send.ok ? undefined : (sd?.error?.message || `send HTTP ${send.status}`) });
+      }
+      return res.status(200).json({ results });
+    }
+
     const r = await fetch(
       `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=name,status,category,language,components,quality_score&limit=100`,
       { headers: { 'Authorization': 'Bearer ' + TOKEN } }
@@ -222,4 +267,16 @@ export default async function handler(req, res) {
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
+}
+
+// Signed report token — MUST match api/portal.js verifyReportToken (same
+// LISTING_SYNC_SECRET, HMAC-SHA256, first 16 hex chars).
+function mkReportToken(slug) {
+  const sig = crypto.createHmac('sha256', process.env.LISTING_SYNC_SECRET || '').update(String(slug)).digest('hex').slice(0, 16);
+  return `${slug}~${sig}`;
+}
+function fmtReportWeek(week) {
+  if (!week?.from || !week?.to) return 'this week';
+  const f = new Date(week.from + 'T00:00:00Z'), t = new Date(week.to + 'T00:00:00Z');
+  return `${f.toLocaleDateString('en-GB', { day: 'numeric', timeZone: 'UTC' })}–${t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}`;
 }
