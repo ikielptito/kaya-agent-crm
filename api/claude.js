@@ -1,3 +1,21 @@
+// Repair unpaired UTF-16 surrogates (broken emoji halves from WhatsApp text) so the
+// payload survives Anthropic's strict JSON parser ("no low surrogate in string").
+function wellFormedStr(s) {
+  return typeof s.toWellFormed === 'function'
+    ? s.toWellFormed()
+    : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+}
+function deepWellFormed(v) {
+  if (typeof v === 'string') return wellFormedStr(v);
+  if (Array.isArray(v)) return v.map(deepWellFormed);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k in v) o[k] = deepWellFormed(v[k]);
+    return o;
+  }
+  return v;
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -19,7 +37,7 @@ export default async function handler(req, res) {
         'x-api-key': process.env.ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(deepWellFormed(req.body)),
     });
 
     const data = await response.json();
