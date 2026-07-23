@@ -6,7 +6,7 @@
 // App shell cache — the inbox opens instantly and works offline with the
 // last-loaded shell. Network-first so deploys are picked up immediately;
 // the cache only serves when the network is down.
-const SHELL_CACHE = 'maya-shell-v2';
+const SHELL_CACHE = 'maya-shell-v3-rebrand';
 const SHELL_URLS = ['/chat.html', '/manifest.webmanifest', '/maya-icon.svg'];
 
 self.addEventListener('install', e => {
