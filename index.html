@@ -3,13 +3,25 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Agent CRM</title>
+<title>Samba CRM — Agent network</title>
+<meta name="description" content="Samba's agent relationship manager — track rental agents, listings, and outreach across Bali.">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Samba">
+<meta property="og:title" content="Samba CRM">
+<meta property="og:description" content="Connecting owners & agents — Bali's rental network.">
+<meta property="og:image" content="/brand/og-image.png">
+<meta property="og:image:width" content="1731">
+<meta property="og:image:height" content="909">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="/brand/og-image.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/brand.css">
 <link rel="icon" type="image/png" sizes="32x32" href="/brand/favicon-32.png">
-<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/brand/favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png">
+<link rel="manifest" href="/samba.webmanifest">
 <meta name="theme-color" content="#F4F1ED">
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
@@ -53,10 +65,11 @@ body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(-
 /* HEADER */
 .header { background: white; border-bottom: 1px solid var(--sand3); padding: 0 24px; display: flex; align-items: center; gap: 16px; height: 56px; position: sticky; top: 0; z-index: 100; }
 
-.brand { display: flex; align-items: baseline; gap: 8px; flex-shrink: 0; }
-.brand-name { font-family: 'Instrument Serif', serif; font-size: 18px; color: var(--ink); }
-.brand-sep { width: 1px; height: 14px; background: var(--sand3); }
-.brand-sub { font-size: 11px; color: var(--ink3); font-weight: 400; letter-spacing: 0.04em; text-transform: uppercase; }
+.brand { display: flex; align-items: center; gap: 7px; flex-shrink: 0; }
+.brand-logo { width: 26px; height: 26px; display: block; }
+.brand-name { font-family: 'Satoshi', var(--sb-font-display, sans-serif); font-weight: 900; font-size: 20px; letter-spacing: -.01em; color: var(--ink); }
+.brand-sep { width: 1px; height: 16px; background: var(--sand3); }
+.brand-sub { font-size: 11px; color: var(--ink3); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; }
 
 /* PIPELINE TOGGLE */
 .pipeline-toggle { display: flex; background: var(--sand); border-radius: 8px; padding: 3px; gap: 2px; flex-shrink: 0; }
@@ -673,7 +686,8 @@ body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(-
 
 <header class="header">
   <div class="brand">
-    <span class="brand-name" id="brandName">KAYA</span>
+    <img class="brand-logo" src="/brand/samba-mark.png" alt="Samba" width="26" height="26">
+    <span class="brand-name" id="brandName">Samba</span>
     <span class="brand-sep"></span>
     <span class="brand-sub" id="brandSub">CRM</span>
   </div>
