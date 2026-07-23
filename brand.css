@@ -126,14 +126,9 @@
   --sb-shadow-sm:0 1px 2px rgba(0,0,0,.4),0 4px 10px rgba(0,0,0,.3);
   --sb-shadow-md:0 2px 4px rgba(0,0,0,.4),0 10px 24px rgba(0,0,0,.35);
 }
-@media (prefers-color-scheme:dark){
-  :root:not([data-theme="light"]){
-    --sb-bg:#0E1310; --sb-surface:#161D19; --sb-surface-2:#1B231E;
-    --sb-surface-sunken:#10160F; --sb-border:#28322C; --sb-hairline:rgba(255,255,255,.08);
-    --sb-text:#EDEAE2; --sb-text-2:#C5C9C1; --sb-muted:#8F958D; --sb-subtle:#6B716A;
-    --sb-on-green:#EDEAE2;
-  }
-}
+/* Dark theme is OPT-IN only (set data-theme="dark" on <html>). It is intentionally
+   NOT auto-applied via prefers-color-scheme, because the existing pages are designed
+   light-only and would render half-broken if the system flipped them to dark. */
 
 /* ==========================================================================
    Base primitives
