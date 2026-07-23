@@ -1,7 +1,7 @@
 // Fetch the list of approved WhatsApp Business templates from Meta.
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
-import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, createMediaTemplate, heroImageForSlug } from '../lib/wa-carousel.js';
+import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, createMediaTemplate, heroImageForSlug, setBusinessProfilePicture } from '../lib/wa-carousel.js';
 import crypto from 'node:crypto';
 
 export default async function handler(req, res) {
@@ -48,6 +48,20 @@ export default async function handler(req, res) {
       wabaId = phoneData.whatsapp_business_account?.id;
       if (!wabaId) {
         return res.status(500).json({ error: 'Could not determine WABA ID', details: phoneData });
+      }
+    }
+
+    if (req.method === 'POST' && req.body?.action === 'set-profile-picture') {
+      // Set Maya's WhatsApp profile picture. Image comes inline as base64 so
+      // nothing has to be hosted publicly; the token lives here at runtime.
+      const { imageBase64, mime } = req.body;
+      if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
+      try {
+        const buffer = Buffer.from(imageBase64, 'base64');
+        const out = await setBusinessProfilePicture({ TOKEN, PHONE_ID }, buffer, mime || 'image/jpeg');
+        return res.status(200).json({ success: true, bytes: buffer.length, ...out });
+      } catch (e) {
+        return res.status(500).json({ error: e.message });
       }
     }
 
