@@ -1305,6 +1305,22 @@ function wellFormedStr(s) {
     : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
 }
 
+// Recursively repair lone surrogates through an arbitrary structure (system
+// prompt strings + the messages array). Conversation history loaded from the DB
+// can still carry broken emoji stored before ingestion sanitization existed, so
+// every Anthropic request body must pass through this or the whole call fails
+// with "no low surrogate in string".
+function deepWellFormed(v) {
+  if (typeof v === 'string') return wellFormedStr(v);
+  if (Array.isArray(v)) return v.map(deepWellFormed);
+  if (v && typeof v === 'object') {
+    const o = {};
+    for (const k in v) o[k] = deepWellFormed(v[k]);
+    return o;
+  }
+  return v;
+}
+
 function humanizeMarker(content) {
   const c = String(content || '');
   const m = c.match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
@@ -1478,12 +1494,12 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+        body: JSON.stringify(deepWellFormed({
           model: 'claude-sonnet-4-6',
           max_tokens: 800,
           system,
           messages,
-        })
+        }))
       });
       llmCalls++;
       const data = await res.json();
@@ -1642,7 +1658,7 @@ Use "report" to fetch real numbers before answering a performance question (set 
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 700, system, messages }),
+        body: JSON.stringify(deepWellFormed({ model: 'claude-sonnet-4-6', max_tokens: 700, system, messages })),
       });
       llmCalls++;
       const data = await res.json();
