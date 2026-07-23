@@ -437,8 +437,10 @@ export default async function handler(req, res) {
     // content string + a media reference (if applicable) so the inbox
     // shows the actual message instead of a blank row.
     const extracted = extractInboundContent(msg);
-    let text = extracted.textForClaude;       // what Maya sees as the inbound prompt
-    let dbContent = extracted.dbContent;      // what gets stored in wa_messages.content
+    // Repair broken emoji (unpaired UTF-16 surrogates) right at ingestion so
+    // bad characters never reach the DB or the model.
+    let text = wellFormedStr(extracted.textForClaude);   // what Maya sees as the inbound prompt
+    let dbContent = wellFormedStr(extracted.dbContent);  // what gets stored in wa_messages.content
     const mediaType = extracted.mediaType;    // 'image' | 'document' | 'audio' | etc, or null
     const mediaId = extracted.mediaId;        // WhatsApp media id, fetched on demand by /api/wa-media
     const reactionTarget = extracted.reactionTarget; // for reactions, the original message_id
@@ -1294,6 +1296,15 @@ async function sendDocument(phoneId, token, to, link, filename) {
 
 // Rich [[card]] / [[carousel]] rows read as JSON gunk in Maya's own context —
 // collapse them to a short human line for summaries and thread history.
+// Repair unpaired UTF-16 surrogates (half-emoji from WhatsApp) so stored content
+// and model payloads stay well-formed. Non-strings pass through untouched.
+function wellFormedStr(s) {
+  if (typeof s !== 'string') return s;
+  return s.toWellFormed
+    ? s.toWellFormed()
+    : s.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '�');
+}
+
 function humanizeMarker(content) {
   const c = String(content || '');
   const m = c.match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
