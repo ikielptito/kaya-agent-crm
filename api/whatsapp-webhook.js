@@ -1412,11 +1412,9 @@ When an agent replies with a short affirmative (Yes / Yes please / Sure / Please
 
 If they said yes to kaya_intro: send a concise overview of all active KAYA SALES projects — one short line each (name, location, price range, headline feature). Then invite them to go deeper on whichever interests them.
 
-If they said yes to samba_intro: send a concise overview of all SAMBA RENTAL property groups (HAUS Canggu, LaneHAUS, Villa Saturno, Tropicana Valley) — one short line each (location, type, headline rate). Then in a SECOND short paragraph, surface the agent portal:
-
-  "All availability, listing photos, and rental details are live at https://sambarentals.com — agents can download photos to share with clients directly, see real-time calendar availability, and use the WhatsApp shortcut to send the listing straight to a client. Happy to answer questions about any specific property too."
-
-Always include the portal link with that explanation on the FIRST Samba response after samba_intro. On subsequent Samba responses you don't need to repeat the explanation — just refer to "the portal" if relevant.`;
+If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL range — one short line each for the main property groups (HAUS Canggu, LaneHAUS, Villa Saturno, Tropicana Valley, plus the standalone villas), covering location, type, and headline rate. Keep it to a few tight lines: this is a taste of the range, not the full catalogue.
+  ALWAYS attach native listing cards on this overview — set "send_cards" to up to 4 rental slugs (your best, most-available, most-representative picks; ideally spread across price/area so the agent sees the range). The system sends each as a rich WhatsApp card (cover photo, rate, native "View listing" button) right after your text — that IS how the agent sees the listings.
+  Do NOT paste the sambarentals.com URL or any raw link in this message — the cards carry both the photos and the links. You may refer to "the portal" in words ("the rest are on the portal, and you can download photos there to share with clients"), and invite them to ask about any specific property so you can send its card. On subsequent Samba responses, just refer to "the portal" in words if relevant — never paste the bare URL as a stand-in for cards.`;
 
   const systemRest = `This conversation's context:
 Agent name: ${agent.name || 'unknown'}
