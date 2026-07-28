@@ -548,6 +548,25 @@ export default async function handler(req, res) {
       waveCount: staggered ? AVAILABILITY_WAVES : 1,
     });
 
+    // ── INTRO SWEEP (first-touch backlog) ────────────────────────────
+    // After the regular broadcast: send the carousel intro to a capped batch
+    // of enrolled agents who've never received ANY availability message.
+    // Gated by settings.samba_availability.intro_sweep_daily_cap (off when
+    // unset/0). Runs on the wave-0 daily pass and manual fires, never in
+    // preview; per-agent dedupe (introducedSet + last_availability_alert_at)
+    // makes an extra manual run safe — it just works further down the queue.
+    let introSweep = null;
+    if (!previewMode) {
+      try {
+        introSweep = await runIntroSweep({
+          now, sbHeaders, supabaseUrl: SUPABASE_URL,
+          agents, templatesMap,
+          waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+          results,
+        });
+      } catch (e) { introSweep = { error: e.message }; }
+    }
+
     // ── RENTALS RECONCILE (daily safety net) ─────────────────────────
     // The portal pushes every listing edit to us in real time (listing-sync
     // webhook into api/supabase.js); this daily pass re-syncs everything in
@@ -725,6 +744,7 @@ export default async function handler(req, res) {
         sequences: sequenceSent,
         alerts: availabilityResult?.event_alerts_sent || 0,
         digests: availabilityResult?.weekly_digest_sent || 0,
+        intros: introSweep?.sent || 0,
         resumed: autoResumed || 0,
         briefing: !!ownerReport?.sent,
         review: weeklyReview?.grade || (weeklyReview?.staged ? 'staged' : null),
@@ -745,6 +765,7 @@ export default async function handler(req, res) {
       sla_reminded: slaReminded,
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
+      intro_sweep: introSweep,
       rentals_reconcile: rentalsReconcile,
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
@@ -1466,6 +1487,146 @@ export async function runAvailabilityNotifications(ctx) {
     await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
   }
   summary.ran = true;
+  return summary;
+}
+
+// ── INTRO SWEEP ──────────────────────────────────────────────────────
+// One-time first-touch for enrolled agents the availability broadcast has
+// never reached. The daily broadcast is event-driven (needs ≥HIGH_SIGNAL_MIN
+// new openings) and tier-gated (dormant = Monday digest only), so an agent
+// can sit enrolled for weeks without a single availability message. This
+// sweep works through that backlog at a capped rate: each run sends the
+// carousel intro (top available villas + "I'm Maya" framing) to up to
+// `intro_sweep_daily_cap` never-touched agents, most-engaged tiers first.
+// Dormant agents are deliberately INCLUDED — their tag usually comes from
+// old KAYA sales history, and everyone deserves exactly one proper hello.
+// Off by default: runs only when settings.samba_availability
+// .intro_sweep_daily_cap is set to a positive number.
+export async function runIntroSweep(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
+
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  const cap = parseInt(config.intro_sweep_daily_cap, 10) || 0;
+  if (!config.enabled || cap <= 0) {
+    summary.skipped_reason = !config.enabled
+      ? 'samba_availability.enabled = false'
+      : 'intro_sweep_daily_cap not set';
+    return summary;
+  }
+  summary.enabled = true;
+
+  // Mondays are digest day — never stack an intro on top of the digest.
+  if (now.getUTCDay() === 1) { summary.skipped_reason = 'Monday (digest day)'; return summary; }
+
+  // Carousel-only: the visual intro doesn't depend on that day's availability
+  // changes, so it can go out on quiet days too. If the carousel template
+  // isn't approved or the portal can't serve enough covers, skip today rather
+  // than sending a text intro with empty bullet slots.
+  if (!templatesMap[CAROUSEL_DIGEST]) { summary.skipped_reason = 'carousel template not approved'; return summary; }
+
+  const digestUrl = process.env.AVAILABILITY_DIGEST_URL;
+  const digestSecret = process.env.DIGEST_SHARED_SECRET;
+  if (!digestUrl || !digestSecret) {
+    summary.errors.push('AVAILABILITY_DIGEST_URL / DIGEST_SHARED_SECRET not set');
+    return summary;
+  }
+  let digest;
+  try {
+    const r = await fetch(digestUrl, { headers: { Authorization: `Bearer ${digestSecret}` } });
+    if (!r.ok) { summary.errors.push(`digest fetch ${r.status}`); return summary; }
+    digest = await r.json();
+  } catch (e) {
+    summary.errors.push('digest fetch failed: ' + e.message);
+    return summary;
+  }
+  let cards;
+  try { cards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT); } catch (_) { cards = null; }
+  if (!cards) { summary.skipped_reason = 'carousel unavailable (portal or covers short)'; return summary; }
+
+  // Never-touched = no availability-category wa_messages row AND no
+  // last_availability_alert_at stamp. Belt-and-braces on purpose: old
+  // wa_messages rows get pruned (which would make a long-introduced agent
+  // look new again), while the timestamp column never lies about a past send.
+  const introduced = await loadIntroducedSet(supabaseUrl, sbHeaders);
+  const TIER_ORDER = { champion: 0, active: 1, hot: 1, new: 2, warm: 3, dormant: 5, cold: 5 };
+  const tierRank = (a) => TIER_ORDER[String(a.engagement_tier || '').toLowerCase().trim()] ?? 4;
+  const queue = agents
+    .filter(a => isAvailabilityEligible(a, config))
+    .filter(a => !introduced.has(a.id) && !a.last_availability_alert_at)
+    .sort((a, b) => tierRank(a) - tierRank(b) || a.id - b.id);
+  summary.queue = queue.length;
+
+  for (const agent of queue.slice(0, cap)) {
+    const firstName = firstNameOf(agent.name);
+    const introText = `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`;
+    const components = buildCarouselComponents(firstName, cards, introText);
+
+    let metaErr = null;
+    let waMessageId = null;
+    try {
+      const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
+          template: { name: CAROUSEL_DIGEST, language: { code: 'en' }, components },
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        waMessageId = d.messages?.[0]?.id;
+      } else {
+        const d = await r.json().catch(() => ({}));
+        metaErr = d?.error?.message || `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      metaErr = e.message;
+    }
+    if (metaErr) {
+      summary.errors.push(`agent ${agent.id}: ${metaErr}`);
+      continue;
+    }
+
+    // Same rich carousel marker the broadcast logs, so the console inbox
+    // renders what the agent actually saw.
+    const renderedPreview = '[[carousel]]' + JSON.stringify({
+      title: 'Meet Maya — current openings',
+      cards: cards.map(c => ({
+        title: c.name,
+        subtitle: [c.detail, c.area].filter(Boolean).join(' · '),
+        image: c.imageUrl,
+        url: `https://sambarentals.com/?property=${c.slug}`,
+        badge: c.badge || null,
+      })),
+    });
+    await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({
+        agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+        content: renderedPreview, timestamp: now.toISOString(),
+        source: 'cron', category: 'availability_intro', template_name: CAROUSEL_DIGEST,
+        wa_message_id: waMessageId, status: 'sent',
+      }),
+    }).catch(() => {});
+
+    // Stamp the touch AND advance the CRM pipeline label — a real first
+    // message is exactly what 'Not contacted' → 'Contacted' means. (The
+    // manual campaign flow does the same bump client-side.)
+    const patch = { last_availability_alert_at: now.toISOString() };
+    const sambaStatus = agent.samba?.status || 'Not contacted';
+    if (sambaStatus === 'Not contacted') {
+      patch.samba = { ...(agent.samba || {}), status: 'Contacted' };
+    }
+    await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify(patch),
+    }).catch(() => {});
+
+    summary.sent++;
+    results.push({ availability: true, agent: agent.name || agent.id, kind: 'intro_sweep', template: CAROUSEL_DIGEST });
+  }
+  summary.remaining = Math.max(0, queue.length - summary.sent);
   return summary;
 }
 
