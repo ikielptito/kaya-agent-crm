@@ -28,20 +28,24 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --sand: #f5f2ed;
-  --sand2: #ede9e2;
-  --sand3: #e0dbd2;
-  --ink: #1a1814;
-  --ink2: #4a4540;
-  --ink3: #8a8278;
-  --ink4: #b8b2a8;
+  /* Neutrals from the Samba brand system (brand.css --sb-*) — names kept,
+     values reconciled so the console shares the site's foundation. */
+  --sand: #F4F1ED;
+  --sand2: #E9E2D6;
+  --sand3: #E7E1D8;
+  --ink: #131A17;
+  --ink2: #3B443E;
+  --ink3: #6E756F;
+  --ink4: #9AA09A;
 
+  /* Pipeline identities: KAYA keeps its own green (semantic, not drift);
+     the Samba pipeline moves off the old brown onto true brand terracotta. */
   --kaya: #2d5a3d;
   --kaya-light: #e8f0eb;
   --kaya-mid: #4a8a5e;
-  --samba: #8b4513;
-  --samba-light: #f5ede6;
-  --samba-mid: #c4722a;
+  --samba: #B23E19;
+  --samba-light: #FBEDE7;
+  --samba-mid: #CE4A20;
 
   --accent: #2d5a3d;
   --accent-light: #e8f0eb;
@@ -56,8 +60,8 @@
   --s4-bg: #f5eef8; --s4-text: #6a3898; --s4-dot: #9a58c8;
   --s5-bg: #e3f5ee; --s5-text: #1a6848; --s5-dot: #28a868;
 
-  --radius: 12px;
-  --radius-sm: 7px;
+  --radius: 14px;
+  --radius-sm: 6px;
 }
 
 body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(--ink); min-height: 100vh; font-size: 14px; line-height: 1.5; }
