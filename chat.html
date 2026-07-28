@@ -1366,7 +1366,9 @@ function initials(name, agency) {
   if (w.length === 1) return w[0].slice(0, 2).toUpperCase();
   return '?';
 }
-function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Full escape set — quotes included, so interpolation into HTML attributes
+// (title="...", data-*) can't be broken out of by message content.
+function esc(s) { return (s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
 // ── Inline stroke icons (Lucide-style, currentColor) — replaces emoji chrome ──
 const ICONS = {

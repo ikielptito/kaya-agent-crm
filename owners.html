@@ -110,7 +110,7 @@ async function api(action, payload){
   try{ return JSON.parse(t); }catch{ return null; }
 }
 function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2400); }
-function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function initials(o){ const n=(o.name||'').trim(); if(n) return n.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(); return '#'; }
 function fmtTime(iso){ if(!iso) return ''; const d=new Date(iso), now=new Date(); const sameDay=d.toDateString()===now.toDateString(); return sameDay ? d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
 

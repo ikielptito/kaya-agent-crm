@@ -1328,7 +1328,6 @@ async function loadAgents() {
       const data = await r.json();
       if (data && data.length > 0) {
         agents = data;
-        console.log('Loaded', agents.length, 'agents from Supabase');
         render();
         return;
       }
@@ -1370,7 +1369,6 @@ async function saveOneAgent(agent) {
           agents[idx] = serverAgent;
         }
         try { localStorage.setItem('kaya_samba_crm_v5', JSON.stringify(agents)); } catch(e) {}
-        console.log('Saved agent', serverAgent.id, serverAgent.name, 'to Supabase');
         return serverAgent;
       }
     } else {
@@ -6105,7 +6103,7 @@ function twoCol(a, b) {
 
 function esc(v) {
   if (v === null || v === undefined) return '';
-  return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function escapeHtml(v) { return esc(v); }
