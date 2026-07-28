@@ -342,22 +342,57 @@ const DAILY_SPEND_CAP_USD = 2.00;
 // Cache read ≈ $0.30/M (0.1×), cache write ≈ $3.75/M (1.25×) — both 0 today
 // since Maya's calls don't set cache_control, but included so the number stays
 // correct if caching is added later.
-const SONNET_INPUT_USD_PER_TOK = 3 / 1e6;
-const SONNET_OUTPUT_USD_PER_TOK = 15 / 1e6;
-const SONNET_CACHE_READ_USD_PER_TOK = 0.30 / 1e6;
-const SONNET_CACHE_WRITE_USD_PER_TOK = 3.75 / 1e6;
+// Per-token USD rates by model: input / output / cache-read / cache-write(5m).
+// Used so the daily spend cap reflects the ACTUAL model that answered — a Haiku
+// reply must be charged at Haiku rates, or the cap wouldn't move even though the
+// spend dropped.
+const MODEL_RATES = {
+  'claude-sonnet-4-6': { in: 3 / 1e6,  out: 15 / 1e6, cr: 0.30 / 1e6, cw: 3.75 / 1e6 },
+  'claude-haiku-4-5':  { in: 1 / 1e6,  out: 5 / 1e6,  cr: 0.10 / 1e6, cw: 1.25 / 1e6 },
+  'claude-opus-5':     { in: 5 / 1e6,  out: 25 / 1e6, cr: 0.50 / 1e6, cw: 6.25 / 1e6 },
+};
+
+// Maya's reply models. Sonnet is the default/safe choice; Haiku handles the
+// clearly-trivial traffic (~3x cheaper) when MAYA_HAIKU_ROUTING is enabled.
+const SONNET_MODEL = 'claude-sonnet-4-6';
+const HAIKU_MODEL = 'claude-haiku-4-5';
+
+// Conservative router: default to Sonnet, drop to Haiku ONLY for short,
+// single-intent, low-stakes messages (greetings/acks, commission questions,
+// brochure requests, photo/card requests). Anything with a hint of substance —
+// availability/dates, recommendations, contact/viewing requests, negotiation,
+// complaints, an image, a first-ever message, or length/multi-question — stays
+// on Sonnet. Off unless MAYA_HAIKU_ROUTING === '1', so rollout is opt-in and the
+// weekly Opus review (which audits the split) has data before we trust it.
+function pickReplyModel(text, { hasImage = false, firstContact = false } = {}) {
+  if (process.env.MAYA_HAIKU_ROUTING !== '1') return SONNET_MODEL;
+  const t = String(text || '').trim();
+  const low = t.toLowerCase();
+  if (hasImage || firstContact) return SONNET_MODEL;
+  if (t.length > 120) return SONNET_MODEL;                    // detailed / multi-part
+  if ((t.match(/\?/g) || []).length > 1) return SONNET_MODEL; // more than one question
+  const forceSonnet = /(availab|free\b|dates?|check.?in|check.?out|\bwhen\b|next (week|month)|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\b\d{1,2}[\/\-.]\d{1,2}|recommend|suggest|looking for|options|what.*(have|do you)|who (do i|to|should i)|contact|arrange|viewing|visit|\bbook|negoti|discount|lower|cheaper|complain|refund|deposit|legal|contract|talk to|speak to|ikiel)/i;
+  if (forceSonnet.test(low)) return SONNET_MODEL;
+  const haikuOk =
+    /^(hi|hey|hello|halo|hai|gm|good (morning|afternoon|evening)|thanks?|thank you|ok(ay)?|noted|got it|sure|great|cheers|bye|👍|🙏|selamat|makasih|terima kasih)\b/i.test(low)
+    || /commission|your cut|the split|how much do you (take|charge)/i.test(low)
+    || /brochure|pdf|info ?pack|catalogue?|documents?/i.test(low)
+    || /photos?|pictures?|images?|foto/i.test(low);
+  return haikuOk ? HAIKU_MODEL : SONNET_MODEL;
+}
 
 // Fallback per-reply charge if the API response carries no usage block (e.g.
 // an HTTP error before token accounting). Deliberately conservative.
 const FALLBACK_COST_PER_REPLY_USD = 0.02;
 
 // Real dollar cost of one Anthropic `usage` object.
-function costOfUsage(u) {
+function costOfUsage(u, model = SONNET_MODEL) {
   if (!u) return 0;
-  return (u.input_tokens || 0) * SONNET_INPUT_USD_PER_TOK
-    + (u.output_tokens || 0) * SONNET_OUTPUT_USD_PER_TOK
-    + (u.cache_read_input_tokens || 0) * SONNET_CACHE_READ_USD_PER_TOK
-    + (u.cache_creation_input_tokens || 0) * SONNET_CACHE_WRITE_USD_PER_TOK;
+  const r = MODEL_RATES[model] || MODEL_RATES[SONNET_MODEL];
+  return (u.input_tokens || 0) * r.in
+    + (u.output_tokens || 0) * r.out
+    + (u.cache_read_input_tokens || 0) * r.cr
+    + (u.cache_creation_input_tokens || 0) * r.cw;
 }
 
 export default async function handler(req, res) {
@@ -876,7 +911,7 @@ export default async function handler(req, res) {
       const buttons = Array.isArray(aiResult.reply_buttons) ? aiResult.reply_buttons : [];
       const replyMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply, buttons);
       const buttonsNote = buttons.length ? `\n[Buttons: ${buttons.join(' | ')}]` : '';
-      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply + buttonsNote, replyMid);
+      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply + buttonsNote, replyMid, null, aiResult.model);
       // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
       forwardMayaReply(agent, aiResult.reply).catch(() => {});
 
@@ -1104,20 +1139,29 @@ async function hasNewerInbound(url, headers, agentId, ownTimestamp, ownWaMessage
   } catch (_) { return false; }
 }
 
-async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null, category = null) {
+async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null, category = null, model = null) {
   const ts = new Date().toISOString();
-  await fetch(`${url}/rest/v1/wa_messages`, {
-    method: 'POST', headers,
-    body: JSON.stringify({
-      agent_id: agentId, wa_num: waNum, direction: 'outbound',
-      content, timestamp: ts, source: 'api',
-      // category feeds comms_metrics' read-rate-by-format breakdown
-      // (e.g. 'listing_card' vs free-text vs template sends).
-      category,
-      // Baseline status + the id so delivered/read events can be matched.
-      status: 'sent', wa_message_id: waMessageId
-    })
-  }).catch(e => console.warn('logOutbound failed:', e.message));
+  const row = {
+    agent_id: agentId, wa_num: waNum, direction: 'outbound',
+    content, timestamp: ts, source: 'api',
+    // category feeds comms_metrics' read-rate-by-format breakdown
+    // (e.g. 'listing_card' vs free-text vs template sends).
+    category,
+    // Which Claude model wrote this reply (haiku/sonnet) — feeds the weekly
+    // review's routing audit. Null for template/system sends.
+    model,
+    // Baseline status + the id so delivered/read events can be matched.
+    status: 'sent', wa_message_id: waMessageId
+  };
+  const post = (body) => fetch(`${url}/rest/v1/wa_messages`, {
+    method: 'POST', headers, body: JSON.stringify(body),
+  });
+  try {
+    const res = await post(row);
+    // Self-heal if the `model` column migration hasn't run yet: retry without it
+    // so a reply is never dropped from the inbox log over a schema lag.
+    if (!res.ok && model != null) { const { model: _m, ...rest } = row; await post(rest); }
+  } catch (e) { console.warn('logOutbound failed:', e.message); }
 
   // Also append outbound to the agent's conversation_summary so it's visible as context
   if (agentId) {
@@ -1365,6 +1409,10 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
   const brochureKeys = Object.keys(brochureMap).join(', ');
   const isHybrid = mode === 'hybrid';
 
+  // Pick Haiku vs Sonnet for this reply (no-op → Sonnet unless routing is on).
+  // A first-ever message (no prior thread) always gets Sonnet — first impression.
+  const replyModel = pickReplyModel(inbound, { hasImage: !!inboundImage, firstContact: !recentThread });
+
   const threadBlock = recentThread
     ? `Recent message thread (oldest → newest, both sides):\n${recentThread}`
     : `Prior notes:\n${(agent.conversation_summary || '(no prior history)').slice(-2500)}`;
@@ -1493,7 +1541,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
         body: JSON.stringify(deepWellFormed({
-          model: 'claude-sonnet-4-6',
+          model: replyModel,
           max_tokens: 800,
           system,
           messages,
@@ -1512,7 +1560,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         return { action: 'escalate', reply: '', error: errMsg, send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
       }
       // Charge actual token spend for this hop (falls back if usage is absent).
-      costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
+      costUsd += data.usage ? costOfUsage(data.usage, replyModel) : FALLBACK_COST_PER_REPLY_USD;
       const raw = data.content?.[0]?.text || '';
       const jsonMatch = raw.match(/\{[\s\S]*\}/);
       if (!jsonMatch) {
@@ -1546,14 +1594,15 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
         crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
         llm_calls: llmCalls,
         cost_usd: costUsd,
+        model: replyModel,
       };
     }
     // Exhausted hops without a terminal reply (e.g. Maya asked for availability
     // twice) — escalate so a human picks it up rather than sending nothing.
-    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd, model: replyModel };
   } catch (err) {
     console.warn('generateReply failed:', err.message);
-    return { action: 'escalate', reply: '', error: err.message || 'generateReply threw', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd };
+    return { action: 'escalate', reply: '', error: err.message || 'generateReply threw', send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls || 1, cost_usd: costUsd, model: replyModel };
   }
 }
 

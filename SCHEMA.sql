@@ -134,6 +134,10 @@ alter table wa_messages add column if not exists template_name text;  -- which t
 alter table wa_messages add column if not exists reply_to text;
   -- wa_message_id of the message this one quotes (reply context), either
   -- direction. The inbox renders a quoted preview above the bubble.
+alter table wa_messages add column if not exists model text;
+  -- which Claude model generated an outbound Maya reply ('claude-haiku-4-5' |
+  -- 'claude-sonnet-4-6'). Null for inbound, template, and manual sends. Feeds
+  -- the weekly self-review's Haiku/Sonnet routing audit.
 
 alter table agents add column if not exists engagement_tier text;
   -- hot | warm | cold — set by Maya via crm_updates based on conversation signals
