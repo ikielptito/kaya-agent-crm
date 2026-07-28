@@ -921,7 +921,7 @@ async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, 
     return r.ok;
   } catch (e) { return false; }
 }
-async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID }) {
+export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID }) {
   if (!WA_TOKEN || !WA_PHONE_ID) return { skipped: 'no WhatsApp credentials' };
   const secret = process.env.LISTING_SYNC_SECRET;
   const r = await fetch(`${SUPABASE_URL}/rest/v1/owners?opt_in=eq.true&report_enabled=eq.true&select=*`, { headers: sbHeaders });
@@ -931,29 +931,45 @@ async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PH
   const sixDaysAgo = Date.now() - 6 * 86400000;
   let sent = 0, skipped = 0, failed = 0;
   for (const o of list) {
-    const slug = (o.listing_slugs || [])[0];
-    if (!slug) { skipped++; continue; }
+    // EVERY listing this contact is linked to gets its own report message —
+    // a multi-villa owner used to receive only listing_slugs[0], leaving
+    // their other villas silently unreported. The template has exactly 4
+    // body params and no villa-name slot, so villa identity lives in each
+    // message's signed report link.
+    const slugs = Array.isArray(o.listing_slugs) ? o.listing_slugs.filter(Boolean) : [];
+    if (!slugs.length) { skipped++; continue; }
+    // Per-owner dedupe stays a single scalar: checked once before the loop,
+    // stamped once after. A mid-loop failure therefore won't re-send the
+    // earlier villas next run — accepted trade-off; failures are counted.
     if (o.last_report_sent_at && new Date(o.last_report_sent_at).getTime() > sixDaysAgo) { skipped++; continue; }
-    let d;
-    try {
-      const rr = await fetch(`${PORTAL_BASE}/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
-      if (!rr.ok) { failed++; continue; }
-      d = await rr.json();
-    } catch { failed++; continue; }
-    const firstName = String(o.name || 'there').split(/\s+/)[0];
-    const views = String(d.metrics?.views?.now ?? 0);
-    const enquiries = String(d.metrics?.enquiries?.now ?? 0);
-    const tok = reportToken(slug);
-    const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(d.week), views, enquiries, tok });
-    if (!ok) { failed++; continue; }
-    sent++;
-    await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-      method: 'POST', headers: sbHeaders,
-      body: JSON.stringify({ owner_id: o.id, wa_num: o.wa_num, direction: 'outbound', content: `[Weekly report sent — ${views} views, ${enquiries} enquiries]`, timestamp: new Date().toISOString(), source: 'cron', status: 'sent' }),
-    }).catch(() => {});
-    await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
-      method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ last_report_sent_at: new Date().toISOString() }),
-    }).catch(() => {});
+    let anySent = false;
+    for (const slug of slugs) {
+      let d;
+      try {
+        const rr = await fetch(`${PORTAL_BASE}/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
+        if (!rr.ok) { failed++; continue; }
+        d = await rr.json();
+      } catch { failed++; continue; }
+      const firstName = String(o.name || 'there').split(/\s+/)[0];
+      const views = String(d.metrics?.views?.now ?? 0);
+      const enquiries = String(d.metrics?.enquiries?.now ?? 0);
+      const tok = reportToken(slug);
+      const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(d.week), views, enquiries, tok });
+      if (!ok) { failed++; continue; }
+      sent++; anySent = true;
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({ owner_id: o.id, wa_num: o.wa_num, direction: 'outbound', content: `[Weekly report sent — ${d.name || slug}: ${views} views, ${enquiries} enquiries]`, timestamp: new Date().toISOString(), source: 'cron', status: 'sent' }),
+      }).catch(() => {});
+      // Gentle spacing: a 14-villa owner gets 14 templates back-to-back —
+      // don't hammer the Graph API or trip per-number rate limits.
+      if (slugs.length > 1) await new Promise(res => setTimeout(res, 300));
+    }
+    if (anySent) {
+      await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
+        method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ last_report_sent_at: new Date().toISOString() }),
+      }).catch(() => {});
+    }
   }
   return { considered: list.length, sent, skipped, failed };
 }
