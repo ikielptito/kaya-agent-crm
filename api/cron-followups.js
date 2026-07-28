@@ -56,9 +56,10 @@ const FOLLOWUP_INTERVAL_DAYS = 3;
 const MAX_FOLLOWUPS = 4;
 const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
 // Shared with the webhook cap — both charge the same daily_usage counter, so
-// this is the effective ceiling for the whole CRM's Claude spend. $2.00 with
-// accurate per-token costing (see costOfUsage) allows ~100+ replies/day.
-const DAILY_SPEND_CAP_USD = 2.00;
+// this is the effective ceiling for the whole CRM's Claude spend. With accurate
+// per-token costing (see costOfUsage) + Haiku routing, this allows several
+// hundred replies/day, minus the weekly Opus self-review's ~$0.40 on Sundays.
+const DAILY_SPEND_CAP_USD = 2.50;
 // Forward-looking estimate used ONLY to gate whether the next Claude call would
 // exceed the cap. Actual spend is charged from real token usage (costOfUsage),
 // so this just needs to be a safe upper bound on one reply (~1.5-2¢ real).
