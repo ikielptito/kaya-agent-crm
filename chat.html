@@ -1281,7 +1281,9 @@ async function submitQuickAdd(e) {
     result.className = 'qa-result ok';
     result.textContent = r.welcome_sent
       ? `Added! Welcome message sent to ${r.agent?.name || 'agent'}.`
-      : `Added! (Welcome template not yet approved — no message sent)`;
+      : r.welcome_deferred
+        ? `Added! Welcome message will send at 9am.`
+        : `Added! (Welcome template not yet approved — no message sent)`;
     btn.textContent = 'Done';
     refreshAll(true);
     setTimeout(() => {

@@ -1077,12 +1077,25 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!created.ok) return res.status(500).json({ error: 'insert failed: ' + created.error });
       const row = created.row;
       let welcome_sent = false;
+      let welcome_deferred = deferWelcome;
       if (!deferWelcome && row?.id) {
         const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: row.id, name, wa, source: 'api' });
         welcome_sent = wr.sent;
         if (!wr.sent && wr.reason) console.warn('welcome template send failed:', wr.reason, wr.detail || '');
+        // Timed out or transiently failed: don't lose the welcome. Flag it
+        // pending so the 9am WITA cron retries it, and report it as deferred so
+        // the client shows "will send" rather than "no message sent". A missing
+        // template / missing env isn't retryable, so leave those un-flagged.
+        if (!wr.sent && (wr.reason === 'timeout' || wr.reason === 'send_failed' || wr.reason === 'exception')) {
+          const eng = row.campaign_engagement || {};
+          eng.samba = { ...(eng.samba || {}), welcome_pending: true };
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${row.id}`, {
+            method: 'PATCH', headers, body: JSON.stringify({ campaign_engagement: eng }),
+          }).catch(() => {});
+          welcome_deferred = true;
+        }
       }
-      return res.status(200).json({ success: true, agent: row, welcome_sent, welcome_deferred: deferWelcome });
+      return res.status(200).json({ success: true, agent: row, welcome_sent, welcome_deferred });
 
     } else if (action === 'onboard_existing_agents') {
       // Backfill onboarding for agents that were added via a path which didn't

@@ -2290,6 +2290,7 @@ async function quickAdd() {
   const exists = agents.find(a => a.wa_num === waRaw);
   if (exists) { qaFlash('Already in CRM', 'var(--ink3)'); return; }
   document.getElementById('qaBtn').disabled = true;
+  if (name) qaFlash('Adding…', 'var(--ink3)');   // immediate feedback while the welcome send runs
   // With a name, route through quick_add_agent so the contact is enrolled in Samba
   // and gets Maya's onboarding welcome (deferred to 9am WITA if added off-hours).
   // Without a name the welcome template can't be personalised — fall back to a
