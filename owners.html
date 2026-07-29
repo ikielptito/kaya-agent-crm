@@ -102,6 +102,9 @@
   .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(70px);background:var(--ink);color:#fff;padding:10px 18px;border-radius:10px;font-size:.8rem;opacity:0;transition:all .25s;z-index:50;}
   .toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
   .loading{padding:30px;text-align:center;color:var(--muted);font-size:.85rem;}
+
+/* iOS auto-zoom guard — sub-16px inputs zoom the page on focus and stay zoomed */
+@media(max-width:640px){input,textarea,select{font-size:16px !important;}}
 </style>
 </head>
 <body>

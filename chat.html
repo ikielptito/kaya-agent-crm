@@ -688,6 +688,9 @@
   @media (min-width: 760px) {
     .pane-thread { display: flex; }
   }
+
+/* iOS auto-zoom guard — sub-16px inputs zoom the page on focus and stay zoomed */
+@media(max-width:640px){input,textarea,select{font-size:16px !important;}}
 </style>
 </head>
 <body>
