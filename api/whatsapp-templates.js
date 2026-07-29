@@ -36,6 +36,25 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Meta env vars not configured' });
   }
 
+  // Public read-only: Maya's display phone number (the number agents/owners
+  // already message — printed on the portal's "chat with Maya" buttons).
+  if (req.method === 'GET' && req.query?.phone === '1') {
+    try {
+      const pr = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}?fields=display_phone_number,verified_name`, {
+        headers: { Authorization: 'Bearer ' + TOKEN },
+      });
+      const pd = await pr.json();
+      if (!pr.ok) return res.status(pr.status).json({ error: pd?.error?.message || 'phone lookup failed' });
+      return res.status(200).json({
+        displayPhoneNumber: pd.display_phone_number || null,
+        waDigits: String(pd.display_phone_number || '').replace(/\D/g, ''),
+        verifiedName: pd.verified_name || null,
+      });
+    } catch (e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   try {
     // If WABA_ID is not set, derive it from the phone number
     let wabaId = WABA_ID;

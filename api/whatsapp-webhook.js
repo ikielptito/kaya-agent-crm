@@ -600,6 +600,41 @@ export default async function handler(req, res) {
     }
 
     if (!agent) {
+      // Unknown sender whose FIRST message is the portal's "List with Maya"
+      // prefill (or an obvious listing-intent line): this is a villa OWNER,
+      // not an agent lead. Create an owners row and hand the conversation to
+      // owner-mode onboarding — otherwise they'd be auto-created as an agent
+      // and get the agent welcome, a hard-to-recover misroute.
+      if (process.env.OWNERS_ENABLED === '1'
+          && /list (?:my|our) (?:villa|property|home)|memasarkan villa saya|listing villa saya/i.test(text || '')) {
+        try {
+          const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners`, {
+            method: 'POST', headers: { ...sbHeaders, Prefer: 'return=representation' },
+            body: JSON.stringify({
+              wa_num: fromNum, name: null, opt_in: true,
+              onboarding_status: 'in_conversation',
+              consent_note: 'Self-initiated via the portal "List with Maya" WhatsApp button',
+              promo_code: 'PRELAUNCH90',
+            }),
+          });
+          const newOwner = (await oRes.json().catch(() => []))?.[0];
+          if (newOwner && newOwner.id != null) {
+            if (waMessageId) {
+              await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, {
+                method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ owner_id: newOwner.id }),
+              }).catch(() => {});
+            }
+            await handleOwnerConversation({
+              SUPABASE_URL, sbHeaders, owner: newOwner, fromNum,
+              inbound: text, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY,
+              mediaType, mediaId,
+            });
+            return res.status(200).end();
+          }
+        } catch (e) {
+          console.error('owner self-signup routing failed, falling through to agent flow:', e.message);
+        }
+      }
       // Unknown sender = a brand-new agent's very first message. This used to
       // be a dead end (message logged with no agent_id, so invisible in the
       // inbox, and no reply). Instead: create a lead record so the thread
