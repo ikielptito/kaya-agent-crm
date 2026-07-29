@@ -39,6 +39,13 @@ export default async function handler(req, res) {
     { name: 'owners.suggested_reply',  url: '/rest/v1/owners?select=suggested_reply&limit=1' },
     { name: 'owners.paused',           url: '/rest/v1/owners?select=paused&limit=1' },
     { name: 'owners.last_report_sent_at', url: '/rest/v1/owners?select=last_report_sent_at&limit=1' },
+    { name: 'owners.onboarding_status', url: '/rest/v1/owners?select=onboarding_status&limit=1' },
+    { name: 'owners.consent_note',     url: '/rest/v1/owners?select=consent_note&limit=1' },
+    { name: 'owners.promo_code',       url: '/rest/v1/owners?select=promo_code&limit=1' },
+    { name: 'owners.lang',             url: '/rest/v1/owners?select=lang&limit=1' },
+    { name: 'owners.drive_folder_id',  url: '/rest/v1/owners?select=drive_folder_id&limit=1' },
+    { name: 'owners.last_onboarding_nudge_at', url: '/rest/v1/owners?select=last_onboarding_nudge_at&limit=1' },
+    { name: 'owners.onboarding_nudges', url: '/rest/v1/owners?select=onboarding_nudges&limit=1' },
     { name: 'wa_messages.owner_id',    url: '/rest/v1/wa_messages?select=owner_id&limit=1' }
   ];
 

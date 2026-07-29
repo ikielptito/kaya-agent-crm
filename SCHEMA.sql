@@ -226,3 +226,25 @@ alter table owners add column if not exists last_report_sent_at timestamptz;
 -- threads are untouched, and messages keep their agent_id as today.
 alter table wa_messages add column if not exists owner_id bigint references owners(id);
 create index if not exists idx_wa_messages_owner on wa_messages (owner_id, timestamp desc);
+
+-- ── OWNER ONBOARDING FUNNEL (added 2026-07-29) ──────────────────────
+-- Prospective owners Ikiel has spoken to who verbally agreed to list but
+-- haven't yet. Entered manually in the owner inbox; Maya works the lead in
+-- onboarding mode (pitch → answer questions → list the villa in chat).
+-- onboarding_status: null = regular synced owner (not in the funnel) |
+--   'agreed'          — entered as a prospect, no outreach sent yet
+--   'contacted'       — intro template sent, no reply yet
+--   'in_conversation' — they replied, Maya is onboarding them
+--   'listed'          — at least one listing created (funnel complete)
+--   'declined'        — asked to stop / not interested (never re-contact)
+alter table owners add column if not exists onboarding_status text;
+alter table owners add column if not exists consent_note text;
+  -- where/when they verbally agreed (paper trail for the outreach)
+alter table owners add column if not exists promo_code text;
+  -- launch promo Maya quotes them (e.g. PRELAUNCH90)
+alter table owners add column if not exists lang text;
+  -- 'en' | 'id' — which onboarding template variant to send
+alter table owners add column if not exists drive_folder_id text;
+  -- Google Drive folder auto-created for photos they send in chat
+alter table owners add column if not exists last_onboarding_nudge_at timestamptz;
+alter table owners add column if not exists onboarding_nudges int default 0;

@@ -51,6 +51,29 @@
   .chip.draft{background:#f0e4ce;color:var(--gold);}
   .chip.unread{background:var(--unread);color:#fff;min-width:18px;text-align:center;}
   .chip.paused{background:#eee;color:#888;}
+  /* onboarding funnel chips */
+  .chip.agreed{background:#f0e4ce;color:var(--gold);}
+  .chip.contacted{background:#fbede7;color:var(--sage);}
+  .chip.talking{background:#dcede6;color:#2A6A3A;}
+  .chip.listed{background:#2A6A3A;color:#fff;}
+  .chip.declined{background:#f2dcd8;color:var(--clay);}
+
+  /* add-prospect modal */
+  .modal-bg{position:fixed;inset:0;background:rgba(19,26,23,.4);display:none;align-items:center;justify-content:center;z-index:40;padding:16px;}
+  .modal-bg.open{display:flex;}
+  .modal{background:var(--panel);border-radius:16px;padding:22px;width:100%;max-width:420px;box-shadow:0 12px 40px rgba(0,0,0,.18);}
+  .modal h2{margin:0 0 4px;font-size:1.05rem;}
+  .modal .sub2{font-size:.74rem;color:var(--muted);margin-bottom:16px;line-height:1.5;}
+  .modal label{display:block;font-size:.66rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:12px 0 5px;}
+  .modal input,.modal textarea,.modal select{width:100%;box-sizing:border-box;border:1px solid var(--rule);border-radius:10px;padding:9px 12px;font-family:inherit;font-size:.86rem;color:var(--ink);background:var(--bg);outline:none;}
+  .modal input:focus,.modal textarea:focus{border-color:var(--sage);}
+  .modal .actions{display:flex;gap:9px;justify-content:flex-end;margin-top:18px;}
+  .modal .ghost{background:none;border:1px solid var(--rule);border-radius:10px;padding:9px 15px;font-size:.8rem;cursor:pointer;color:var(--ink-2);font-family:inherit;}
+  .modal .primary{background:var(--sage);border:none;border-radius:10px;padding:9px 16px;font-size:.8rem;font-weight:600;cursor:pointer;color:#fff;font-family:inherit;}
+  .modal .primary:disabled{opacity:.5;}
+  .modal .warn{margin-top:10px;font-size:.74rem;color:var(--clay);background:#f9ece8;border-radius:8px;padding:8px 10px;display:none;}
+  .intro-btn{background:var(--sage);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:.72rem;font-weight:600;cursor:pointer;font-family:inherit;}
+  .intro-btn:disabled{opacity:.5;}
 
   /* right thread */
   .thread{display:flex;flex-direction:column;min-height:0;background:var(--bg);}
@@ -86,7 +109,10 @@
   <div class="list">
     <div class="list-head">
       <div><h1>Owner inbox</h1><div class="sub">Maya · Samba</div></div>
-      <button class="icon-btn" id="refresh" onclick="load(true)">↻ Refresh</button>
+      <div style="display:flex;gap:7px">
+        <button class="icon-btn" onclick="openProspectModal()">+ Prospect</button>
+        <button class="icon-btn" id="refresh" onclick="load(true)">↻ Refresh</button>
+      </div>
     </div>
     <div class="threads" id="threads"><div class="loading">Loading…</div></div>
   </div>
@@ -97,6 +123,26 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
+
+<div class="modal-bg" id="prospect-modal">
+  <div class="modal">
+    <h2>Add owner prospect</h2>
+    <div class="sub2">Someone who verbally agreed to list their villa. Maya will onboard them on WhatsApp — the intro message only goes out when you press "Send intro" on their thread.</div>
+    <label>Name *</label>
+    <input id="p-name" placeholder="e.g. Made Wirawan" />
+    <label>WhatsApp number *</label>
+    <input id="p-wa" placeholder="e.g. 0812… or 62812…" inputmode="tel" />
+    <label>Language</label>
+    <select id="p-lang"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select>
+    <label>How/when they agreed <span style="text-transform:none;font-weight:400">(consent note)</span></label>
+    <textarea id="p-note" rows="2" placeholder="e.g. Met at the villa 26 Jul — agreed to list both units"></textarea>
+    <div class="warn" id="p-warn"></div>
+    <div class="actions">
+      <button class="ghost" onclick="closeProspectModal()">Cancel</button>
+      <button class="primary" id="p-save" onclick="saveProspect()">Add prospect</button>
+    </div>
+  </div>
+</div>
 
 <script>
 const state = { owners: [], sel: null, msgs: [] };
@@ -115,6 +161,14 @@ function toast(m){ const t=document.getElementById('toast'); t.textContent=m; t.
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function initials(o){ const n=(o.name||'').trim(); if(n) return n.split(/\s+/).slice(0,2).map(w=>w[0]).join('').toUpperCase(); return '#'; }
 function fmtTime(iso){ if(!iso) return ''; const d=new Date(iso), now=new Date(); const sameDay=d.toDateString()===now.toDateString(); return sameDay ? d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : d.toLocaleDateString('en-GB',{day:'numeric',month:'short'}); }
+
+// Onboarding funnel chip for a row (null onboarding_status = regular owner).
+function onboardChip(o){
+  const s = o.onboarding_status;
+  if(!s) return '';
+  const map = { agreed:['agreed','agreed'], contacted:['contacted','intro sent'], in_conversation:['talking','talking'], listed:['listed','listed ✓'], declined:['declined','declined'] };
+  const m = map[s]; return m ? `<span class="chip ${m[0]}">${m[1]}</span>` : '';
+}
 
 async function load(manual){
   const btn=document.getElementById('refresh'); if(manual) btn.textContent='…';
@@ -135,6 +189,7 @@ function renderList(){
     const unread=o.unread_count||0;
     const meta = `${nlist} listing${nlist===1?'':'s'} · +${esc(o.wa_num)}`;
     const chips = [
+      onboardChip(o),
       o.paused ? '<span class="chip paused">paused</span>' : '',
       (o.suggested_reply && o.suggested_reply.trim()) ? '<span class="chip draft">draft</span>' : '',
       unread ? `<span class="chip unread">${unread}</span>` : '',
@@ -165,8 +220,9 @@ async function openThread(o, keepScroll){
     <div class="thread-head">
       <button class="back" onclick="closeThread()">‹</button>
       <div class="av">${esc(initials(o))}</div>
-      <div><div class="nm">${esc(o.name||('+'+o.wa_num))}</div><div class="meta">+${esc(o.wa_num)} · ${nlist} listing${nlist===1?'':'s'}${o.email?' · '+esc(o.email):''}</div></div>
+      <div><div class="nm">${esc(o.name||('+'+o.wa_num))} ${onboardChip(o)}</div><div class="meta">+${esc(o.wa_num)} · ${nlist} listing${nlist===1?'':'s'}${o.email?' · '+esc(o.email):''}${o.consent_note?' · '+esc(o.consent_note):''}</div></div>
       <div class="spacer"></div>
+      ${o.onboarding_status==='agreed' ? `<button class="intro-btn" id="introbtn" onclick="sendIntro()">Send intro ➤</button>` : ''}
       <button class="pause-btn" onclick="toggleOptIn()" style="${o.opt_in?'background:var(--pos-soft,#dcede6);border-color:var(--sage);color:var(--sage)':''}">${o.opt_in?'✓ Weekly report':'Weekly report off'}</button>
       <button class="pause-btn ${o.paused?'paused':''}" onclick="togglePause()">${o.paused?'Paused — resume':'Pause Maya'}</button>
     </div>
@@ -213,6 +269,51 @@ async function send(){
     toast('Sent');
     await openThread(o); renderList();
   }catch(e){ toast('Send failed'); btn.disabled=false; btn.textContent='Send'; }
+}
+
+// ── Add owner prospect (verbally agreed, Maya onboards them) ──
+function openProspectModal(){ document.getElementById('prospect-modal').classList.add('open'); document.getElementById('p-warn').style.display='none'; }
+function closeProspectModal(){ document.getElementById('prospect-modal').classList.remove('open'); }
+async function saveProspect(){
+  const name=document.getElementById('p-name').value.trim();
+  const wa=document.getElementById('p-wa').value.trim();
+  const lang=document.getElementById('p-lang').value;
+  const note=document.getElementById('p-note').value.trim();
+  const warn=document.getElementById('p-warn');
+  if(!name||!wa){ toast('Name and WhatsApp number are required'); return; }
+  const btn=document.getElementById('p-save'); btn.disabled=true; btn.textContent='Adding…';
+  try{
+    const r = await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'add_owner_prospect',payload:{name,waNum:wa,lang,consentNote:note}})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
+    if(d.agentCollision){
+      warn.style.display='block';
+      warn.textContent=`⚠ This number is also agent "${d.agentCollision.name||d.agentCollision.agency||'unknown'}" in the CRM — WhatsApp replies will route to AGENT-mode Maya, not onboarding. Consider removing the agent record first.`;
+      toast('Added — but check the agent collision warning');
+    } else {
+      toast('Prospect added — open their thread and press "Send intro"');
+      closeProspectModal();
+    }
+    document.getElementById('p-name').value=''; document.getElementById('p-wa').value=''; document.getElementById('p-note').value='';
+    await load(true);
+  }catch(e){ warn.style.display='block'; warn.textContent=e.message; }
+  btn.disabled=false; btn.textContent='Add prospect';
+}
+
+// Fire the approved onboarding template at an 'agreed' prospect (first contact).
+async function sendIntro(){
+  const o=state.sel; if(!o) return;
+  if(!confirm(`Send Maya's onboarding intro to ${o.name||o.wa_num} on WhatsApp now?`)) return;
+  const btn=document.getElementById('introbtn'); if(btn){ btn.disabled=true; btn.textContent='Sending…'; }
+  try{
+    const r = await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'send_onboard_intro',payload:{id:o.id}})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
+    toast(`Intro sent (${d.template})`);
+    await load(true);
+  }catch(e){ toast('Intro failed: '+e.message); if(btn){ btn.disabled=false; btn.textContent='Send intro ➤'; } }
 }
 
 load();

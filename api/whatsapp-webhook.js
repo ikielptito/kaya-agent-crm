@@ -6,6 +6,8 @@ import { createAgentRow } from '../lib/agents.js';
 import { patchAgent, applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { transcribeWaAudio } from '../lib/transcribe.js';
+import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
+import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -589,6 +591,7 @@ export default async function handler(req, res) {
         await handleOwnerConversation({
           SUPABASE_URL, sbHeaders, owner, fromNum,
           inbound: text, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY,
+          mediaType, mediaId,
         });
       } catch (e) {
         console.error('owner-mode error:', e.message);
@@ -1614,7 +1617,7 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
 // flow but use the owners table + owner_id-tagged messages. (PORTAL_BASE is
 // declared near the top of the file, shared with the availability helpers.)
 
-async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY }) {
+async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, mediaType, mediaId }) {
   // Automation mode: global setting, with a per-owner pause override.
   let globalMode = 'draft';
   try {
@@ -1625,6 +1628,57 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   const mode = owner.paused ? 'paused' : globalMode;
 
   const patch = { last_inbound_at: timestamp, unread_count: (owner.unread_count || 0) + 1 };
+
+  // ── Onboarding funnel bookkeeping (prospects only) ──
+  if (isProspect(owner)) {
+    // Hard opt-out: mark declined + paused, never contact again. A short
+    // gracious goodbye goes out even in draft mode — leaving an opt-out
+    // unanswered while a draft waits for review would be worse.
+    if (isOptOut(inbound)) {
+      patch.onboarding_status = 'declined';
+      patch.paused = true;
+      patch.suggested_reply = '';
+      if (WA_TOKEN && WA_PHONE_ID) {
+        const bye = owner.lang === 'id'
+          ? 'Baik, tidak apa-apa — saya tidak akan menghubungi lagi. Kalau berubah pikiran, saya selalu ada di sini. 🙏'
+          : 'No problem at all — I won’t message you about this again. If you ever change your mind, I’m right here. 🙏';
+        const mid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, bye, []).catch(() => null);
+        await logOutboundOwner(SUPABASE_URL, sbHeaders, owner.id, fromNum, bye, mid);
+      }
+      await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+      return;
+    }
+    // First reply after the intro template → they're in conversation.
+    if (owner.onboarding_status === 'agreed' || owner.onboarding_status === 'contacted') {
+      patch.onboarding_status = 'in_conversation';
+      owner = { ...owner, onboarding_status: 'in_conversation' };
+    }
+  }
+
+  // ── Inbound photos → the owner's Drive folder (their future gallery) ──
+  // Any owner (prospect or listed) sending an image gets it archived; Maya
+  // acknowledges with the running count. Failures degrade to a text note so
+  // the conversation never breaks on a Drive hiccup.
+  if (mediaType === 'image' && mediaId && WA_TOKEN) {
+    if (driveConfigured()) {
+      try {
+        let folderId = owner.drive_folder_id;
+        if (!folderId) {
+          folderId = await createOwnerFolder(`${owner.name || fromNum} — villa photos`);
+          patch.drive_folder_id = folderId;
+          owner = { ...owner, drive_folder_id: folderId };
+        }
+        const { count } = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId });
+        inbound = `[The owner sent a photo. It was saved automatically to their villa photo folder${count ? ` — ${count} photo${count === 1 ? '' : 's'} collected so far` : ''} (${folderLink(folderId)}). Acknowledge naturally; if you have enough details plus photos, consider moving to submit the listing with photosLink set to that folder link.]${inbound && !/^\[/.test(inbound) ? ` Caption: "${inbound}"` : ''}`;
+      } catch (e) {
+        console.error('drive upload failed:', e.message);
+        inbound = `[The owner sent a photo but automatic saving failed (${e.message}). Acknowledge you received it and continue; Ikiel will collect the photos manually.]`;
+      }
+    } else {
+      inbound = '[The owner sent a photo. Automatic photo saving is not configured yet — acknowledge you received it and continue; Ikiel will collect the photos manually.]';
+    }
+  }
+
   if (mode === 'paused' || mode === 'off' || !ANTHROPIC_KEY) {
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
     return;
@@ -1632,7 +1686,7 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
 
   const thread = await fetchOwnerThread(SUPABASE_URL, sbHeaders, owner.id);
   const listingSlugs = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
-  const ai = await generateOwnerReply(ANTHROPIC_KEY, owner, inbound, thread, listingSlugs);
+  const ai = await generateOwnerReply(ANTHROPIC_KEY, owner, inbound, thread, listingSlugs, { SUPABASE_URL, sbHeaders });
 
   // Count the token spend against the same daily budget as agent replies.
   if (typeof ai.cost_usd === 'number' && ai.cost_usd > 0) {
@@ -1644,9 +1698,18 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
     return;
   }
+  // Prospect opted out via Maya's judgement (softer than the keyword guard).
+  if (ai.action === 'optout' && isProspect(owner)) {
+    patch.onboarding_status = 'declined';
+    patch.paused = true;
+  }
   // Draft mode (or hybrid escalation): stage the reply for review, don't send.
+  // An image suggestion is staged as "[image:key]\ncaption" — owner_send in
+  // api/supabase.js parses the marker back into a real WhatsApp image message.
   if (mode === 'draft' || (mode === 'hybrid' && ai.action === 'escalate')) {
-    patch.suggested_reply = ai.reply || '';
+    patch.suggested_reply = (ai.media_key && ONBOARD_MEDIA[ai.media_key])
+      ? `[image:${ai.media_key}]\n${ai.reply || ONBOARD_MEDIA[ai.media_key].caption}`
+      : (ai.reply || '');
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
     return;
   }
@@ -1657,8 +1720,16 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   }
   // Autopilot / hybrid(auto): send it.
   if (ai.reply && WA_TOKEN && WA_PHONE_ID) {
-    const mid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, ai.reply, []);
-    await logOutboundOwner(SUPABASE_URL, sbHeaders, owner.id, fromNum, ai.reply, mid);
+    let mid = null;
+    const media = ai.media_key && ONBOARD_MEDIA[ai.media_key];
+    if (media) {
+      mid = await sendOwnerImage(WA_PHONE_ID, WA_TOKEN, fromNum, media.url, ai.reply).catch(() => null);
+      if (!mid) mid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, ai.reply, []); // image failed → at least send the text
+      await logOutboundOwner(SUPABASE_URL, sbHeaders, owner.id, fromNum, media ? `[image:${ai.media_key}]\n${ai.reply}` : ai.reply, mid);
+    } else {
+      mid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, ai.reply, []);
+      await logOutboundOwner(SUPABASE_URL, sbHeaders, owner.id, fromNum, ai.reply, mid);
+    }
     forwardMayaReply({ name: owner.name || ('+' + owner.wa_num), agency: 'villa owner' }, ai.reply).catch(() => {});
     patch.suggested_reply = '';
     patch.unread_count = 0;
@@ -1668,10 +1739,20 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
 }
 
-async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs) {
+async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
   const secret = process.env.LISTING_SYNC_SECRET;
   const ownerName = owner.name || 'there';
   const listingsLine = listingSlugs.length ? listingSlugs.join(', ') : '(none yet — this owner has not listed a villa)';
+
+  // Prospects get the onboarding pitch appended (value props, pricing, promo,
+  // media + optout actions). The agent-reach figure is fetched live so Maya
+  // never quotes a stale number.
+  const prospect = isProspect(owner);
+  let onboardingBlock = '';
+  if (prospect && db) {
+    const agentReach = await fetchAgentReach(db.SUPABASE_URL, db.sbHeaders);
+    onboardingBlock = buildOnboardingPitch({ owner, agentReach });
+  }
 
   const system = `You are Maya, listings coordinator for Samba Realty in Bali. You are messaging on WhatsApp with a villa OWNER / property manager — a partner and client, not a sales agent. Be warm, concise, first-name friendly, and never salesy.
 
@@ -1685,17 +1766,19 @@ WHAT YOU DO FOR OWNERS:
 
 RULES:
 - To create/update a listing you need at least a villa name. Area, bedrooms/bathrooms, monthly price, a Google Drive photos link, and an iCal availability calendar make it far stronger — ask for what's missing, but don't demand everything in one go.
+- If photos were saved automatically to their villa photo folder (see thread), use that folder link as photosLink — never ask them for a Drive link they already effectively gave you by sending photos.
 - For anything about money owed, payouts, billing, complaints, contracts, or legal: set action "escalate" (Ikiel handles those personally).
 - Keep replies to 1–4 short sentences. This is WhatsApp.
-
+${onboardingBlock}
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "intake",
+  "action": "auto" | "escalate" | "report" | "intake"${prospect ? ' | "media" | "optout"' : ''},
   "reply": "message to the owner; leave \\"\\" when action is report or intake",
-  "report_slug": null | "one of their listing slugs",
+  "report_slug": null | "one of their listing slugs",${prospect ? `
+  "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -1726,9 +1809,21 @@ Use "report" to fetch real numbers before answering a performance question (set 
       }
       if (parsed.action === 'intake' && parsed.listing && hop < MAX - 1) {
         const result = await submitOwnerIntake(owner, parsed.listing, secret);
+        // A successful intake completes the onboarding funnel.
+        if (result.startsWith('success') && isProspect(owner) && db) {
+          await fetch(`${db.SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, {
+            method: 'PATCH', headers: db.sbHeaders, body: JSON.stringify({ onboarding_status: 'listed' }),
+          }).catch(() => {});
+        }
         messages.push({ role: 'assistant', content: raw });
         messages.push({ role: 'user', content: `Listing submission result: ${result}\n\nNow confirm to the owner in one friendly sentence (JSON, action "auto"). If it succeeded, tell them it's gone to Ikiel for review and will appear once approved.` });
         continue;
+      }
+      if (parsed.action === 'media' && parsed.media_key && ONBOARD_MEDIA[parsed.media_key]) {
+        return { action: 'media', media_key: parsed.media_key, reply: parsed.reply || ONBOARD_MEDIA[parsed.media_key].caption, llm_calls: llmCalls, cost_usd: costUsd };
+      }
+      if (parsed.action === 'optout') {
+        return { action: 'optout', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd };
       }
       return { action: parsed.action === 'auto' ? 'auto' : 'escalate', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd };
     }

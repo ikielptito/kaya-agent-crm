@@ -9,6 +9,7 @@ import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../l
 // plus the send/log machinery — shared with Maya's autoresponder and the
 // whatsapp-send 'cards' action.
 import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
+import { parseImageMarker } from '../lib/owner-onboarding.js';
 import webpush from 'web-push';
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
@@ -234,10 +235,15 @@ export default async function handler(req, res) {
       const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!TOKEN || !PHONE_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
       const num = String(waNum).replace(/\D/g, '');
+      // A Maya draft may be an image suggestion ("[image:key]\ncaption") from
+      // onboarding mode — approve-and-send turns it into a real image message.
+      const img = parseImageMarker(text);
       const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to: num, type: 'text', text: { body: text } })
+        body: JSON.stringify(img
+          ? { messaging_product: 'whatsapp', to: num, type: 'image', image: { link: img.url, caption: img.caption } }
+          : { messaging_product: 'whatsapp', to: num, type: 'text', text: { body: text } })
       });
       const sendData = await send.json().catch(() => ({}));
       if (!send.ok) return res.status(send.status).json({ error: sendData?.error?.message || 'send failed' });
@@ -250,6 +256,85 @@ export default async function handler(req, res) {
         method: 'PATCH', headers, body: JSON.stringify({ suggested_reply: '', unread_count: 0 })
       }).catch(() => {});
       return res.status(200).json({ ok: true, wa_message_id: mid });
+
+    // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
+    } else if (action === 'add_owner_prospect') {
+      const { name, waNum, consentNote, lang, promoCode } = payload || {};
+      const num = normIndoMobile(waNum) || String(waNum || '').replace(/\D/g, '');
+      if (!num || num.length < 10) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
+      if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
+      // Dual-role check: if this number is already an agent, the webhook will
+      // route them to AGENT-mode Maya, not onboarding — surface that loudly.
+      const agentHit = await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}&select=id,name,agency`, { headers })
+        .then(x => x.json()).catch(() => []);
+      const existing = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${num}&select=id,onboarding_status`, { headers })
+        .then(x => x.json()).catch(() => []);
+      if (existing?.[0]) return res.status(409).json({ error: `This number is already in the owner inbox (status: ${existing[0].onboarding_status || 'synced owner'})`, ownerId: existing[0].id });
+      r = await fetch(SUPABASE_URL + '/rest/v1/owners', {
+        method: 'POST', headers: { ...headers, 'Prefer': 'return=representation' },
+        body: JSON.stringify({
+          wa_num: num, name: String(name).trim(),
+          onboarding_status: 'agreed', opt_in: true,
+          consent_note: String(consentNote || '').trim() || null,
+          lang: lang === 'id' ? 'id' : 'en',
+          promo_code: String(promoCode || 'PRELAUNCH90').trim().toUpperCase(),
+        })
+      });
+      const created = await r.json().catch(() => null);
+      if (!r.ok) return res.status(r.status).json({ error: created?.message || 'insert failed' });
+      return res.status(200).json({ ok: true, owner: created?.[0] || null, agentCollision: agentHit?.[0] || null });
+
+    } else if (action === 'send_onboard_intro') {
+      // Fires the approved onboarding template at a prospect (first contact —
+      // outside any 24h session window, so it MUST be a template send).
+      const { id } = payload || {};
+      if (id == null) return res.status(400).json({ error: 'id required' });
+      const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID, WABA_ID = process.env.META_WABA_ID;
+      if (!TOKEN || !PHONE_ID || !WABA_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
+      const own = (await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${id}&select=*`, { headers }).then(x => x.json()).catch(() => []))?.[0];
+      if (!own) return res.status(404).json({ error: 'Owner not found' });
+      if (own.onboarding_status === 'declined') return res.status(400).json({ error: 'This owner opted out — not contacting them again' });
+      const wantLang = own.lang === 'id' ? 'id' : 'en';
+      const tl = await fetch(`https://graph.facebook.com/v19.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
+        headers: { Authorization: 'Bearer ' + TOKEN }
+      }).then(x => x.json()).catch(() => ({}));
+      const candidates = (tl.data || []).filter(t => /^samba_owner_onboard/.test(t.name) && t.status === 'APPROVED');
+      const tpl = candidates.find(t => (t.language || '').startsWith(wantLang)) || candidates[0];
+      if (!tpl) return res.status(400).json({ error: 'No approved samba_owner_onboard template yet — check template status' });
+      const fName = String(own.name || '').trim().split(/\s+/)[0] || 'there';
+      const comps = [];
+      const headerComp = (tpl.components || []).find(c => c.type === 'HEADER' && c.format === 'IMAGE');
+      if (headerComp) comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: 'https://sambarentals.com/wa/onboard-hero.jpg' } }] });
+      comps.push({ type: 'body', parameters: [{ type: 'text', text: fName }] });
+      // Dynamic URL button ("See how it works" → sambarentals.com/portal)
+      const btnComp = (tpl.components || []).find(c => c.type === 'BUTTONS');
+      if ((btnComp?.buttons || []).some(b => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || ''))) {
+        comps.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'portal' }] });
+      }
+      const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+        method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: own.wa_num, type: 'template',
+          template: { name: tpl.name, language: { code: tpl.language || wantLang }, components: comps }
+        })
+      });
+      const sd = await send.json().catch(() => ({}));
+      if (!send.ok) return res.status(send.status).json({ error: sd?.error?.message || 'template send failed' });
+      const bodyText = ((tpl.components || []).find(c => c.type === 'BODY')?.text || '').replace(/\{\{1\}\}/g, fName);
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers,
+        body: JSON.stringify({
+          owner_id: own.id, wa_num: own.wa_num, direction: 'outbound',
+          content: bodyText || '[onboarding intro template]', wa_message_id: sd.messages?.[0]?.id || null,
+          timestamp: new Date().toISOString(), source: 'api', status: 'sent',
+          category: 'onboarding', template_name: tpl.name,
+        })
+      }).catch(() => {});
+      await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${id}`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ onboarding_status: 'contacted', suggested_reply: '' })
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language });
 
     } else if (action === 'upsert_campaign') {
       r = await fetch(SUPABASE_URL + '/rest/v1/campaigns', {

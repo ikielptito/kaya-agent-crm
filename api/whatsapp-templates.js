@@ -79,10 +79,10 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST' && req.body?.action === 'create_media') {
       // Single-image-header strategic template (large hero + body + button).
-      const { name, body, example, sampleImageUrl, buttonText } = req.body;
+      const { name, body, example, sampleImageUrl, buttonText, buttonBase, buttonExampleUrl } = req.body;
       if (!name || !body || !sampleImageUrl) return res.status(400).json({ error: 'name, body, sampleImageUrl required' });
       try {
-        const out = await createMediaTemplate({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, body, example, sampleImageUrl, buttonText });
+        const out = await createMediaTemplate({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, body, example, sampleImageUrl, buttonText, buttonBase, buttonExampleUrl });
         return res.status(200).json({ success: true, ...out });
       } catch (e) {
         return res.status(500).json({ error: e.message });

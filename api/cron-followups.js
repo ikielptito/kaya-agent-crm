@@ -600,6 +600,47 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── ONBOARDING PROSPECTS GOING COLD (daily flag, no auto-send) ───
+    // Owner prospects Maya contacted who haven't replied in 3+ days get
+    // flagged to Ikiel via push (max 2 flags per prospect). We deliberately
+    // do NOT auto-send a nudge template while onboarding runs draft-first:
+    // a re-approach to a warm personal contact should be a human call.
+    // (When onboarding graduates to autopilot, this is the hook where a
+    // nudge template send would replace the push.)
+    let prospectFlags = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      try {
+        const staleBefore = new Date(now.getTime() - 3 * 24 * 3600 * 1000).toISOString();
+        const rows = await fetch(
+          `${SUPABASE_URL}/rest/v1/owners?onboarding_status=in.(contacted,in_conversation)` +
+          `&onboarding_nudges=lt.2&select=id,name,wa_num,onboarding_status,last_inbound_at,last_onboarding_nudge_at,onboarding_nudges`,
+          { headers: sbHeaders }
+        ).then(r => r.json());
+        const stale = (Array.isArray(rows) ? rows : []).filter(o => {
+          const lastActivity = o.last_inbound_at || o.last_onboarding_nudge_at;
+          // 'contacted' with no reply ever: nudge clock starts at the intro
+          // (last_onboarding_nudge_at is null then — treat as stale).
+          if (!lastActivity) return true;
+          if (lastActivity >= staleBefore) return false;
+          // Don't re-flag within the 3-day window of the previous flag.
+          return !o.last_onboarding_nudge_at || o.last_onboarding_nudge_at < staleBefore;
+        });
+        for (const o of stale) {
+          await sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, {
+            title: `Owner prospect going cold: ${o.name || '+' + o.wa_num}`,
+            body: o.onboarding_status === 'contacted'
+              ? 'No reply to Maya’s intro in 3+ days — worth a personal WhatsApp or call.'
+              : 'Conversation went quiet 3+ days ago — a personal nudge from you would help.',
+          }).catch(() => {});
+          await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
+            method: 'PATCH', headers: sbHeaders,
+            body: JSON.stringify({ last_onboarding_nudge_at: now.toISOString(), onboarding_nudges: (o.onboarding_nudges || 0) + 1 }),
+          }).catch(() => {});
+        }
+        prospectFlags = { flagged: stale.length };
+      } catch (e) { prospectFlags = { error: e.message }; }
+    }
+
     // ── PORTAL ANALYTICS PULL (daily) ────────────────────────────────
     // Cache per-agent clicks/enquiries + channel totals from the portal into
     // settings.agent_portal_stats so the funnel dashboard + report can join
@@ -769,6 +810,7 @@ export default async function handler(req, res) {
       rentals_reconcile: rentalsReconcile,
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
+      prospect_flags: prospectFlags,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
       owner_report: ownerReport && { sent: ownerReport.sent, chars: ownerReport.chars, error: ownerReport.error },
@@ -1734,7 +1776,9 @@ function diffImprovements(prev, properties) {
       continue;
     }
     if (p.availability?.nextLongWindowFrom && prior.nextLongWindowFrom) {
-      const delta = daysBetween(prior.nextLongWindowFrom, p.availability.nextLongWindowFrom);
+      // Positive delta = the long window now opens EARLIER than yesterday's
+      // snapshot said. A window sliding later (someone booked) is not news.
+      const delta = daysBetween(p.availability.nextLongWindowFrom, prior.nextLongWindowFrom);
       if (delta >= LONG_WINDOW_MOVE_THRESHOLD_DAYS) {
         items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'window_earlier',
           summary: `${p.name}${meta ? ` (${meta})` : ''} available from ${formatShortDate(p.availability.nextLongWindowFrom)} (was ${formatShortDate(prior.nextLongWindowFrom)})` });
