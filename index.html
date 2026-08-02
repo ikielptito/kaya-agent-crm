@@ -268,6 +268,7 @@ body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(-
 .proj-table-row:hover { background: var(--sand); }
 .proj-table-name { font-size: 12px; font-weight: 500; color: var(--ink2); display: flex; align-items: center; gap: 5px; }
 .personal-badge { font-size: 9px; background: var(--sand2); color: var(--ink4); padding: 1px 5px; border-radius: 4px; }
+.dead-number-badge { font-size: 9px; background: #fcebeb; color: #791f1f; padding: 1px 5px; border-radius: 4px; font-weight: 600; vertical-align: middle; }
 .proj-table-status select { background: none; border: none; font-family: 'Satoshi', sans-serif; font-size: 12px; color: var(--ink2); cursor: pointer; outline: none; width: 100%; }
 .proj-table-link { display: flex; align-items: center; justify-content: center; color: var(--ink4); font-size: 13px; cursor: pointer; border-radius: 4px; transition: color 0.12s; }
 .proj-table-link:hover { color: var(--kaya); }
@@ -1708,7 +1709,7 @@ function renderCards() {
       <div class="card-top">
         <div class="avatar">${ini}</div>
         <div class="card-info">
-          <div class="card-name ${!a.name ? 'unnamed' : ''}">${a.name || (a.agency ? '(no name)' : 'Unknown')}</div>
+          <div class="card-name ${!a.name ? 'unnamed' : ''}">${a.name || (a.agency ? '(no name)' : 'Unknown')}${a.dead_number ? ' <span class="dead-number-badge" title="WhatsApp reports this number as undeliverable — excluded from broadcasts. Clears automatically if they ever message in.">dead number</span>' : ''}</div>
           ${a.agency ? `<div class="card-agency">${a.agency}</div>` : ''}
         </div>
         <span class="urgency-dot ${urgency}" title="${urgency === 'red' ? 'Overdue' : urgency === 'yellow' ? 'Due today' : urgency === 'green' ? 'Scheduled' : 'No follow-up'}"></span>

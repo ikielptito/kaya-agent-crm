@@ -170,7 +170,7 @@ export default async function handler(req, res) {
   const waveParam = req.query?.wave !== undefined ? parseInt(req.query.wave, 10) : null;
   if (waveParam !== null && waveParam >= 1) {
     try {
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null`, { headers: sbHeaders });
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null&dead_number=not.is.true`, { headers: sbHeaders });
       const agents = await r.json();
       if (!Array.isArray(agents)) return res.status(500).json({ error: 'Failed to fetch agents' });
       const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders);
@@ -204,7 +204,7 @@ export default async function handler(req, res) {
     } catch (e) { /* default: proceed as if mayaOff = false */ }
 
     // Fetch all agents who have a wa_num AND have at least one project tracked
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null`, { headers: sbHeaders });
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=*&wa_num=not.is.null&dead_number=not.is.true`, { headers: sbHeaders });
     const agents = await r.json();
     if (!Array.isArray(agents)) {
       return res.status(500).json({ error: 'Failed to fetch agents' });
@@ -567,6 +567,24 @@ export default async function handler(req, res) {
       } catch (e) { introSweep = { error: e.message }; }
     }
 
+    // ── UNANSWERED-INBOUND SWEEP (daily safety net) ──────────────────
+    // Agents whose latest message is still unanswered (Maya superseded, spend
+    // cap, manual takeover that went quiet, webhook hiccup) get a catch-up
+    // pass via the existing resume_unanswered action: autopilot/hybrid sends,
+    // draft mode leaves a reviewable draft, off/paused skips. Before 2 Aug
+    // 2026 this action existed but NOTHING called it — real leads sat
+    // unanswered for days (the 27 Jul "1BR, 22jt max" lead among them).
+    let unansweredSweep = null;
+    if (!previewMode) {
+      try {
+        const swRes = await fetch('https://kaya-agent-crm.vercel.app/api/supabase', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resume_unanswered', payload: { since_days: 4, limit: 40 } }),
+        });
+        unansweredSweep = swRes.ok ? await swRes.json() : { error: 'HTTP ' + swRes.status };
+      } catch (e) { unansweredSweep = { error: e.message }; }
+    }
+
     // ── RENTALS RECONCILE (daily safety net) ─────────────────────────
     // The portal pushes every listing edit to us in real time (listing-sync
     // webhook into api/supabase.js); this daily pass re-syncs everything in
@@ -807,6 +825,7 @@ export default async function handler(req, res) {
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       intro_sweep: introSweep,
+      unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
@@ -1380,6 +1399,9 @@ export async function runAvailabilityNotifications(ctx) {
   // ── Send loop ───────────────────────────────────────────────────
   for (const agent of cohort) {
     if (agent.samba_alerts_opt_out) { summary.skipped_opt_out++; continue; }
+    // Dead numbers (chronic delivery failures / not on WhatsApp) never get
+    // broadcasts. Belt-and-braces: the agent fetch already filters these.
+    if (agent.dead_number) { summary.skipped_opt_out++; continue; }
 
     // Idempotency guard — no agent gets a second availability touch within 6h,
     // whatever the day. Protects against double cron fires, a manual re-run

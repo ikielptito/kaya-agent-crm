@@ -12,6 +12,89 @@ import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
+// ── Team alerts (Maya → Ikiel / Era on WhatsApp) ───────────────────────
+// When Maya promises "I'll check with Ikiel" or needs villa manager Era on a
+// guest issue, she must actually ping them — immediately, whatever the hour.
+// Free text goes out directly when their 24h session is open; otherwise the
+// approved utility template (TEAM_ALERT_TEMPLATE) opens the conversation and
+// the queued detail flushes when they reply (see flushTeamAlerts).
+const ERA_WA_NUM = String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
+const OWNER_NUM = String(process.env.OWNER_WA_NUM || '').replace(/\D/g, '');
+const TEAM_NUMS = new Set([ERA_WA_NUM, OWNER_NUM].filter(Boolean));
+const TEAM_ALERT_TEMPLATE = 'maya_team_alert';
+
+async function sendTeamTemplate(phoneId, token, to, param) {
+  try {
+    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        messaging_product: 'whatsapp', to, type: 'template',
+        template: {
+          name: TEAM_ALERT_TEMPLATE, language: { code: 'en' },
+          components: [{ type: 'body', parameters: [{ type: 'text', text: String(param).slice(0, 120) }] }],
+        },
+      }),
+    });
+    const data = await r.json();
+    return data.messages?.[0]?.id || null;
+  } catch (_) { return null; }
+}
+
+async function readTeamAlertQueue(url, headers) {
+  try {
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.team_alerts&select=value`, { headers });
+    const v = (await r.json())?.[0]?.value;
+    return (v && typeof v === 'object') ? v : {};
+  } catch (_) { return {}; }
+}
+
+async function writeTeamAlertQueue(url, headers, value) {
+  await fetch(`${url}/rest/v1/settings`, {
+    method: 'POST',
+    headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ key: 'team_alerts', value }),
+  }).catch(() => {});
+}
+
+// Send one alert to Ikiel or Era. Direct free text first (works whenever their
+// 24h window is open); on failure, queue the detail and open the window with
+// the approved template. Always fire-and-forget from the caller's perspective.
+async function notifyTeam(url, headers, phoneId, token, { to, summary, shareContact }, agent) {
+  const num = to === 'era' ? ERA_WA_NUM : OWNER_NUM;
+  if (!num || !phoneId || !token) return false;
+  const who = agent?.name || (agent?.wa_num ? '+' + agent.wa_num : 'unknown contact');
+  const detail = `Maya team alert — ${who}:\n${summary}${agent?.wa_num ? `\nTheir number: +${agent.wa_num}` : ''}`;
+  const mid = await sendText(phoneId, token, num, detail);
+  if (mid) {
+    if (shareContact && agent?.wa_num) await sendContactCard(phoneId, token, num, who, agent.wa_num);
+    return true;
+  }
+  const q = await readTeamAlertQueue(url, headers);
+  const list = Array.isArray(q[num]) ? q[num] : [];
+  list.push({ summary: String(summary).slice(0, 500), agent_name: who, agent_num: agent?.wa_num || null, share_contact: !!shareContact, ts: new Date().toISOString() });
+  q[num] = list.slice(-10);
+  await writeTeamAlertQueue(url, headers, q);
+  await sendTeamTemplate(phoneId, token, num, who);
+  return true;
+}
+
+// Deliver every queued alert for a team member the moment they message in
+// (their reply opens the 24h window). Returns true when anything was flushed.
+async function flushTeamAlerts(url, headers, phoneId, token, fromNum) {
+  const q = await readTeamAlertQueue(url, headers);
+  const list = Array.isArray(q[fromNum]) ? q[fromNum] : [];
+  if (!list.length) return false;
+  for (const item of list) {
+    const detail = `Maya team alert — ${item.agent_name}:\n${item.summary}${item.agent_num ? `\nTheir number: +${item.agent_num}` : ''}`;
+    await sendText(phoneId, token, fromNum, detail);
+    if (item.share_contact && item.agent_num) await sendContactCard(phoneId, token, fromNum, item.agent_name, item.agent_num);
+  }
+  delete q[fromNum];
+  await writeTeamAlertQueue(url, headers, q);
+  return true;
+}
+
 // ── Web Push to the Maya chat PWA ──────────────────────────────────────
 // Fan out a notification to every subscribed device when an agent messages
 // in. Subscriptions live in settings.push_subscriptions (saved by chat.html
@@ -453,9 +536,29 @@ export default async function handler(req, res) {
             const curStatus = (await cur.json())?.[0]?.status;
             if (curStatus && curStatus !== 'failed' && (RANK[st.status] || 0) <= (RANK[curStatus] || 0)) return;
           } catch (_) {}
+          // Keep Meta's failure reason — without it every failed broadcast is
+          // undiagnosable after the fact (Jul 2026: 172 failures, zero codes).
+          const errInfo = st.status === 'failed' && Array.isArray(st.errors) && st.errors.length
+            ? st.errors.map(e => [e.code, e.title || e.message, e.error_data?.details].filter(Boolean).join(' — ')).join('; ').slice(0, 400)
+            : null;
           await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}`, {
-            method: 'PATCH', headers: sh, body: JSON.stringify({ status: st.status })
+            method: 'PATCH', headers: sh, body: JSON.stringify({ status: st.status, ...(errInfo ? { error: errInfo } : {}) })
           }).catch(() => {});
+          // 131026 = recipient is not a valid WhatsApp user. If this contact has
+          // never once had a message delivered, the number is dead — flag it so
+          // every broadcast loop skips it from now on (an inbound message from
+          // the number clears the flag automatically in the main handler).
+          if (errInfo && /\b131026\b/.test(errInfo) && st.recipient_id) {
+            try {
+              const num = String(st.recipient_id).replace(/\D/g, '');
+              const okRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&status=in.(delivered,read)&select=id&limit=1`, { headers: sh });
+              if (!((await okRes.json())?.length)) {
+                await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}`, {
+                  method: 'PATCH', headers: sh, body: JSON.stringify({ dead_number: true })
+                }).catch(() => {});
+              }
+            } catch (_) {}
+          }
         }));
       }
       return res.status(200).end();
@@ -517,12 +620,23 @@ export default async function handler(req, res) {
       } catch (_) {} // guard is best-effort — never block a real message
     }
 
+    // ── TEAM ALERT FLUSH ──────────────────────────────────────────
+    // When Ikiel or Era replies (typically "OK" to the maya_team_alert
+    // template), deliver every queued alert detail — full summary plus the
+    // agent/guest contact card — inside the now-open 24h window. Their
+    // message is consumed by the flush; normal agent handling is skipped
+    // for this turn so Maya never chats back at her own team ping.
+    if (TEAM_NUMS.has(fromNum)) {
+      const flushed = await flushTeamAlerts(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, fromNum);
+      if (flushed) return res.status(200).end();
+    }
+
     // Find matching agent
     const agentRes = await fetch(
       `${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${fromNum}&select=*`,
       { headers: sbHeaders }
     );
-    const agent = (await agentRes.json())?.[0];
+    let agent = (await agentRes.json())?.[0];
 
     // Find matching owner (villa owner/manager, by listing WhatsApp contact).
     // Gated by OWNERS_ENABLED so this stays a no-op until the owners-table
@@ -680,21 +794,34 @@ export default async function handler(req, res) {
               method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ agent_id: newAgent.id }),
             }).catch(() => {});
           }
-          let welcomeMode = 'draft';
-          try {
-            const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
-            welcomeMode = (await sRes.json())?.[0]?.value?.mode || 'draft';
-          } catch (e) { /* stay conservative: no auto-welcome */ }
-          // No hours gate: this fires only when an agent messages Maya first, and
-          // agent-initiated contact is answered any time (night owls included).
-          if (welcomeMode === 'autopilot' || welcomeMode === 'hybrid') {
-            const welcome = "Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty. I can send project info and brochures, check live villa availability for your clients, and walk you through commissions — 5% on KAYA sales, 10% on Samba monthly rentals (already built into the portal price you quote). Ikiel sees every message and jumps in personally when needed. What can I help you with?";
-            const welcomeMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
-            await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome, welcomeMid);
+          // A substantive first message (a real question or request, not just
+          // "hi") flows into the full Maya pipeline below so the sender gets an
+          // actual answer. The static capability intro used to swallow real
+          // asks — e.g. an urgent Monday-availability question answered with a
+          // generic welcome (1 Aug 2026). Trivial openers keep the intro.
+          const isSubstantive = ((text || '').trim().length >= 25 || /\?/.test(text || ''))
+            && mediaType !== 'audio'; // untranscribed voice keeps the old flow
+          if (isSubstantive) {
+            // The creation row already counted this message as unread=1; zero it
+            // here so the standard +1 patch below lands back on 1, not 2.
+            agent = { ...newAgent, unread_count: 0 };
+          } else {
+            let welcomeMode = 'draft';
+            try {
+              const sRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers: sbHeaders });
+              welcomeMode = (await sRes.json())?.[0]?.value?.mode || 'draft';
+            } catch (e) { /* stay conservative: no auto-welcome */ }
+            // No hours gate: this fires only when an agent messages Maya first, and
+            // agent-initiated contact is answered any time (night owls included).
+            if (welcomeMode === 'autopilot' || welcomeMode === 'hybrid') {
+              const welcome = "Hi! I'm Maya, listings coordinator for KAYA Developments and Samba Realty. I can send project info and brochures, check live villa availability for your clients, and walk you through commissions — 5% on KAYA sales, 10% on Samba monthly rentals (already built into the portal price you quote). Ikiel sees every message and jumps in personally when needed. What can I help you with?";
+              const welcomeMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, welcome);
+              await logOutbound(SUPABASE_URL, sbHeaders, newAgent.id, fromNum, welcome, welcomeMid);
+            }
           }
         }
       } catch (e) { console.warn('new-agent welcome failed:', e.message); }
-      return res.status(200).end();
+      if (!agent) return res.status(200).end();
     }
 
     // Update conversation summary, history, inbox state
@@ -729,6 +856,11 @@ export default async function handler(req, res) {
       last_inbound_at: timestamp,
       unread_count: (agent.unread_count || 0) + 1
     };
+
+    // A message FROM a number proves it's alive — clear any dead-number flag
+    // (set by the 131026 auto-marker or the Jul 2026 cleanup) so broadcasts
+    // resume for this agent.
+    if (agent.dead_number) patch.dead_number = false;
 
     // STOP CAMPAIGN SEQUENCES — any inbound message stops ALL active sequences
     // for this agent (across both KAYA and Samba pipelines). The conversation
@@ -1005,6 +1137,28 @@ export default async function handler(req, res) {
         if (contactMid) {
           await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Contact card: ${contact.name} — +${contact.phone}]`, contactMid);
         }
+      }
+      // TEAM ALERT — Maya promised a follow-up she can't do herself, or a
+      // guest issue needs Era. Ping the right person on WhatsApp NOW, mirror
+      // to the PWA push, and leave an audit row so the promise is traceable.
+      if (aiResult.notify_team) {
+        const nt = aiResult.notify_team;
+        try {
+          await notifyTeam(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, { to: nt.to, summary: nt.summary, shareContact: nt.share_contact }, agent);
+          await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({
+              agent_id: agent.id, field: 'team_alert', new_value: nt.to,
+              reason: nt.summary.slice(0, 300), evidence: (text || '').slice(0, 200),
+              by_maya: true, created_at: new Date().toISOString(),
+            }),
+          }).catch(() => {});
+        } catch (e) { console.warn('notifyTeam failed:', e.message); }
+        sendPushNotifications(SUPABASE_URL, sbHeaders, {
+          title: `Maya → ${nt.to === 'era' ? 'Era' : 'Ikiel'}: ${agent.name || '+' + fromNum}`,
+          body: nt.summary.slice(0, 160), agentId: agent.id,
+          badgeCount: (agent.unread_count || 0) + 1,
+        }).catch(() => {});
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -1547,6 +1701,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "send_cards": [] | up to 4 Samba rental slugs, e.g. ["villa_umah_astanine", "haus_4"] — valid slugs: [${rentalSlugs.join(', ') || '(none available)'}],
   "send_contact": null | { "name": "Era", "phone": "6281246357778" },
   "reply_buttons": [] | up to 3 short tap options (max 20 chars each), e.g. ["More options", "Download photos"],
+  "notify_team": null | { "to": "era" | "ikiel", "summary": "1-2 sentences: property name + what's needed + any deadline", "share_agent_contact": true|false },
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -1567,8 +1722,28 @@ Any time your reply pitches, recommends, or answers about one or more SPECIFIC S
 Set "send_cards" to [] only when no specific Samba property is being shared (greetings, commission questions, KAYA sales talk, etc).
 CONTACT CARD ("send_contact"): when the agent asks WHO to contact for a viewing, visit, or booking of a Samba rental, set send_contact with the EXACT name and number from that property's "enquire with" line in the live availability data (never a number from conversation history). The system sends a native, tappable WhatsApp contact card the agent can save. Still mention the name briefly in your text reply ("I'm sending you Era's contact card -- she arranges the viewings for this villa."). Leave null otherwise.
 QUICK-REPLY BUTTONS ("reply_buttons"): when there is an obvious next step, offer up to 3 tap options so the agent doesn't have to type — e.g. after recommending villas: ["More options", "Download photos", "Book a viewing"]; after an availability answer: ["Check other dates", "Send the listing"]. Each label max 20 characters, plain words, no emojis. When the agent taps one, you receive that label as their next message — so only offer buttons you can actually act on. Leave [] on closers ("thanks, bye"), escalations, and when no clear next step exists.
+TEAM ALERTS ("notify_team") — a real promise, not a figure of speech:
+Whenever your reply tells the person you'll check with / flag for / pass along to Ikiel, Era, or "the team" — or they need something you cannot complete yourself (a rate you don't have, a video that doesn't exist, a negotiation, a special arrangement) — you MUST set notify_team in the same turn. It sends a WhatsApp message to that team member immediately, whatever the hour. Never say "I'll check and come back to you" with notify_team left null: that is a broken promise.
+- "to": "era" for anything operational about a specific villa or stay — viewings she coordinates, guest problems, keys and check-in, maintenance, cleaning, availability oddities — especially when Era is that property's "enquire with" contact. Era is the villa manager and the first port of call for operations.
+- "to": "ikiel" for pricing and negotiation, non-standard commissions, business decisions, partnership offers, and anything that is not villa operations.
+- "summary": 1-2 sentences a busy person can act on — property name, who is asking, what they need, any deadline.
+- "share_agent_contact": true when the team member will need to contact this person directly (always true for guest issues).
+
+GUEST SUPPORT & DISTRESS — when the sender is clearly a GUEST or someone with an urgent stay problem (locked out, something broken, complaint about cleanliness or service, urgent booking issue) rather than an agent:
+1. Reply with genuine empathy and zero deflection. Tell them plainly: you are an AI assistant, but you are alerting Era — the villa manager and the right person to fix this — right now.
+2. Attach Era's contact via send_contact so they can reach her directly.
+3. Set notify_team {"to": "era", "summary": <the issue, the property if known, how urgent>, "share_agent_contact": true}.
+Never leave a distressed message unanswered or answer it with a sales-style intro. Even when the stay isn't one of ours (e.g. an Airbnb mix-up), respond kindly, say so, and still alert Era if there's any chance it involves one of our properties.
+
+WHEN NOT TO REPLY — set "reply" to "" with action "auto" (nothing is sent, no draft is left) for:
+- stickers, emoji-only messages, and [Sticker] / [Unknown message type] markers
+- automated out-of-office / auto-reply messages from a business line (wait for the human; never converse with an autoresponder)
+- bare acknowledgments ("ok", "noted", "thanks", "🙏", "siap") when your PREVIOUS message already closed the loop — the conversation may end without you having the last word. One thank-you does not need three goodbyes.
+When a short closer IS warranted, write a fresh one — never send the same closing line twice in a row to the same person, and keep closers to one sentence.
+
 Set "crm_updates" to an empty array if no clear pipeline signals are present.
-Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
+Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.
+Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above apply.`;
 
   // systemHead is the stable, cacheable prefix; systemRest carries the volatile
   // per-conversation context. Together they carry the same instructions as the
@@ -1647,6 +1822,13 @@ Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply.`;
           : [],
         crm_updates: Array.isArray(parsed.crm_updates) ? parsed.crm_updates : [],
         crm_actions: Array.isArray(parsed.crm_actions) ? parsed.crm_actions : [],
+        notify_team: (parsed.notify_team && parsed.notify_team.to && parsed.notify_team.summary)
+          ? {
+              to: String(parsed.notify_team.to).toLowerCase() === 'era' ? 'era' : 'ikiel',
+              summary: String(parsed.notify_team.summary).slice(0, 500),
+              share_contact: !!parsed.notify_team.share_agent_contact,
+            }
+          : null,
         llm_calls: llmCalls,
         cost_usd: costUsd,
         model: replyModel,

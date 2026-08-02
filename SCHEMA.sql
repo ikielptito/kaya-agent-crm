@@ -20,6 +20,13 @@ create index if not exists idx_wa_messages_wa_num on wa_messages (wa_num);
 -- Backstop for the webhook's redelivery guard: Meta delivers at-least-once,
 -- and a redelivered wamid must never become a second row (applied 2 Aug 2026).
 create unique index if not exists wa_messages_wamid_uniq on wa_messages (wa_message_id) where wa_message_id is not null;
+-- Meta failure reason ("131026 — Message undeliverable", etc.), captured from
+-- the status webhook so failed broadcasts are diagnosable (applied 2 Aug 2026).
+alter table wa_messages add column if not exists error text;
+-- Chronic-delivery-failure flag: set by the 131026 auto-marker (agent has zero
+-- lifetime deliveries) or manual cleanup; excluded from every broadcast loop;
+-- cleared automatically when the number ever messages in (applied 2 Aug 2026).
+alter table agents add column if not exists dead_number boolean default false;
 
 create table if not exists settings (
   key   text primary key,
