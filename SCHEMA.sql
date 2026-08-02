@@ -17,6 +17,9 @@ create table if not exists wa_messages (
 );
 create index if not exists idx_wa_messages_agent_time on wa_messages (agent_id, timestamp desc);
 create index if not exists idx_wa_messages_wa_num on wa_messages (wa_num);
+-- Backstop for the webhook's redelivery guard: Meta delivers at-least-once,
+-- and a redelivered wamid must never become a second row (applied 2 Aug 2026).
+create unique index if not exists wa_messages_wamid_uniq on wa_messages (wa_message_id) where wa_message_id is not null;
 
 create table if not exists settings (
   key   text primary key,

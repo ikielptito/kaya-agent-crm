@@ -500,6 +500,23 @@ export default async function handler(req, res) {
       'Prefer': 'return=minimal'
     };
 
+    // ── REDELIVERY GUARD ──────────────────────────────────────────
+    // Meta delivers webhooks at-least-once: when we don't 200 fast enough
+    // (reply generation runs ~20s before this handler returns), the SAME
+    // message is redelivered with the SAME wamid — without this check it
+    // gets stored and answered again (up to 7× observed). The supersede
+    // checks can't catch it: they only tie-break between DIFFERENT wamids.
+    // If this wamid is already stored, a previous invocation owns it.
+    if (waMessageId) {
+      try {
+        const dupRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}&select=id&limit=1`,
+          { headers: sbHeaders }
+        );
+        if ((await dupRes.json())?.length) return res.status(200).end();
+      } catch (_) {} // guard is best-effort — never block a real message
+    }
+
     // Find matching agent
     const agentRes = await fetch(
       `${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${fromNum}&select=*`,
