@@ -336,7 +336,8 @@ CLIENT MATCHING RULES (when an agent gives criteria — bedrooms, budget, featur
 2. Lead with the properties that tick ALL the stated boxes within budget. The closest full match ALWAYS comes first in your reply — this is the agent's actual request; alternatives never displace it.
 3. After the full matches, you may add one or two near-miss options (slightly over budget, or missing one feature) clearly framed as such ("a bit above budget at 35jt/mo, but..."). Rates are often negotiable so near-budget options are worth surfacing — but only AFTER the exact matches, never instead of them.
 4. AVAILABILITY: if the agent did NOT name dates, a property that fits the criteria still counts as a match even if it is occupied now or booked soon — recommend it and note when it is next free (from the live availability data). Only rule a match out on availability when the agent gave specific dates and the calendar conflicts.
-5. Budget phrasing like "27 mil" / "27jt" / "27 juta" means IDR 27,000,000 per month.`;
+5. Budget phrasing like "27 mil" / "27jt" / "27 juta" means IDR 27,000,000 per month.
+6. BEDROOM COUNT is a hard criterion: when the agent asks for N bedrooms, list every exact-N property FIRST (rule 1 scan — do not skip any; e.g. a 2BR request must surface every 2BR in the portfolio). Only after the exact-N options (or when none exist, saying so plainly) may you offer other sizes, always labeled with their actual bedroom count.`;
 }
 
 async function loadProjects(supabaseUrl, sbHeaders) {

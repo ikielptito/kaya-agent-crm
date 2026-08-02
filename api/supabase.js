@@ -1076,8 +1076,11 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         if (!waNum) { results.push({ agent: a.name || a.id, skipped: 'no_number' }); continue; }
         if (todaySpend >= CAP_USD) { results.push({ agent: a.name || a.id, skipped: 'spend_cap' }); continue; }
 
-        // Only answer if the LAST message is inbound (i.e. still genuinely unanswered).
-        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&order=timestamp.desc&limit=1&select=direction`, { headers });
+        // Only answer if the LAST message is inbound (i.e. still genuinely
+        // unanswered). Broadcasts don't count as answers: a cron digest that
+        // happens to land after an agent's question must not mask it (that hid
+        // a real 27 Jul "1BR, 22jt budget" lead behind an availability digest).
+        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&or=(source.neq.cron,source.is.null)&order=timestamp.desc&limit=1&select=direction`, { headers });
         const last = (await lastRes.json())?.[0];
         if (!last || last.direction !== 'inbound') {
           await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0 }) }).catch(() => {});
