@@ -597,9 +597,11 @@ export default async function handler(req, res) {
                 const nowState = a.availableToday ? 'available now' : 'occupied now';
                 const next = a.nextAvailableFrom ? `next free ${a.nextAvailableFrom}` : 'no free day in horizon';
                 const longw = a.nextLongWindowFrom ? `long-term stay window from ${a.nextLongWindowFrom}` : 'no long-term stay window';
-                return `- ${p.name} — ${nowState}; ${next}; ${longw}`;
+                const contactName = p.waContactName || 'Era';
+                const contactNum = p.waNumber || '6281246357778';
+                return `- ${p.name} — ${nowState}; ${next}; ${longw} | enquire with: ${contactName} (+${contactNum})`;
               });
-              availabilityCtx = `SAMBA LIVE AVAILABILITY (real calendar data):\n${lines.join('\n')}\n\nUse this to answer availability questions directly. For a specific date range you cannot resolve from this summary, say you'll confirm the exact dates and check the portal calendar.`;
+              availabilityCtx = `SAMBA LIVE AVAILABILITY (real calendar data):\n${lines.join('\n')}\n\nUse this to answer availability questions directly. For a specific date range you cannot resolve from this summary, say you'll confirm the exact dates and check the portal calendar.\n\nDIRECTLY-MANAGED vs OWNER-MANAGED: when a property's "enquire with" contact is Era, our team manages it. Any OTHER contact name means the listing is owner-managed — for pricing, negotiation, viewings, videos, or special requests on those, redirect the agent: tell them to tap the "Contact owner" button on the listing page and give them the listed contact's name and number. Never negotiate or promise Ikiel on an owner-managed property.`;
             }
           }
         }
@@ -634,7 +636,9 @@ Respond with ONLY a JSON object (no markdown, no prose):
     { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "service_type": "rental", "replace": false }
   ]
 }
-Set "crm_updates" to an empty array if no clear pipeline / frequency / service-classification signals are present. Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.`;
+Set "crm_updates" to an empty array if no clear pipeline / frequency / service-classification signals are present. Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.
+WHEN NOT TO REPLY — set "reply" to "" (nothing is sent; often the right move) for: stickers or emoji-only messages; automated out-of-office / auto-reply messages from a business line; bare acknowledgments ("ok", "thanks", "🙏", "siap") when your previous message already closed the loop. Never repeat a closing line you already used in this thread.
+GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked out, broken AC, complaint), reply with empathy, say you are an AI assistant alerting Era the villa manager right now, and include Era's name and number (+6281246357778) in the reply. Never promise Ikiel for guest issues.`;
 
       const system = [
         { type: 'text', text: systemHead, cache_control: { type: 'ephemeral' } },
@@ -652,7 +656,7 @@ Set "crm_updates" to an empty array if no clear pipeline / frequency / service-c
           headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 700,
+            max_tokens: 1100,
             system,
             messages: [{ role: 'user', content: 'Generate the reply now.' }]
           })
@@ -665,15 +669,19 @@ Set "crm_updates" to an empty array if no clear pipeline / frequency / service-c
         // so the console/catch-up never break on a malformed response.
         let reply = '', crmUpdates = [], crmActions = [];
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        // Raw-text fallback is only safe when Maya wrote prose. If the output
+        // looks like JSON or a code fence (truncated/malformed contract), ship
+        // NOTHING — raw JSON once went out to an agent as the message body.
+        const rawFallback = /^[`{\[]/.test(raw) ? '' : raw;
         if (jsonMatch) {
           try {
             const parsed = JSON.parse(jsonMatch[0]);
             reply = (parsed.reply || '').trim();
             if (Array.isArray(parsed.crm_updates)) crmUpdates = parsed.crm_updates;
             if (Array.isArray(parsed.crm_actions)) crmActions = parsed.crm_actions;
-          } catch (_) { reply = raw; }
+          } catch (_) { reply = rawFallback; }
         } else {
-          reply = raw;
+          reply = rawFallback;
         }
 
         // Apply the CRM changes Maya recognised — SAME helpers the webhook uses.
