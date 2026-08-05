@@ -8,6 +8,7 @@
 //   - 'template' — pre-approved template
 //   - 'document' — PDF / brochure
 //   - 'image'    — inline photo with optional caption
+//   - 'video'    — inline video with optional caption (MP4/3GPP, ≤16MB)
 //   - 'cards'    — rich listing cards (cta_url with native View-listing button)
 //   - 'recall'   — attempt to delete a previously-sent message (24h window)
 //   - 'edit'     — attempt to edit a previously-sent text message (15min window)
@@ -52,6 +53,7 @@ export default async function handler(req, res) {
   let action = body.action;
   if (!action) {
     if (body.imageUrl) action = 'image';
+    else if (body.videoUrl) action = 'video';
     else if (body.docUrl) action = 'document';
     else if (body.useTemplate) action = 'template';
     else if (body.message) action = 'text';
@@ -64,6 +66,7 @@ export default async function handler(req, res) {
     if (action === 'recall')   return await handleRecall(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'edit')     return await handleEdit(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders);
     if (action === 'image')    return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'image');
+    if (action === 'video')    return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'video');
     if (action === 'document') return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'document');
     if (action === 'template') return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'template');
     return await handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeaders, 'text');
@@ -79,6 +82,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     templateName, templateParams, templateLanguage, templateBodyText,
     docUrl, docFilename,
     imageUrl,
+    videoUrl,
     caption,
     agentId, campaignId,
     replyTo,            // wa_message_id this send quotes (reply context), optional
@@ -103,6 +107,16 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
       ...ctx
     };
     logContent = `[Image]${caption ? ' ' + caption : ''}`;
+  } else if (type === 'video') {
+    if (!videoUrl) return res.status(400).json({ error: 'videoUrl is required for video send' });
+    metaBody = {
+      messaging_product: 'whatsapp',
+      to: waNum,
+      type: 'video',
+      video: { link: videoUrl, ...(caption ? { caption } : {}) },
+      ...ctx
+    };
+    logContent = `[Video]${caption ? ' ' + caption : ''}`;
   } else if (type === 'document') {
     if (!docUrl) return res.status(400).json({ error: 'docUrl is required for document send' });
     metaBody = {
@@ -161,8 +175,10 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         template_name: type === 'template' ? (templateName || null) : null,
         // Persist the media URL so the inbox renders sent images inline and sent
         // documents (e.g. a signed agreement) as a tappable card, not plain text.
-        media_type: (type === 'image' || type === 'document') ? type : null,
-        media_id: type === 'image' ? (imageUrl || null) : (type === 'document' ? (docUrl || null) : null)
+        media_type: (type === 'image' || type === 'video' || type === 'document') ? type : null,
+        media_id: type === 'image' ? (imageUrl || null)
+          : type === 'video' ? (videoUrl || null)
+          : (type === 'document' ? (docUrl || null) : null)
       })
     }).catch(e => console.warn('Failed to log outbound message:', e.message));
   }

@@ -397,6 +397,26 @@ export default async function handler(req, res) {
       // Legacy: return URLs for client-side upload (won't work without auth)
       return res.status(200).json({ uploadUrl, publicUrl });
 
+    } else if (action === 'sign_upload') {
+      // Signed upload URL so the browser can PUT large files (e.g. videos)
+      // straight to Supabase Storage, bypassing the serverless body-size cap.
+      const { path } = payload;
+      if (!path || path.includes('..')) return res.status(400).json({ error: 'valid path required' });
+      r = await fetch(SUPABASE_URL + '/storage/v1/object/upload/sign/brochures/' + path, {
+        method: 'POST',
+        headers: { ...headers, 'x-upsert': 'true' },
+        body: JSON.stringify({})
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        return res.status(r.status).json({ error: err });
+      }
+      const signed = await r.json(); // { url: '/object/upload/sign/brochures/<path>?token=…' }
+      return res.status(200).json({
+        uploadUrl: SUPABASE_URL + '/storage/v1' + signed.url,
+        publicUrl: SUPABASE_URL + '/storage/v1/object/public/brochures/' + path
+      });
+
     } else if (action === 'set_settings') {
       r = await fetch(SUPABASE_URL + '/rest/v1/settings', {
         method: 'POST',
