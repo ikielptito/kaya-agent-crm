@@ -784,10 +784,9 @@
         <textarea id="replyBox" rows="1" placeholder="Type a message" oninput="onReplyInput()"></textarea>
         <button class="icon-btn send-btn" id="sendBtn" onclick="send()" title="Send" aria-label="Send" data-ic="send"></button>
       </div>
-      <input type="file" id="fileImage"  accept="image/*" style="display:none" onchange="onFilePicked(this,'image')">
-      <input type="file" id="fileCamera" accept="image/*" capture="environment" style="display:none" onchange="onFilePicked(this,'image')">
-      <input type="file" id="fileVideo"  accept="video/*" style="display:none" onchange="onFilePicked(this,'video')">
-      <input type="file" id="fileDoc"    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" style="display:none" onchange="onFilePicked(this,'document')">
+      <input type="file" id="fileImage"  accept="image/*,video/*" style="display:none" onchange="onFilePicked(this)">
+      <input type="file" id="fileCamera" accept="image/*" capture="environment" style="display:none" onchange="onFilePicked(this)">
+      <input type="file" id="fileDoc"    accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv" style="display:none" onchange="onFilePicked(this)">
       <div class="pop" id="emojiPop" style="display:none"></div>
       <div class="pop" id="qrPop" style="display:none"></div>
     </div>
@@ -2053,8 +2052,7 @@ async function recallMsg(wid) {
 function toggleAttachSheet() {
   openSheet(`
     <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">${ic('camera')}</span> Take photo</button>
-    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">${ic('image')}</span> Photo library</button>
-    <button class="sheet-item" onclick="pick('fileVideo')"><span class="ico">${ic('video')}</span> Video</button>
+    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">${ic('image')}</span> Photo &amp; video</button>
     <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">${ic('file')}</span> Document</button>
     <button class="sheet-item" onclick="closeSheet();openListingPicker()"><span class="ico">${ic('home')}</span> Send listing (card)</button>
     <button class="sheet-item" onclick="closeSheet();suggest()"><span class="ico">${ic('spark')}</span> Maya draft a reply</button>
@@ -2067,12 +2065,20 @@ function pick(inputId) { closeSheet(); document.getElementById(inputId).click();
 function fileToBase64(file) {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = rej; r.readAsDataURL(file); });
 }
-async function onFilePicked(input, kind) {
+async function onFilePicked(input) {
   const file = input.files && input.files[0]; input.value = '';
   if (!file) return;
   const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
+  const type = file.type || '';
+  let kind = type.startsWith('image/') ? 'image' : type.startsWith('video/') ? 'video' : 'document';
+  if (file.size > 100 * 1024 * 1024) {
+    toast('File too large — WhatsApp caps attachments at 100MB'); return;
+  }
   if (kind === 'video' && file.size > 16 * 1024 * 1024) {
-    toast('Video too large — WhatsApp caps videos at 16MB'); return;
+    // WhatsApp caps inline video at 16MB but documents at 100MB — deliver
+    // big videos as a file attachment (full quality, no inline preview).
+    kind = 'document';
+    toast('Video over 16MB — sending as a file instead of inline video');
   }
   toast('Uploading ' + file.name + '…');
   try {
