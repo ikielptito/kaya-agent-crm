@@ -871,6 +871,7 @@ const state = {
   primed: false,       // true once the first poll has set a baseline
   swReg: null,
   threadMsgs: [],      // currently-loaded thread (ascending)
+  threadHtml: null,    // last-rendered thread HTML — poll skips DOM writes when unchanged
   msgIndex: {},        // wa_message_id -> message (for quote lookup)
   replyTarget: null,   // { waMessageId, who, text } when composing a reply
   search: { q: '', matches: [], idx: 0 },
@@ -1572,6 +1573,7 @@ function openConv(id) {
   document.getElementById('emojiPop').style.display = 'none';
   document.getElementById('qrPop').style.display = 'none';
   state.threadMsgs = []; state.msgIndex = {};
+  state.threadHtml = null;   // force a fresh render for the new thread
   state.threadLastRead = localStorage.getItem('maya_read_' + id) || null;
   state.translateOn = localStorage.getItem('maya_xlate_' + id) === '1';
   updateTranslateBtn();
@@ -1737,7 +1739,8 @@ async function refreshThread(scroll) {
   if (id !== state.activeId) return; // user switched away mid-fetch
   const body = document.getElementById('threadBody');
   if (!Array.isArray(msgs) || msgs.length === 0) {
-    body.innerHTML = '<div class="empty">No messages yet.</div>';
+    const empty = '<div class="empty">No messages yet.</div>';
+    if (state.threadHtml !== empty) { state.threadHtml = empty; body.innerHTML = empty; }
     return;
   }
   const nearBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 120;
@@ -1761,9 +1764,25 @@ async function refreshThread(scroll) {
   if (state.mayaPending[id] && Date.now() < state.mayaPending[id]) {
     rows.push('<div class="bubble in typing"><span class="tdots"><i></i><i></i><i></i></span>Maya is replying…</div>');
   }
-  body.innerHTML = rows.join('');
-  if (state.search.q) applySearchHighlights();
-  if (scroll || nearBottom) { body.scrollTop = body.scrollHeight; state.atBottom = true; }
+  // Only touch the DOM when the rendered content actually changed. The poll
+  // fires every 8s; rebuilding innerHTML each time destroys and reloads every
+  // <img>/<video>, which collapses then re-expands the scroll height — the
+  // thread visibly jumps up and down. Comparing the built HTML makes the
+  // common no-change poll a no-op (and keeps playing audio/selection alive).
+  const html = rows.join('');
+  const changed = html !== state.threadHtml;
+  if (changed) {
+    state.threadHtml = html;
+    const prevTop = body.scrollTop;
+    body.innerHTML = html;
+    if (state.search.q) applySearchHighlights();
+    // Reading older history: keep the user's place instead of letting the
+    // rebuild (and async media reloads) shift it.
+    if (!scroll && !nearBottom) body.scrollTop = prevTop;
+  }
+  // Snap to bottom only on explicit request or when new content landed while
+  // the user was already at the bottom — never on a no-change poll.
+  if (scroll || (changed && nearBottom)) { body.scrollTop = body.scrollHeight; state.atBottom = true; }
   const newest = asc[asc.length - 1]?.timestamp;
   if (newest) localStorage.setItem('maya_read_' + id, newest);
   updateScrollFab();
@@ -2615,6 +2634,7 @@ function openAssistant() {
 
 function renderAssistantThread(scroll) {
   if (state.activeId !== ASSIST_ID) return;
+  state.threadHtml = null;   // threadBody no longer holds an agent thread
   const body = document.getElementById('threadBody');
   const h = state.assist.history;
   const rows = [];
