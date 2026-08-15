@@ -8,6 +8,7 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
+import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -92,6 +93,44 @@ async function flushTeamAlerts(url, headers, phoneId, token, fromNum) {
   }
   delete q[fromNum];
   await writeTeamAlertQueue(url, headers, q);
+  return true;
+}
+
+// ── Question relay (agent ⇄ villa contact, brokered by Maya) ───────────
+// Anyone who is a listing's "enquire with" contact — Era for our own villas,
+// the owner or manager for theirs — may have open agent questions sitting with
+// them. Their inbound message is checked against those questions BEFORE normal
+// handling: an answer gets recorded and carried back to the agent, and nothing
+// else about their thread changes. Returns true when the message was consumed
+// as a relay answer, false when it's ordinary conversation.
+// "OK" / "ya" / "thanks" — a message whose only content is that they showed
+// up, which is exactly what a re-opener template asks for. It tells the relay
+// legs when a delivery IS the whole turn, and when there's a real message
+// underneath that still deserves a normal reply.
+const isBareAck = (s) =>
+  /^(ok(ay|e)?|ya|yes|yep|yup|sure|siap|noted|thanks?|thank you|terima kasih|👍|🙏)[\s.!]*$/i
+    .test(String(s || '').trim());
+
+async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
+  const open = await openRelaysForContact(db, fromNum);
+  if (!open.length) return false;
+  const captured = await captureRelayAnswer(apiKey, open, text);
+  if (!captured) return false;
+
+  const prop = captured.relay.property_name || captured.relay.rental_slug || 'the villa';
+
+  // A hedge ("maybe", "I think so") is not an answer an agent can quote to
+  // their client. Ask once for a straight yes/no rather than passing a guess.
+  if (!captured.confident) {
+    await sendText(wa.phoneId, wa.token, fromNum,
+      `Thanks! Just so I give the agent something solid on ${prop} — can you confirm either way?`);
+    return true;
+  }
+
+  await recordAnswer(db, captured.relay.id, { answer: captured.answer, durableFact: captured.durableFact });
+  await sendText(wa.phoneId, wa.token, fromNum,
+    `Perfect, thank you — passing that straight back to the agent now.`);
+  await deliverAnswers(db, wa, captured.relay.agent_wa);
   return true;
 }
 
@@ -631,9 +670,20 @@ export default async function handler(req, res) {
     // agent/guest contact card — inside the now-open 24h window. Their
     // message is consumed by the flush; normal agent handling is skipped
     // for this turn so Maya never chats back at her own team ping.
+    // Shared handles for the relay module (same Supabase + WhatsApp creds).
+    const relayDb = { SUPABASE_URL, sbHeaders };
+    const relayWa = { phoneId: WA_PHONE_ID, token: WA_TOKEN };
+
     if (TEAM_NUMS.has(fromNum)) {
       const flushed = await flushTeamAlerts(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, fromNum);
-      if (flushed) return res.status(200).end();
+      // Era is the "enquire with" contact for our directly-managed villas, so
+      // she gets relayed agent questions like any owner: her reply opens the
+      // window (delivering anything queued) and may itself be an answer.
+      const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
+      const answered = await handleRelayReply({
+        db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+      });
+      if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
     }
 
     // Find matching agent
@@ -714,6 +764,47 @@ export default async function handler(req, res) {
       agentId: agent ? agent.id : null,
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
+
+    // ── RELAY: THE SENDER IS ANSWERING ───────────────────────────────
+    // Any "enquire with" contact — an owner, a manager, anyone holding an open
+    // question — gets their reply matched against it first. Their inbound also
+    // opens their 24h window, so anything that was waiting on a template goes
+    // out now. A captured answer consumes the message: no chat reply follows,
+    // because the thank-you and the hand-back to the agent already happened.
+    {
+      const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
+      const answered = await handleRelayReply({
+        db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+      });
+      if (answered) {
+        if (owner) {
+          await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, {
+            method: 'PATCH', headers: sbHeaders,
+            body: JSON.stringify({ last_inbound_at: timestamp }),
+          }).catch(() => {});
+        }
+        return res.status(200).end();
+      }
+      // A bare "OK" was just the window opening, so the question we sent is
+      // the whole turn. Anything more substantial is a real message — let it
+      // through to normal handling so their own request still gets answered.
+      if (asked && isBareAck(text)) return res.status(200).end();
+    }
+
+    // ── RELAY: THE SENDER IS OWED AN ANSWER ──────────────────────────
+    // An agent whose question came back while their window was shut got the
+    // maya_answer_ready template; this message re-opens the window, so the
+    // answer goes out now. When that message is nothing but the "OK" the
+    // template asked for, the answer IS the reply — Maya doesn't chat on top.
+    if (agent) {
+      const delivered = await deliverAnswers(relayDb, relayWa, fromNum);
+      if (delivered && isBareAck(text)) {
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, {
+          last_inbound_at: timestamp, unread_count: 0, dead_number: false,
+        });
+        return res.status(200).end();
+      }
+    }
 
     // ── OWNER-MODE BRANCH ────────────────────────────────────────────
     // A villa owner/manager (matched by their listing's WhatsApp contact) who
@@ -1164,6 +1255,46 @@ export default async function handler(req, res) {
           body: nt.summary.slice(0, 160), agentId: agent.id,
           badgeCount: (agent.unread_count || 0) + 1,
         }).catch(() => {});
+      }
+      // QUESTION RELAY — the agent asked something checkable that isn't in the
+      // KB. Maya puts it to that listing's "enquire with" contact and carries
+      // the answer back herself, instead of leaving the agent to chase it.
+      if (aiResult.ask_owner) {
+        const ao = aiResult.ask_owner;
+        const prop = (digest?.properties || []).find(p => p.slug === ao.slug);
+        const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
+        const contactName = prop?.waContactName || 'Era';
+        try {
+          // Thread it into the owner's inbox when we know them as an owner.
+          let ownerId = null;
+          try {
+            const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${contactWa}&select=id&limit=1`, { headers: sbHeaders });
+            ownerId = (await oRes.json())?.[0]?.id ?? null;
+          } catch { /* owner link is a nicety, not a requirement */ }
+
+          const r = await openRelay(relayDb, relayWa, {
+            agent, question: ao.question, slug: ao.slug,
+            propertyName: prop?.name || ao.slug, contactName, contactWa, ownerId,
+          });
+          if (r.ok) {
+            await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({
+                agent_id: agent.id, field: 'relay_opened', new_value: contactName,
+                reason: `${prop?.name || ao.slug}: ${ao.question}`.slice(0, 300),
+                evidence: (text || '').slice(0, 200), by_maya: true,
+                created_at: new Date().toISOString(),
+              }),
+            }).catch(() => {});
+            sendPushNotifications(SUPABASE_URL, sbHeaders, {
+              title: `Maya asked ${contactName}: ${prop?.name || ao.slug}`,
+              body: ao.question.slice(0, 160), agentId: agent.id,
+              badgeCount: (agent.unread_count || 0) + 1,
+            }).catch(() => {});
+          } else {
+            console.log('relay not opened:', r.reason);
+          }
+        } catch (e) { console.warn('openRelay failed:', e.message); }
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -1675,6 +1806,16 @@ DATA PRIORITY RULES (critical — read carefully):
 5. Brochure URLs, commission %, status, delivery date, payment plan — also authoritative as written in the structured fields.
 6. The "Extended details (from brochure)" block is supplementary information pulled from the project's sales brochure. Use it for questions that aren't covered by structured fields (architects, builder/contractor, design philosophy, materials, construction methodology, amenity rationale, etc.). Quote it freely when relevant.
 7. If a field is empty AND there's nothing in extended_info that covers the question, do not guess or fill in from memory. Say "Let me check with Ikiel and come back to you."
+8. Better still, GO AND GET THE ANSWER — see ASKING THE VILLA CONTACT below. "I don't have that" is a dead end; "let me find out for you" is the job.
+
+ASKING THE VILLA CONTACT ("ask_owner") — how you answer what isn't in your data:
+When an agent asks a CHECKABLE FACT about a specific Samba villa that is not in the data above — a bathtub, an oven, a bathtub vs shower, air-con in every room, a generator, whether the pet policy stretches to a dog, stroller access, a workspace, water pressure, staff, parking for two cars — do not stop at the contact card. Set "ask_owner": { "slug": "<that property's slug>", "question": "<the question in one clear sentence>" }. The system asks that listing's "enquire with" contact on WhatsApp, waits for their answer, and delivers it back to the agent for you — even days later, and even if either side's chat window has closed in the meantime.
+- Tell the agent plainly what you're doing, in the same reply: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
+- Also send the contact card as you normally would (the agent may want to arrange the viewing directly). Relaying the question and handing over the card are not alternatives — do both.
+- The question you write goes to the contact VERBATIM, so make it a clean single question about the property. Never mention the agent's name, their agency, or their client. The contact is told only that "an agent asked" — you are the one brokering this.
+- ONE relay per reply, and only for a fact the contact can actually confirm. Do NOT relay: price negotiation and discounts (escalate to Ikiel), live availability (use need_availability), anything already answered in your data, or vague curiosity with no agent waiting on it.
+- If the agent is asking about a KAYA SALES project rather than a Samba rental, leave ask_owner null — those go to Ikiel via notify_team.
+- When a relay is already open with that contact for the same question, just tell the agent you're still waiting; the system will not double-ask.
 
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
@@ -1717,6 +1858,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "send_contact": null | { "name": "Era", "phone": "6281246357778" },
   "reply_buttons": [] | up to 3 short tap options (max 20 chars each), e.g. ["More options", "Download photos"],
   "notify_team": null | { "to": "era" | "ikiel", "summary": "1-2 sentences: property name + what's needed + any deadline", "share_agent_contact": true|false },
+  "ask_owner": null | { "slug": "<samba rental slug from the list above>", "question": "one clear question about the property, sent verbatim to its enquire-with contact" },
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -1843,6 +1985,15 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
               to: String(parsed.notify_team.to).toLowerCase() === 'era' ? 'era' : 'ikiel',
               summary: String(parsed.notify_team.summary).slice(0, 500),
               share_contact: !!parsed.notify_team.share_agent_contact,
+            }
+          : null,
+        // Only relay against a slug that actually exists — an invented slug
+        // would send a question about a villa nobody manages.
+        ask_owner: (parsed.ask_owner && parsed.ask_owner.slug && parsed.ask_owner.question
+                    && rentalSlugs.includes(String(parsed.ask_owner.slug)))
+          ? {
+              slug: String(parsed.ask_owner.slug),
+              question: String(parsed.ask_owner.question).trim().slice(0, 500),
             }
           : null,
         llm_calls: llmCalls,

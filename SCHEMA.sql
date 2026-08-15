@@ -12,7 +12,7 @@ create table if not exists wa_messages (
   content       text,
   wa_message_id text,
   timestamp     timestamptz default now(),
-  source        text,             -- 'api' | 'webhook' | 'cron'
+  source        text,             -- 'api' | 'webhook' | 'cron' | 'relay'
   campaign_id   uuid
 );
 create index if not exists idx_wa_messages_agent_time on wa_messages (agent_id, timestamp desc);
@@ -258,3 +258,53 @@ alter table owners add column if not exists drive_folder_id text;
   -- Google Drive folder auto-created for photos they send in chat
 alter table owners add column if not exists last_onboarding_nudge_at timestamptz;
 alter table owners add column if not exists onboarding_nudges int default 0;
+
+-- ── QUESTION RELAYS ─────────────────────────────────────────────────
+-- Maya brokering an agent's question to the person who actually knows the
+-- answer (the listing's "enquire with" contact — Era for directly-managed
+-- villas, the owner/manager otherwise) and carrying the answer back. Both
+-- legs have to survive WhatsApp's 24h session window, so the status column
+-- tracks where in the round trip each question is:
+--   'queued'    — contact's window was shut; the maya_owner_question template
+--                 went out and the question itself is waiting for them to reply
+--   'asked'     — the question has been delivered; waiting on an answer
+--   'answered'  — we have the answer; waiting to hand it to the agent (their
+--                 window may be shut, in which case maya_answer_ready went out)
+--   'delivered' — the agent has the answer; round trip complete
+--   'expired'   — nobody answered inside RELAY_TTL_HOURS; the agent was told
+--   'cancelled' — superseded or manually closed
+-- The agent's client is NEVER part of a relay: questions are about the
+-- property, and the contact is told "an agent asked", never who.
+create table if not exists relays (
+  id            bigserial primary key,
+  agent_id      bigint references agents(id),
+  agent_wa      text not null,
+  agent_name    text,
+  rental_slug   text,
+  property_name text,
+  question      text not null,
+  contact_name  text,
+  contact_wa    text not null,
+  owner_id      bigint references owners(id),
+  status        text not null default 'asked',
+  answer        text,
+  -- A durable fact worth keeping in the KB ("Unit 1 has a bathtub in the
+  -- master ensuite"), staged for Ikiel's approval rather than written live:
+  -- an owner's offhand reply should not become something Maya quotes to
+  -- every agent until a human has seen it. kb_status: pending|approved|rejected.
+  kb_fact       text,
+  kb_status     text,
+  asked_at      timestamptz default now(),
+  answered_at   timestamptz,
+  delivered_at  timestamptz,
+  nudges        int default 0,
+  last_nudge_at timestamptz,
+  -- Two separate re-openers, one per leg: the contact's window and the
+  -- agent's shut independently, so they must never share a timestamp.
+  template_sent_at timestamptz,      -- maya_owner_question → the villa contact
+  answer_template_at timestamptz,    -- maya_answer_ready   → the agent
+  created_at    timestamptz default now()
+);
+create index if not exists idx_relays_contact on relays (contact_wa, status);
+create index if not exists idx_relays_agent on relays (agent_wa, status);
+create index if not exists idx_relays_kb on relays (kb_status) where kb_status is not null;

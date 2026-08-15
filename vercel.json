@@ -21,6 +21,10 @@
     {
       "path": "/api/cron-followups?wave=2",
       "schedule": "40 1 * * *"
+    },
+    {
+      "path": "/api/cron-followups?relay=sweep",
+      "schedule": "5 * * * *"
     }
   ]
 }

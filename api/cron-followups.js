@@ -22,6 +22,7 @@ import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from
 import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
+import { sweepRelays } from '../lib/relay.js';
 import crypto from 'node:crypto';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
@@ -126,6 +127,23 @@ export default async function handler(req, res) {
       return res.status(200).json({ owner_report: rep });
     } catch (e) {
       return res.status(500).json({ error: 'report failed: ' + e.message });
+    }
+  }
+
+  // ── Question-relay sweep ─────────────────────────────────────────────
+  // ?relay=sweep nudges villa contacts sitting on an unanswered agent
+  // question, expires the ones nobody answered (telling the agent honestly
+  // rather than letting Maya's promise evaporate), and retries answers the
+  // agent hasn't come back to collect. Runs hourly; no other send logic.
+  if (req.query?.relay === 'sweep') {
+    try {
+      const out = await sweepRelays(
+        { SUPABASE_URL, sbHeaders },
+        { phoneId: WA_PHONE_ID, token: WA_TOKEN },
+      );
+      return res.status(200).json({ relay_sweep: out });
+    } catch (e) {
+      return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
   }
 
