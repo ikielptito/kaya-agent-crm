@@ -10,6 +10,7 @@ import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../l
 // whatsapp-send 'cards' action.
 import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { parseImageMarker } from '../lib/owner-onboarding.js';
+import { driveConfigured, createOwnerFolder, listFolderImages, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
@@ -1393,6 +1394,65 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         body: JSON.stringify({ key: 'push_subscriptions', value: next })
       });
       return res.status(200).json({ success: true, count: next.length });
+
+    } else if (action === 'repair_owner_photos') {
+      // Re-drive every photo an owner ever sent into ONE folder.
+      //
+      // Inbound images are archived to Drive as they arrive, which is fine
+      // until a burst races: on 16 Aug 2026 twenty-seven photos landed in one
+      // second, each invocation created its own folder, and only 16 files
+      // survived — scattered across 14 folders. wa_messages keeps the WhatsApp
+      // media_id of every inbound image, and Meta serves that media for ~30
+      // days, so the set is recoverable as long as the sweep runs in time.
+      //
+      // Idempotent: files are named wa-<mediaId>, so anything already in the
+      // target folder is skipped. Safe to re-run.
+      const secret = process.env.MAINT_SECRET;
+      if (!secret || (req.headers.authorization || '') !== `Bearer ${secret}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const { ownerId, folderId: forceFolder, dryRun } = payload || {};
+      if (ownerId == null) return res.status(400).json({ error: 'ownerId required' });
+      const WA_TOKEN = process.env.META_WA_TOKEN;
+      if (!WA_TOKEN) return res.status(500).json({ error: 'META_WA_TOKEN not configured' });
+      if (!driveConfigured()) return res.status(500).json({ error: 'Drive not configured' });
+
+      const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}&select=*`, { headers });
+      const owner = (await oRes.json())?.[0];
+      if (!owner) return res.status(404).json({ error: 'Unknown owner' });
+
+      // Oldest → newest so the folder ends up in the order the owner sent them.
+      const mRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${ownerId}&direction=eq.inbound&media_type=eq.image`
+        + `&media_id=not.is.null&order=timestamp.asc&limit=1000&select=media_id,timestamp`, { headers });
+      const rows = await mRes.json();
+      const mediaIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => r.media_id).filter(Boolean))];
+      if (!mediaIds.length) return res.status(200).json({ ok: true, total: 0, note: 'no inbound photos on this thread' });
+
+      let folderId = forceFolder || owner.drive_folder_id;
+      if (!folderId || String(folderId).startsWith('pending:')) {
+        folderId = await createOwnerFolder(`${owner.name || owner.wa_num} — villa photos`);
+      }
+      if (dryRun) return res.status(200).json({ ok: true, dryRun: true, folderId, total: mediaIds.length });
+
+      const existing = await listFolderImages(folderId);
+      const out = { ok: true, folderId, total: mediaIds.length, uploaded: 0, skipped: 0, failed: [] };
+      for (const mediaId of mediaIds) {
+        try {
+          const r = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId, existing });
+          if (r.skipped) out.skipped++;
+          else { out.uploaded++; existing[`wa-${mediaId}.jpg`] = r.fileId; }
+        } catch (e) {
+          out.failed.push({ mediaId, error: e.message });
+        }
+      }
+      out.inFolder = Object.keys(await listFolderImages(folderId)).length;
+      if (owner.drive_folder_id !== folderId) {
+        await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}`, {
+          method: 'PATCH', headers, body: JSON.stringify({ drive_folder_id: folderId }),
+        });
+      }
+      return res.status(200).json(out);
 
     } else {
       return res.status(400).json({ error: 'Unknown action: ' + action });

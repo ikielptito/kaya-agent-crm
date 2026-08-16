@@ -8,6 +8,7 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
+import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
@@ -92,6 +93,44 @@ async function flushTeamAlerts(url, headers, phoneId, token, fromNum) {
   }
   delete q[fromNum];
   await writeTeamAlertQueue(url, headers, q);
+  return true;
+}
+
+// ── Question relay (agent ⇄ villa contact, brokered by Maya) ───────────
+// Anyone who is a listing's "enquire with" contact — Era for our own villas,
+// the owner or manager for theirs — may have open agent questions sitting with
+// them. Their inbound message is checked against those questions BEFORE normal
+// handling: an answer gets recorded and carried back to the agent, and nothing
+// else about their thread changes. Returns true when the message was consumed
+// as a relay answer, false when it's ordinary conversation.
+// "OK" / "ya" / "thanks" — a message whose only content is that they showed
+// up, which is exactly what a re-opener template asks for. It tells the relay
+// legs when a delivery IS the whole turn, and when there's a real message
+// underneath that still deserves a normal reply.
+const isBareAck = (s) =>
+  /^(ok(ay|e)?|ya|yes|yep|yup|sure|siap|noted|thanks?|thank you|terima kasih|👍|🙏)[\s.!]*$/i
+    .test(String(s || '').trim());
+
+async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
+  const open = await openRelaysForContact(db, fromNum);
+  if (!open.length) return false;
+  const captured = await captureRelayAnswer(apiKey, open, text);
+  if (!captured) return false;
+
+  const prop = captured.relay.property_name || captured.relay.rental_slug || 'the villa';
+
+  // A hedge ("maybe", "I think so") is not an answer an agent can quote to
+  // their client. Ask once for a straight yes/no rather than passing a guess.
+  if (!captured.confident) {
+    await sendText(wa.phoneId, wa.token, fromNum,
+      `Thanks! Just so I give the agent something solid on ${prop} — can you confirm either way?`);
+    return true;
+  }
+
+  await recordAnswer(db, captured.relay.id, { answer: captured.answer, durableFact: captured.durableFact });
+  await sendText(wa.phoneId, wa.token, fromNum,
+    `Perfect, thank you — passing that straight back to the agent now.`);
+  await deliverAnswers(db, wa, captured.relay.agent_wa);
   return true;
 }
 
@@ -631,9 +670,20 @@ export default async function handler(req, res) {
     // agent/guest contact card — inside the now-open 24h window. Their
     // message is consumed by the flush; normal agent handling is skipped
     // for this turn so Maya never chats back at her own team ping.
+    // Shared handles for the relay module (same Supabase + WhatsApp creds).
+    const relayDb = { SUPABASE_URL, sbHeaders };
+    const relayWa = { phoneId: WA_PHONE_ID, token: WA_TOKEN };
+
     if (TEAM_NUMS.has(fromNum)) {
       const flushed = await flushTeamAlerts(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, fromNum);
-      if (flushed) return res.status(200).end();
+      // Era is the "enquire with" contact for our directly-managed villas, so
+      // she gets relayed agent questions like any owner: her reply opens the
+      // window (delivering anything queued) and may itself be an answer.
+      const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
+      const answered = await handleRelayReply({
+        db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+      });
+      if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
     }
 
     // Find matching agent
@@ -715,6 +765,47 @@ export default async function handler(req, res) {
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
 
+    // ── RELAY: THE SENDER IS ANSWERING ───────────────────────────────
+    // Any "enquire with" contact — an owner, a manager, anyone holding an open
+    // question — gets their reply matched against it first. Their inbound also
+    // opens their 24h window, so anything that was waiting on a template goes
+    // out now. A captured answer consumes the message: no chat reply follows,
+    // because the thank-you and the hand-back to the agent already happened.
+    {
+      const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
+      const answered = await handleRelayReply({
+        db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+      });
+      if (answered) {
+        if (owner) {
+          await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, {
+            method: 'PATCH', headers: sbHeaders,
+            body: JSON.stringify({ last_inbound_at: timestamp }),
+          }).catch(() => {});
+        }
+        return res.status(200).end();
+      }
+      // A bare "OK" was just the window opening, so the question we sent is
+      // the whole turn. Anything more substantial is a real message — let it
+      // through to normal handling so their own request still gets answered.
+      if (asked && isBareAck(text)) return res.status(200).end();
+    }
+
+    // ── RELAY: THE SENDER IS OWED AN ANSWER ──────────────────────────
+    // An agent whose question came back while their window was shut got the
+    // maya_answer_ready template; this message re-opens the window, so the
+    // answer goes out now. When that message is nothing but the "OK" the
+    // template asked for, the answer IS the reply — Maya doesn't chat on top.
+    if (agent) {
+      const delivered = await deliverAnswers(relayDb, relayWa, fromNum);
+      if (delivered && isBareAck(text)) {
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, {
+          last_inbound_at: timestamp, unread_count: 0, dead_number: false,
+        });
+        return res.status(200).end();
+      }
+    }
+
     // ── OWNER-MODE BRANCH ────────────────────────────────────────────
     // A villa owner/manager (matched by their listing's WhatsApp contact) who
     // is NOT also an agent: Maya handles this in owner-mode and we return,
@@ -726,7 +817,7 @@ export default async function handler(req, res) {
       try {
         await handleOwnerConversation({
           SUPABASE_URL, sbHeaders, owner, fromNum,
-          inbound: text, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY,
+          inbound: text, timestamp, waMessageId, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY,
           mediaType, mediaId,
         });
       } catch (e) {
@@ -1164,6 +1255,46 @@ export default async function handler(req, res) {
           body: nt.summary.slice(0, 160), agentId: agent.id,
           badgeCount: (agent.unread_count || 0) + 1,
         }).catch(() => {});
+      }
+      // QUESTION RELAY — the agent asked something checkable that isn't in the
+      // KB. Maya puts it to that listing's "enquire with" contact and carries
+      // the answer back herself, instead of leaving the agent to chase it.
+      if (aiResult.ask_owner) {
+        const ao = aiResult.ask_owner;
+        const prop = (digest?.properties || []).find(p => p.slug === ao.slug);
+        const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
+        const contactName = prop?.waContactName || 'Era';
+        try {
+          // Thread it into the owner's inbox when we know them as an owner.
+          let ownerId = null;
+          try {
+            const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${contactWa}&select=id&limit=1`, { headers: sbHeaders });
+            ownerId = (await oRes.json())?.[0]?.id ?? null;
+          } catch { /* owner link is a nicety, not a requirement */ }
+
+          const r = await openRelay(relayDb, relayWa, {
+            agent, question: ao.question, slug: ao.slug,
+            propertyName: prop?.name || ao.slug, contactName, contactWa, ownerId,
+          });
+          if (r.ok) {
+            await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({
+                agent_id: agent.id, field: 'relay_opened', new_value: contactName,
+                reason: `${prop?.name || ao.slug}: ${ao.question}`.slice(0, 300),
+                evidence: (text || '').slice(0, 200), by_maya: true,
+                created_at: new Date().toISOString(),
+              }),
+            }).catch(() => {});
+            sendPushNotifications(SUPABASE_URL, sbHeaders, {
+              title: `Maya asked ${contactName}: ${prop?.name || ao.slug}`,
+              body: ao.question.slice(0, 160), agentId: agent.id,
+              badgeCount: (agent.unread_count || 0) + 1,
+            }).catch(() => {});
+          } else {
+            console.log('relay not opened:', r.reason);
+          }
+        } catch (e) { console.warn('openRelay failed:', e.message); }
       }
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
@@ -1675,6 +1806,16 @@ DATA PRIORITY RULES (critical — read carefully):
 5. Brochure URLs, commission %, status, delivery date, payment plan — also authoritative as written in the structured fields.
 6. The "Extended details (from brochure)" block is supplementary information pulled from the project's sales brochure. Use it for questions that aren't covered by structured fields (architects, builder/contractor, design philosophy, materials, construction methodology, amenity rationale, etc.). Quote it freely when relevant.
 7. If a field is empty AND there's nothing in extended_info that covers the question, do not guess or fill in from memory. Say "Let me check with Ikiel and come back to you."
+8. Better still, GO AND GET THE ANSWER — see ASKING THE VILLA CONTACT below. "I don't have that" is a dead end; "let me find out for you" is the job.
+
+ASKING THE VILLA CONTACT ("ask_owner") — how you answer what isn't in your data:
+When an agent asks a CHECKABLE FACT about a specific Samba villa that is not in the data above — a bathtub, an oven, a bathtub vs shower, air-con in every room, a generator, whether the pet policy stretches to a dog, stroller access, a workspace, water pressure, staff, parking for two cars — do not stop at the contact card. Set "ask_owner": { "slug": "<that property's slug>", "question": "<the question in one clear sentence>" }. The system asks that listing's "enquire with" contact on WhatsApp, waits for their answer, and delivers it back to the agent for you — even days later, and even if either side's chat window has closed in the meantime.
+- Tell the agent plainly what you're doing, in the same reply: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
+- Also send the contact card as you normally would (the agent may want to arrange the viewing directly). Relaying the question and handing over the card are not alternatives — do both.
+- The question you write goes to the contact VERBATIM, so make it a clean single question about the property. Never mention the agent's name, their agency, or their client. The contact is told only that "an agent asked" — you are the one brokering this.
+- ONE relay per reply, and only for a fact the contact can actually confirm. Do NOT relay: price negotiation and discounts (escalate to Ikiel), live availability (use need_availability), anything already answered in your data, or vague curiosity with no agent waiting on it.
+- If the agent is asking about a KAYA SALES project rather than a Samba rental, leave ask_owner null — those go to Ikiel via notify_team.
+- When a relay is already open with that contact for the same question, just tell the agent you're still waiting; the system will not double-ask.
 
 TEMPLATE CONTEXT (what the approved outbound templates say, so you understand replies to them):
 - [Template: kaya_intro] = "Hi {name}, I'm reaching out from KAYA Developments Listings Team to make sure agents have up-to-date info on our current projects and properties. Can I send you the latest info?"
@@ -1717,6 +1858,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "send_contact": null | { "name": "Era", "phone": "6281246357778" },
   "reply_buttons": [] | up to 3 short tap options (max 20 chars each), e.g. ["More options", "Download photos"],
   "notify_team": null | { "to": "era" | "ikiel", "summary": "1-2 sentences: property name + what's needed + any deadline", "share_agent_contact": true|false },
+  "ask_owner": null | { "slug": "<samba rental slug from the list above>", "question": "one clear question about the property, sent verbatim to its enquire-with contact" },
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -1845,6 +1987,15 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
               share_contact: !!parsed.notify_team.share_agent_contact,
             }
           : null,
+        // Only relay against a slug that actually exists — an invented slug
+        // would send a question about a villa nobody manages.
+        ask_owner: (parsed.ask_owner && parsed.ask_owner.slug && parsed.ask_owner.question
+                    && rentalSlugs.includes(String(parsed.ask_owner.slug)))
+          ? {
+              slug: String(parsed.ask_owner.slug),
+              question: String(parsed.ask_owner.question).trim().slice(0, 500),
+            }
+          : null,
         llm_calls: llmCalls,
         cost_usd: costUsd,
         model: replyModel,
@@ -1867,7 +2018,7 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
 // flow but use the owners table + owner_id-tagged messages. (PORTAL_BASE is
 // declared near the top of the file, shared with the availability helpers.)
 
-async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, mediaType, mediaId }) {
+async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, waMessageId, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, mediaType, mediaId }) {
   // Automation mode: global setting, with a per-owner pause override.
   let globalMode = 'draft';
   try {
@@ -1912,12 +2063,16 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   if (mediaType === 'image' && mediaId && WA_TOKEN) {
     if (driveConfigured()) {
       try {
-        let folderId = owner.drive_folder_id;
-        if (!folderId) {
-          folderId = await createOwnerFolder(`${owner.name || fromNum} — villa photos`);
-          patch.drive_folder_id = folderId;
-          owner = { ...owner, drive_folder_id: folderId };
-        }
+        // claimOwnerDriveFolder is race-safe: a photo burst arrives as N
+        // concurrent invocations that all read drive_folder_id as null, and
+        // the old `if (!folderId) create` gave each one its OWN folder (14 of
+        // them on 16 Aug 2026, scattering one owner's photos across all of
+        // them). Exactly one invocation now creates; the rest wait for it.
+        const folderId = await claimOwnerDriveFolder({
+          url: SUPABASE_URL, headers: sbHeaders, owner,
+          label: `${owner.name || fromNum} — villa photos`,
+        });
+        owner = { ...owner, drive_folder_id: folderId };
         const { count } = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId });
         inbound = `[The owner sent a photo. It was saved automatically to their villa photo folder${count ? ` — ${count} photo${count === 1 ? '' : 's'} collected so far` : ''} (${folderLink(folderId)}). Acknowledge naturally; if you have enough details plus photos, consider moving to submit the listing with photosLink set to that folder link.]${inbound && !/^\[/.test(inbound) ? ` Caption: "${inbound}"` : ''}`;
       } catch (e) {
@@ -1934,9 +2089,29 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
     return;
   }
 
+  // SUPERSEDE CHECK #1 (pre-generation) — the owner-side twin of the agent
+  // pipeline's guard. Every inbound message is its own invocation, so without
+  // this a 27-photo burst generates 27 replies: on 16 Aug 2026 one owner got
+  // 24 contradictory "all set!" messages in 43 seconds. The photo upload above
+  // still runs for every image; only the REPLY is left to the newest message,
+  // which sees the whole burst in its thread.
+  if (await hasNewerOwnerInbound(SUPABASE_URL, sbHeaders, owner.id, timestamp, waMessageId)) {
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
+
   const thread = await fetchOwnerThread(SUPABASE_URL, sbHeaders, owner.id);
   const listingSlugs = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
-  const ai = await generateOwnerReply(ANTHROPIC_KEY, owner, inbound, thread, listingSlugs, { SUPABASE_URL, sbHeaders });
+  const ai = await generateOwnerReply(ANTHROPIC_KEY, owner, inbound, thread, listingSlugs, { SUPABASE_URL, sbHeaders, owner });
+
+  // SUPERSEDE CHECK #2 (post-generation) — more of the burst can land during
+  // the ~10s Claude call. Drop this reply; the newer invocation answers once.
+  // Any listing intake inside generateOwnerReply has already been applied and
+  // is idempotent on the portal side, so dropping the text is safe.
+  if (await hasNewerOwnerInbound(SUPABASE_URL, sbHeaders, owner.id, timestamp, waMessageId)) {
+    await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    return;
+  }
 
   // Count the token spend against the same daily budget as agent replies.
   if (typeof ai.cost_usd === 'number' && ai.cost_usd > 0) {
@@ -2017,6 +2192,12 @@ WHAT YOU DO FOR OWNERS:
 RULES:
 - To create/update a listing you need at least a villa name. Area, bedrooms/bathrooms, monthly price, a Google Drive photos link, and an iCal availability calendar make it far stronger — ask for what's missing, but don't demand everything in one go.
 - If photos were saved automatically to their villa photo folder (see thread), use that folder link as photosLink — never ask them for a Drive link they already effectively gave you by sending photos.
+- Gather photos AND the availability calendar BEFORE the first "intake" wherever you can. Submitting the moment you have a price means the listing goes to Ikiel half-empty. If the owner still owes you photos or a calendar, ask for them first and submit once.
+- CALENDAR (iCal) — you CANNOT derive one. A link to an Airbnb/Booking listing page is NOT a calendar, and you must NEVER construct, guess, or "pull" an .ics URL from a listing URL. Only ever pass an icalUrl the owner literally sent you. If they send a listing link, thank them, say it's useful for the description, and then ask for the export URL in their own words:
+  · Airbnb: Menu → Listings → pick the villa → Availability → Connect calendars → Export calendar → copy the link.
+  · Booking.com: Calendar → Sync calendars → Export → copy the link.
+  A valid link ends in .ics. If they can't find it, say Ikiel will help set it up — never invent one to fill the field.
+- Once a villa has a slug (see "their current listing slugs"), ALWAYS pass that slug when submitting a change to it. Submitting without the slug creates a duplicate listing.
 - For anything about money owed, payouts, billing, complaints, contracts, or legal: set action "escalate" (Ikiel handles those personally).
 - Keep replies to 1–4 short sentences. This is WhatsApp.
 ${onboardingBlock}
@@ -2058,15 +2239,27 @@ Use "report" to fetch real numbers before answering a performance question (set 
         continue;
       }
       if (parsed.action === 'intake' && parsed.listing && hop < MAX - 1) {
-        const result = await submitOwnerIntake(owner, parsed.listing, secret);
-        // A successful intake completes the onboarding funnel.
-        if (result.startsWith('success') && isProspect(owner) && db) {
+        // Reuse a slug we already know for this owner when Maya omits one —
+        // otherwise a second intake creates a second listing.
+        const listing = { ...parsed.listing };
+        if (!listing.slug && listingSlugs.length === 1) listing.slug = listingSlugs[0];
+        const result = await submitOwnerIntake(owner, listing, secret);
+        if (result.ok && db) {
+          // Persist the slug on the owner row. Previously listing_slugs was
+          // only ever written by lib/rental-sync.js AFTER Ikiel approved in
+          // admin, so until then Maya had no slug and every follow-up intake
+          // created a fresh listing — 15 duplicate "Casa Suhana" records in
+          // one conversation (16 Aug 2026).
+          const merged = Array.from(new Set([...listingSlugs, result.slug].filter(Boolean)));
+          const fields = { listing_slugs: merged };
+          if (isProspect(owner)) fields.onboarding_status = 'listed'; // funnel complete
           await fetch(`${db.SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, {
-            method: 'PATCH', headers: db.sbHeaders, body: JSON.stringify({ onboarding_status: 'listed' }),
+            method: 'PATCH', headers: db.sbHeaders, body: JSON.stringify(fields),
           }).catch(() => {});
+          listingSlugs = merged;
         }
         messages.push({ role: 'assistant', content: raw });
-        messages.push({ role: 'user', content: `Listing submission result: ${result}\n\nNow confirm to the owner in one friendly sentence (JSON, action "auto"). If it succeeded, tell them it's gone to Ikiel for review and will appear once approved.` });
+        messages.push({ role: 'user', content: `Listing submission result: ${result.message}\n\nNow confirm to the owner in one friendly sentence (JSON, action "auto"). If it succeeded, tell them it's gone to Ikiel for review and will appear once approved. If the note above says a calendar is missing or was rejected, ask for the iCal export URL in the same message.` });
         continue;
       }
       if (parsed.action === 'media' && parsed.media_key && ONBOARD_MEDIA[parsed.media_key]) {
@@ -2112,12 +2305,27 @@ async function fetchOwnerReportSummary(slug, secret) {
 }
 
 // Submit a Maya-collected listing to the portal intake endpoint (service secret).
+// Only accept a URL that is actually an exported iCal feed. Maya has invented
+// plausible-looking Airbnb .ics URLs from a room link before (16 Aug 2026),
+// which silently gives a villa a calendar that never resolves — worse than no
+// calendar, because nobody notices. A real Airbnb export always carries the
+// per-calendar secret (?s=<hex>); without it the URL is a guess.
+export function sanitizeIcalUrl(raw) {
+  const u = String(raw || '').trim();
+  if (!/^https?:\/\//i.test(u)) return '';
+  if (!/\.ics(\?|$)|\/ical\//i.test(u)) return '';           // a listing page, not a feed
+  if (/airbnb\./i.test(u) && !/[?&]s=[0-9a-f]{16,}/i.test(u)) return '';
+  return u;
+}
+
 async function submitOwnerIntake(owner, listing, secret) {
+  const ical = sanitizeIcalUrl(listing.icalUrl);
+  const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
   try {
     const data = {
       name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
       bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: listing.monthly,
-      overview: listing.overview, photosLink: listing.photosLink, icalUrl: listing.icalUrl,
+      overview: listing.overview, photosLink: listing.photosLink, icalUrl: ical,
       features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
     };
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
@@ -2126,25 +2334,129 @@ async function submitOwnerIntake(owner, listing, secret) {
       body: JSON.stringify({ slug: listing.slug || '', waNumber: owner.wa_num, ownerEmail: owner.email || '', data }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) return `failed: ${d.error || `HTTP ${r.status}`}`;
-    return `success: "${d.name}" saved as ${d.status} (slug ${d.slug})`;
+    if (!r.ok) return { ok: false, slug: '', message: `failed: ${d.error || `HTTP ${r.status}`}` };
+    const notes = [
+      `success: "${d.name}" saved as ${d.status} (slug ${d.slug})`,
+      `Use slug "${d.slug}" for every future change to this villa — never submit it again without the slug or you will create a duplicate listing.`,
+      icalRejected
+        ? 'NOTE: the calendar link was rejected because it is not a real iCal export — ask the owner to send the proper export URL and do not guess one.'
+        : (ical ? '' : 'NOTE: this villa still has no availability calendar — ask the owner for their iCal export URL.'),
+    ].filter(Boolean);
+    return { ok: true, slug: d.slug || '', message: notes.join(' ') };
   } catch (e) {
-    return `failed: ${e.message}`;
+    return { ok: false, slug: '', message: `failed: ${e.message}` };
   }
+}
+
+// True when a DIFFERENT inbound message with a later timestamp already exists
+// on this OWNER thread — i.e. the one we're processing has been superseded.
+// The owner-side twin of hasNewerInbound, and the same tie-break rule: on equal
+// timestamps the wa_message_id string decides, so exactly ONE of a set of
+// concurrent invocations proceeds (all skipping would mean no reply at all).
+// WhatsApp timestamps are second-precision and a photo burst lands dozens of
+// messages inside one second, so ties are the norm here, not the exception.
+async function hasNewerOwnerInbound(url, headers, ownerId, ownTimestamp, ownWaMessageId) {
+  if (!ownWaMessageId) return false; // can't tie-break safely — always reply
+  try {
+    const r = await fetch(`${url}/rest/v1/wa_messages?owner_id=eq.${ownerId}&direction=eq.inbound&order=timestamp.desc,wa_message_id.desc&limit=1&select=wa_message_id,timestamp`, { headers });
+    const latest = (await r.json())?.[0];
+    if (!latest || !latest.wa_message_id || latest.wa_message_id === ownWaMessageId) return false;
+    // Epoch-ms compare: Supabase serialises timestamptz as "+00:00" while ours
+    // are "Z"-suffixed, so string comparison would misorder them.
+    const latestT = new Date(latest.timestamp).getTime();
+    const ownT = new Date(ownTimestamp).getTime();
+    if (latestT > ownT) return true;
+    return latestT === ownT && String(latest.wa_message_id) > String(ownWaMessageId);
+  } catch (_) { return false; }
+}
+
+// Get-or-create the owner's Drive photo folder without racing.
+//
+// Concurrent invocations all read owner.drive_folder_id as null, so a plain
+// "if empty, create" hands every one of them a fresh folder. Instead we take a
+// claim on the row FIRST — a PATCH conditional on drive_folder_id still being
+// null, which Postgres serialises — and only the winner creates a folder. The
+// losers poll for the winner's id. The claim ticket is written into the same
+// column so there is no schema change and no second source of truth.
+async function claimOwnerDriveFolder({ url, headers, owner, label }) {
+  const real = (v) => v && !String(v).startsWith('pending:');
+  if (real(owner.drive_folder_id)) return owner.drive_folder_id;
+
+  const ticket = `pending:${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  let won = false;
+  try {
+    const claim = await fetch(`${url}/rest/v1/owners?id=eq.${owner.id}&drive_folder_id=is.null`, {
+      method: 'PATCH',
+      headers: { ...headers, Prefer: 'return=representation' },
+      body: JSON.stringify({ drive_folder_id: ticket }),
+    });
+    won = claim.ok && (await claim.json())?.[0]?.drive_folder_id === ticket;
+  } catch (_) { won = false; }
+
+  if (won) {
+    let folderId;
+    try {
+      folderId = await createOwnerFolder(label);
+    } catch (e) {
+      // Release the claim, otherwise this owner can never get a folder again.
+      await fetch(`${url}/rest/v1/owners?id=eq.${owner.id}&drive_folder_id=eq.${encodeURIComponent(ticket)}`, {
+        method: 'PATCH', headers, body: JSON.stringify({ drive_folder_id: null }),
+      }).catch(() => {});
+      throw e;
+    }
+    await fetch(`${url}/rest/v1/owners?id=eq.${owner.id}`, {
+      method: 'PATCH', headers, body: JSON.stringify({ drive_folder_id: folderId }),
+    });
+    return folderId;
+  }
+
+  // Someone else is creating it (or already did) — wait for their write.
+  for (let i = 0; i < 12; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    try {
+      const r = await fetch(`${url}/rest/v1/owners?id=eq.${owner.id}&select=drive_folder_id`, { headers });
+      const cur = (await r.json())?.[0]?.drive_folder_id;
+      if (real(cur)) return cur;
+    } catch (_) { /* keep waiting */ }
+  }
+  throw new Error('timed out waiting for the villa photo folder');
 }
 
 async function fetchOwnerThread(url, headers, ownerId) {
   try {
-    const r = await fetch(`${url}/rest/v1/wa_messages?owner_id=eq.${ownerId}&order=timestamp.desc&limit=30`, { headers });
+    // Pull a WIDE window, then collapse runs of photos into a single line.
+    // With a flat 30-message limit a 27-photo burst filled the entire window
+    // with "[Image]" rows and pushed the villa's name, area and price out of
+    // Maya's context — she then asked the owner for details they had already
+    // given (16 Aug 2026). Collapsing keeps a burst to one line, so the real
+    // conversation survives it.
+    const r = await fetch(`${url}/rest/v1/wa_messages?owner_id=eq.${ownerId}&order=timestamp.desc&limit=200&select=direction,content,timestamp`, { headers });
     if (!r.ok) return '';
     const rows = await r.json();
     if (!Array.isArray(rows) || !rows.length) return '';
     rows.reverse();
-    return rows.map(m => {
+
+    const lines = [];
+    let run = null; // an unbroken run of photo-only messages from one side
+    const flush = () => {
+      if (!run) return;
+      lines.push(`[${run.time}] ${run.who}: [sent ${run.n} photo${run.n === 1 ? '' : 's'}]`);
+      run = null;
+    };
+    for (const m of rows) {
       const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
       const who = m.direction === 'outbound' ? 'Maya' : 'Owner';
-      return `[${t}] ${who}: ${humanizeMarker(m.content || '').slice(0, 200)}`;
-    }).join('\n');
+      const body = humanizeMarker(m.content || '');
+      if (/^\[Image\]\s*$/i.test(body)) {
+        if (run && run.who === who) run.n++;
+        else { flush(); run = { who, time: t, n: 1 }; }
+        continue;
+      }
+      flush();
+      lines.push(`[${t}] ${who}: ${body.slice(0, 200)}`);
+    }
+    flush();
+    return lines.slice(-30).join('\n');
   } catch { return ''; }
 }
 
