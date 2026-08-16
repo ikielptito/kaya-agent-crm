@@ -2184,13 +2184,28 @@ async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, 
 Owner: ${ownerName}
 Their current listing slugs: ${listingsLine}
 
+Their portal account email: ${owner.email || '(not collected yet — see ACCOUNT LINKING)'}
+
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
 2. Help them LIST a new villa or UPDATE one by gathering the details in conversation, then submitting (action "intake"). New/updated listings go to Ikiel for review before they appear publicly — always say so.
 3. General help. Ikiel oversees everything and steps in when needed.
 
+WHAT A GOOD LISTING NEEDS (gather these before the first intake):
+  · name, area, bedrooms, bathrooms, monthly price
+  · overview — 2–4 sentences an agent can read to their client: who the villa suits, what the space is like, what stands out. A listing with an empty overview looks abandoned next to the others.
+  · features — 4+ concrete things: private pool, air conditioning, fast wifi, dedicated workspace, full kitchen, parking, garden, etc.
+  · photos, an iCal calendar, and their portal email
+
+If they send an Airbnb or Booking.com link for the villa, use action "import" FIRST (set import_url). It reads the public page and hands you the description, amenities and room counts, so you can ask two or three sharp follow-ups instead of interviewing them from scratch.
+
+ACCOUNT LINKING — how an owner gets to see their own listing:
+A listing is tied to a portal account by EMAIL. Ask for the Google address they want to sign in with, pass it as "ownerEmail" on the intake, and the listing links itself the first time they log in at sambarentals.com/portal with that exact address. Without it they simply cannot open their own listing, its stats, or its weekly report — so ask early, and once you have it tell them plainly: "Sign in at sambarentals.com/portal with <email> and your villa will be waiting there." If they sign in with a different address than the one you recorded, nothing links — flag it and Ikiel will re-point it.
+
 RULES:
 - To create/update a listing you need at least a villa name. Area, bedrooms/bathrooms, monthly price, a Google Drive photos link, and an iCal availability calendar make it far stronger — ask for what's missing, but don't demand everything in one go.
+- NEVER invent an overview or a feature. Everything you write must come from the owner, or from an "import" of their own listing page. If you have neither, ask — two friendly questions ("what kind of guest does she suit best?", "what are the three things people always comment on?") get you a better overview than anything you could make up.
+- Imported details FILL GAPS ONLY. Anything the owner told you directly wins over the scraped page: their villa name, their bedroom count, their area. If an import disagrees with the owner on a number, do NOT silently pick one — ask them which is right ("Airbnb has it as 2 bedrooms, you said 3 — which should agents see?").
 - If photos were saved automatically to their villa photo folder (see thread), use that folder link as photosLink — never ask them for a Drive link they already effectively gave you by sending photos.
 - Gather photos AND the availability calendar BEFORE the first "intake" wherever you can. Submitting the moment you have a price means the listing goes to Ikiel half-empty. If the owner still owes you photos or a calendar, ask for them first and submit once.
 - CALENDAR (iCal) — you CANNOT derive one. A link to an Airbnb/Booking listing page is NOT a calendar, and you must NEVER construct, guess, or "pull" an .ics URL from a listing URL. Only ever pass an icalUrl the owner literally sent you. If they send a listing link, thank them, say it's useful for the description, and then ask for the export URL in their own words:
@@ -2204,13 +2219,14 @@ RULES:
 ${onboardingBlock}
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "intake"${prospect ? ' | "media" | "optout"' : ''},
-  "reply": "message to the owner; leave \\"\\" when action is report or intake",
-  "report_slug": null | "one of their listing slugs",${prospect ? `
+  "action": "auto" | "escalate" | "report" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
+  "report_slug": null | "one of their listing slugs",
+  "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
-  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "features": [] }
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "ownerEmail": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -2239,6 +2255,12 @@ Use "report" to fetch real numbers before answering a performance question (set 
         messages.push({ role: 'user', content: `Performance data for ${parsed.report_slug}:\n${summary}\n\nNow reply to the owner in plain, friendly language with the key numbers (JSON, action "auto").` });
         continue;
       }
+      if (parsed.action === 'import' && parsed.import_url && hop < MAX - 1) {
+        const imported = await importOwnerListingPage(parsed.import_url, secret);
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Imported from ${parsed.import_url}:\n${imported}\n\nUse this to FILL GAPS only — anything the owner told you directly wins. Where a number here disagrees with what they said, ask them which is right rather than choosing. Reply to the owner (JSON, action "auto"), or go straight to "intake" if you now have enough.` });
+        continue;
+      }
       if (parsed.action === 'intake' && parsed.listing && hop < MAX - 1) {
         // Reuse a slug we already know for this owner when Maya omits one —
         // otherwise a second intake creates a second listing.
@@ -2254,6 +2276,12 @@ Use "report" to fetch real numbers before answering a performance question (set 
           const merged = Array.from(new Set([...listingSlugs, result.slug].filter(Boolean)));
           const fields = { listing_slugs: merged };
           if (isProspect(owner)) fields.onboarding_status = 'listed'; // funnel complete
+          // Remember the portal email so later listings link themselves too,
+          // and so Maya stops asking for something she already has.
+          if (result.email && result.email !== owner.email) {
+            fields.email = result.email;
+            owner = { ...owner, email: result.email };
+          }
           await fetch(`${db.SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, {
             method: 'PATCH', headers: db.sbHeaders, body: JSON.stringify(fields),
           }).catch(() => {});
@@ -2337,9 +2365,50 @@ export function normalizeMonthly(raw) {
   return s;
 }
 
+// Read an owner's public Airbnb/Booking.com page through the portal's own
+// scraper (one extraction path, not a second copy of it here) and flatten the
+// result into a few lines Maya can reason over. Never applied automatically:
+// on Casa Suhana the page said 2 bedrooms where the owner had said 3, so the
+// caller is instructed to treat this as suggestions and query conflicts.
+async function importOwnerListingPage(url, secret) {
+  try {
+    const r = await fetch(`${PORTAL_BASE}/api/portal?action=import-listing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
+      body: JSON.stringify({ url }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return `import failed: ${d.error || `HTTP ${r.status}`}`;
+    const f = d.fields || d;
+    const lines = [
+      f.name && `page title: ${f.name}`,
+      f.area && `area: ${f.area}`,
+      f.unitType && `type: ${f.unitType}`,
+      f.bedrooms != null && `bedrooms on the page: ${f.bedrooms}`,
+      f.bathrooms != null && `bathrooms on the page: ${f.bathrooms}`,
+      f.overview && `description: ${f.overview}`,
+      Array.isArray(f.features) && f.features.length && `amenities: ${f.features.join(', ')}`,
+      Array.isArray(f.photos) && f.photos.length && `${f.photos.length} photos are on the page (already-sent WhatsApp photos are what we use — do not ask them to re-send)`,
+    ].filter(Boolean);
+    return lines.length ? lines.join('\n') : 'the page gave nothing usable — ask the owner directly';
+  } catch (e) {
+    return `import failed: ${e.message}`;
+  }
+}
+
+// A listing is bound to a portal account purely by email: the portal's
+// claimByEmail links it the first time that Google address signs in. So the
+// address Maya records IS the linking key — validate it rather than writing
+// through whatever she heard over a voice note.
+export function sanitizeOwnerEmail(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@,]+\.[a-z]{2,}$/.test(s) ? s : '';
+}
+
 async function submitOwnerIntake(owner, listing, secret) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
+  const email = sanitizeOwnerEmail(listing.ownerEmail) || sanitizeOwnerEmail(owner.email);
   try {
     const data = {
       name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
@@ -2350,18 +2419,24 @@ async function submitOwnerIntake(owner, listing, secret) {
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
-      body: JSON.stringify({ slug: listing.slug || '', waNumber: owner.wa_num, ownerEmail: owner.email || '', data }),
+      body: JSON.stringify({ slug: listing.slug || '', waNumber: owner.wa_num, ownerEmail: email, data }),
     });
     const d = await r.json().catch(() => ({}));
-    if (!r.ok) return { ok: false, slug: '', message: `failed: ${d.error || `HTTP ${r.status}`}` };
+    if (!r.ok) return { ok: false, slug: '', email, message: `failed: ${d.error || `HTTP ${r.status}`}` };
+    const thin = !String(listing.overview || '').trim()
+      || (Array.isArray(listing.features) ? listing.features.length : 0) < 2;
     const notes = [
       `success: "${d.name}" saved as ${d.status} (slug ${d.slug})`,
       `Use slug "${d.slug}" for every future change to this villa — never submit it again without the slug or you will create a duplicate listing.`,
       icalRejected
         ? 'NOTE: the calendar link was rejected because it is not a real iCal export — ask the owner to send the proper export URL and do not guess one.'
         : (ical ? '' : 'NOTE: this villa still has no availability calendar — ask the owner for their iCal export URL.'),
+      thin ? 'NOTE: the listing has little or no description — ask the owner what kind of guest it suits and what stands out, then submit again with the slug.' : '',
+      email
+        ? `NOTE: it is linked to ${email} — tell them to sign in at ${PORTAL_BASE}/portal with that exact Google address to see it.`
+        : 'NOTE: no portal email yet, so the owner cannot open their own listing — ask which Google address they want to sign in with.',
     ].filter(Boolean);
-    return { ok: true, slug: d.slug || '', message: notes.join(' ') };
+    return { ok: true, slug: d.slug || '', email, message: notes.join(' ') };
   } catch (e) {
     return { ok: false, slug: '', message: `failed: ${e.message}` };
   }

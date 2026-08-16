@@ -10,7 +10,7 @@ import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../l
 // whatsapp-send 'cards' action.
 import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { parseImageMarker } from '../lib/owner-onboarding.js';
-import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive } from '../lib/drive-upload.js';
+import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
@@ -1467,6 +1467,30 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       }
       out.remaining = todo.length - out.uploaded;
       out.inFolder = Object.keys(await listFolderImages(folderId)).length;
+      return res.status(200).json(out);
+
+    } else if (action === 'trash_drive_folders') {
+      // Move stray villa folders to Drive's trash. Recoverable for 30 days —
+      // this never hard-deletes. Cleanup for folders left behind by a racing
+      // upload (see repair_owner_photos); the caller is responsible for having
+      // checked the contents are duplicated elsewhere first.
+      const secret = process.env.MAINT_SECRET;
+      if (!secret || (req.headers.authorization || '') !== `Bearer ${secret}`) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      const ids = Array.isArray(payload?.folderIds) ? payload.folderIds.filter(Boolean) : [];
+      if (!ids.length) return res.status(400).json({ error: 'folderIds required' });
+      if (!driveConfigured()) return res.status(500).json({ error: 'Drive not configured' });
+
+      // Refuse to touch a folder that is still some owner's current gallery.
+      const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?select=id,drive_folder_id&drive_folder_id=not.is.null`, { headers });
+      const inUse = new Set((await oRes.json() || []).map(o => o.drive_folder_id));
+      const out = { ok: true, trashed: [], skipped: [], failed: [] };
+      for (const id of ids) {
+        if (inUse.has(id)) { out.skipped.push({ id, reason: 'still an owner\'s active folder' }); continue; }
+        try { await trashDriveFile(id); out.trashed.push(id); }
+        catch (e) { out.failed.push({ id, error: e.message }); }
+      }
       return res.status(200).json(out);
 
     } else {
