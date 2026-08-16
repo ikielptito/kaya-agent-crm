@@ -10,7 +10,7 @@ import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../l
 // whatsapp-send 'cards' action.
 import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { parseImageMarker } from '../lib/owner-onboarding.js';
-import { driveConfigured, createOwnerFolder, listFolderImages, uploadWaImageToDrive } from '../lib/drive-upload.js';
+import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
@@ -1411,7 +1411,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!secret || (req.headers.authorization || '') !== `Bearer ${secret}`) {
         return res.status(401).json({ error: 'Unauthorized' });
       }
-      const { ownerId, folderId: forceFolder, dryRun } = payload || {};
+      const { ownerId, folderId: forceFolder, dryRun, limit } = payload || {};
       if (ownerId == null) return res.status(400).json({ error: 'ownerId required' });
       const WA_TOKEN = process.env.META_WA_TOKEN;
       if (!WA_TOKEN) return res.status(500).json({ error: 'META_WA_TOKEN not configured' });
@@ -1429,29 +1429,44 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       const mediaIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => r.media_id).filter(Boolean))];
       if (!mediaIds.length) return res.status(200).json({ ok: true, total: 0, note: 'no inbound photos on this thread' });
 
+      const label = `${owner.name || owner.wa_num} — villa photos`;
       let folderId = forceFolder || owner.drive_folder_id;
       if (!folderId || String(folderId).startsWith('pending:')) {
-        folderId = await createOwnerFolder(`${owner.name || owner.wa_num} — villa photos`);
+        // Re-attach to a folder an earlier (timed-out) run already made rather
+        // than stranding it and starting a third one.
+        folderId = await findOwnerFolderByName(label) || await createOwnerFolder(label);
       }
-      if (dryRun) return res.status(200).json({ ok: true, dryRun: true, folderId, total: mediaIds.length });
-
-      const existing = await listFolderImages(folderId);
-      const out = { ok: true, folderId, total: mediaIds.length, uploaded: 0, skipped: 0, failed: [] };
-      for (const mediaId of mediaIds) {
-        try {
-          const r = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId, existing });
-          if (r.skipped) out.skipped++;
-          else { out.uploaded++; existing[`wa-${mediaId}.jpg`] = r.fileId; }
-        } catch (e) {
-          out.failed.push({ mediaId, error: e.message });
-        }
-      }
-      out.inFolder = Object.keys(await listFolderImages(folderId)).length;
+      // Persist BEFORE uploading. The first cut wrote this only after the loop,
+      // so the run that timed out mid-upload orphaned its folder and the next
+      // call started from scratch — the very bug this endpoint exists to undo.
       if (owner.drive_folder_id !== folderId) {
         await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}`, {
           method: 'PATCH', headers, body: JSON.stringify({ drive_folder_id: folderId }),
         });
       }
+      if (dryRun) return res.status(200).json({ ok: true, dryRun: true, folderId, total: mediaIds.length });
+
+      // Batched: WhatsApp download + Drive upload is ~1s per photo, so a large
+      // backlog will not fit in one invocation. Callers re-POST while
+      // `remaining` is above zero; skipping is cheap, so re-running is safe.
+      const existing = await listFolderImages(folderId);
+      const todo = mediaIds.filter(id => !existing[`wa-${id}.jpg`] && !existing[`wa-${id}.png`]);
+      const batch = todo.slice(0, Math.max(1, Math.min(Number(limit) || 8, 40)));
+      const out = {
+        ok: true, folderId, total: mediaIds.length,
+        alreadyThere: mediaIds.length - todo.length,
+        uploaded: 0, failed: [],
+      };
+      for (const mediaId of batch) {
+        try {
+          await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId, existing });
+          out.uploaded++;
+        } catch (e) {
+          out.failed.push({ mediaId, error: e.message });
+        }
+      }
+      out.remaining = todo.length - out.uploaded;
+      out.inFolder = Object.keys(await listFolderImages(folderId)).length;
       return res.status(200).json(out);
 
     } else {
