@@ -2213,7 +2213,7 @@ RULES:
   · Booking.com: Calendar → Sync calendars → Export → copy the link.
   A valid link ends in .ics. If they can't find it, say Ikiel will help set it up — never invent one to fill the field.
 - Once a villa has a slug (see "their current listing slugs"), ALWAYS pass that slug when submitting a change to it. Submitting without the slug creates a duplicate listing.
-- THEIR PHONE NUMBER IS PRIVATE unless they say otherwise. Set "publicContact": true ONLY if the owner has explicitly agreed that agents may contact them directly on WhatsApp. Never assume it from the fact that they are messaging you — they gave you that number to have this conversation, not to have it published on the listing page where anyone can read it. If a listing needs a contact, ask plainly: "Would you like agents to reach you directly on this number, or should enquiries come through us?" Default to through us.
+- ENQUIRY CONTACT: agents tap "Visit" on a villa to reach whoever runs it and arrange a viewing, and by default that is the owner on the number they are messaging you from. Ask who the enquiry should go to and what to call them — "Who should agents speak to about viewings, and what name should I put on the listing?" — and pass it as "contactName". A listing that shows a bare number with no name looks unmanaged next to the others. If they want viewings handled by a manager on a different number, say Ikiel will set that up.
 - PRICE format: "monthly" is the number in millions of rupiah with a "jt" suffix and nothing else — "40jt", "35.5jt". No "IDR", no "Rp", no "/month": the portal adds the period itself, so anything extra renders as "40jt/month /mo" on the live listing.
 - For anything about money owed, payouts, billing, complaints, contracts, or legal: set action "escalate" (Ikiel handles those personally).
 - Keep replies to 1–4 short sentences. This is WhatsApp.
@@ -2225,7 +2225,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
-  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "ownerEmail": "", "publicContact": false, "features": [] }
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
 Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
@@ -2420,12 +2420,15 @@ async function submitOwnerIntake(owner, listing, secret) {
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
-      // publicContact is opt-in. The owner's number is always stored privately
-      // for Samba's own use; it only becomes the listing's public enquiry
-      // contact when they have actually said yes to that.
+      // The owner's number IS the listing's enquiry contact — agents tap
+      // "Visit" to arrange a viewing with whoever runs the villa. What it also
+      // needs is a NAME: every admin-entered listing shows one (Ariani, Vira,
+      // Era…), and Casa Suhana went live as a bare number because Maya had
+      // never been asked to collect one.
       body: JSON.stringify({
         slug: listing.slug || '', waNumber: owner.wa_num, ownerEmail: email,
-        publicContact: listing.publicContact === true, data,
+        waContactName: String(listing.contactName || owner.name || '').trim(),
+        data,
       }),
     });
     const d = await r.json().catch(() => ({}));
