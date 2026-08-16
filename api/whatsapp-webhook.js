@@ -2198,6 +2198,7 @@ RULES:
   · Booking.com: Calendar → Sync calendars → Export → copy the link.
   A valid link ends in .ics. If they can't find it, say Ikiel will help set it up — never invent one to fill the field.
 - Once a villa has a slug (see "their current listing slugs"), ALWAYS pass that slug when submitting a change to it. Submitting without the slug creates a duplicate listing.
+- PRICE format: "monthly" is the number in millions of rupiah with a "jt" suffix and nothing else — "40jt", "35.5jt". No "IDR", no "Rp", no "/month": the portal adds the period itself, so anything extra renders as "40jt/month /mo" on the live listing.
 - For anything about money owed, payouts, billing, complaints, contracts, or legal: set action "escalate" (Ikiel handles those personally).
 - Keep replies to 1–4 short sentences. This is WhatsApp.
 ${onboardingBlock}
@@ -2318,13 +2319,31 @@ export function sanitizeIcalUrl(raw) {
   return u;
 }
 
+// The portal renders monthly rent as "<value>/mo", so a value that already
+// carries its own period reads as "IDR 40.000.000/month / month" on the live
+// listing (16 Aug 2026). Strip the suffix and normalise the common ways an
+// owner writes 40 million rupiah down to the portal's own "40jt".
+export function normalizeMonthly(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return '';
+  s = s.replace(/\s*(?:\/|per\s+)\s*(?:month|mo|bulan)\.?$/i, '').trim();
+  const m = s.match(/^(?:idr|rp)?\s*([\d.,]+)\s*(jt|juta|m|mil|million)?$/i);
+  if (m) {
+    const digits = m[1].replace(/[.,]/g, '');
+    const unit = (m[2] || '').toLowerCase();
+    const jt = unit ? parseFloat(m[1].replace(/[.,]/g, '.')) : (digits.length >= 7 ? parseInt(digits, 10) / 1e6 : null);
+    if (jt && Number.isFinite(jt)) return `${Number.isInteger(jt) ? jt : jt.toFixed(1)}jt`;
+  }
+  return s;
+}
+
 async function submitOwnerIntake(owner, listing, secret) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
   try {
     const data = {
       name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
-      bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: listing.monthly,
+      bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: normalizeMonthly(listing.monthly),
       overview: listing.overview, photosLink: listing.photosLink, icalUrl: ical,
       features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
     };
