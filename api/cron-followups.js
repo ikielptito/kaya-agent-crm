@@ -1207,6 +1207,11 @@ const AUTO_RESUME_DAYS = 7;
 // below rolls into the Monday digest. Raising this is the single biggest lever
 // on volume + relevance.
 const HIGH_SIGNAL_MIN = 3;
+// Samba opt-in states live on campaign_engagement.samba.status. Existing
+// values: 'opted_in', 'enrolled', 'unsubscribed'. This one marks a contact who
+// has had the cold first-contact carousel and has not replied yet — tracked,
+// but not yet in the daily availability stream.
+const INTRO_SENT_STATUS = 'intro_sent';
 // Tier-based cadence for event alerts (the Monday digest still goes to everyone
 // except paused). Engaged agents get the full stream; disengaged ones only see
 // the weekly anchor, which is where most of the 12.6-msg/month cut comes from.
@@ -1650,11 +1655,20 @@ export async function runIntroSweep(ctx) {
   const introduced = await loadIntroducedSet(supabaseUrl, sbHeaders);
   const TIER_ORDER = { champion: 0, active: 1, hot: 1, new: 2, warm: 3, dormant: 5, cold: 5 };
   const tierRank = (a) => TIER_ORDER[String(a.engagement_tier || '').toLowerCase().trim()] ?? 4;
+  // Anyone who has ever written to us goes first, ahead of the tier ordering:
+  // a contact with an existing conversation is both likelier to answer and
+  // less likely to treat a first-contact message as spam. 16 of the 73 in the
+  // current backlog are in that position.
+  const hasTalked = (a) => (a.last_inbound_at ? 0 : 1);
   const queue = agents
-    .filter(a => isAvailabilityEligible(a, config))
+    .filter(a => isIntroEligible(a, config))
     .filter(a => !introduced.has(a.id) && !a.last_availability_alert_at)
-    .sort((a, b) => tierRank(a) - tierRank(b) || a.id - b.id);
+    .sort((a, b) => hasTalked(a) - hasTalked(b) || tierRank(a) - tierRank(b) || a.id - b.id);
   summary.queue = queue.length;
+  // Visibility: how much of the queue is cold first-contact vs. an opted-in
+  // agent who simply never came up in a broadcast. The two behave differently
+  // downstream, and the split is the number worth watching after a run.
+  summary.queue_never_enrolled = queue.filter(a => !a.campaign_engagement?.samba).length;
 
   for (const agent of queue.slice(0, cap)) {
     const firstName = firstNameOf(agent.name);
@@ -1717,6 +1731,18 @@ export async function runIntroSweep(ctx) {
     if (sambaStatus === 'Not contacted') {
       patch.samba = { ...(agent.samba || {}), status: 'Contacted' };
     }
+    // Cold first contact: stamp the opt-in record so this agent is tracked,
+    // but as INTRO_SENT rather than opted_in. That keeps them OUT of the daily
+    // availability stream until they answer — one unsolicited message is a
+    // reasonable introduction, a daily series off the back of it is not, and
+    // it is block-and-report rates on exactly that pattern that cost a
+    // WhatsApp number its quality rating.
+    if (!agent.campaign_engagement?.samba) {
+      patch.campaign_engagement = {
+        ...(agent.campaign_engagement || {}),
+        samba: { source: 'intro_sweep', status: INTRO_SENT_STATUS, intro_at: now.toISOString() },
+      };
+    }
     await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
       method: 'PATCH', headers: sbHeaders,
       body: JSON.stringify(patch),
@@ -1772,6 +1798,36 @@ async function loadIntroducedSet(url, headers) {
 // the Samba pipeline." Explicit mutes (samba_alerts_opt_out, automation
 // override = paused/off, or status containing 'declined' / 'stalled') still
 // exclude. test_agents_only restricts to is_test=true for staged rollout.
+// Shared gate: the hard exclusions that apply to ANY Samba send — no number,
+// opted out, automation paused, wrong service line. Split out so the intro
+// sweep can honour all of them without also demanding prior enrolment.
+function passesSambaBaseGate(agent, config) {
+  if (!agent.wa_num) return false;
+  if (agent.samba_alerts_opt_out) return false;
+  if (agent.dead_number) return false;
+  if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
+  if (config.test_agents_only && !agent.is_test) return false;
+  if (agent.campaign_engagement?.service_type === 'leasehold') return false;
+  const status = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
+  if (/declined|stalled|unsubscribed/.test(status)) return false;
+  return true;
+}
+
+// Who may receive the FIRST-CONTACT intro. Deliberately does NOT require
+// campaign_engagement.samba: that field is the opt-in record, and the whole
+// point of the intro sweep is to reach people who don't have one yet. Before
+// this, the sweep filtered on isAvailabilityEligible, so the 74 contacts most
+// in need of an introduction were excluded from the feature built to
+// introduce them — it only ever served already-opted-in agents who happened
+// never to have been messaged.
+function isIntroEligible(agent, config) {
+  if (!passesSambaBaseGate(agent, config)) return false;
+  // Already introduced and waiting on a reply — don't send a second one.
+  const status = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
+  if (status === INTRO_SENT_STATUS) return false;
+  return true;
+}
+
 function isAvailabilityEligible(agent, config) {
   if (!agent.wa_num) return false;
   if (agent.samba_alerts_opt_out) return false;
@@ -1786,6 +1842,11 @@ function isAvailabilityEligible(agent, config) {
   // Treat any non-empty status as enrolled, except explicit terminal states
   const status = String(samba.status || '').toLowerCase().trim();
   if (/declined|stalled|unsubscribed/.test(status)) return false;
+  // Introduced but silent: they've had one cold first-contact carousel and
+  // have not answered it. They do NOT join the daily availability stream on
+  // the strength of a message they never asked for — a reply promotes them
+  // (see promoteIntroToOptedIn in the inbound webhook).
+  if (status === INTRO_SENT_STATUS) return false;
   return true;
 }
 

@@ -958,12 +958,34 @@ export default async function handler(req, res) {
     // resume for this agent.
     if (agent.dead_number) patch.dead_number = false;
 
+
     // STOP CAMPAIGN SEQUENCES — any inbound message stops ALL active sequences
     // for this agent (across both KAYA and Samba pipelines). The conversation
     // is now live; proactive follow-ups should pause regardless of pipeline.
     const stopResult = stopAllPending(agent.campaign_engagement, timestamp);
     if (stopResult.changed) {
       patch.campaign_engagement = stopResult.value;
+    }
+
+    // Cold contact answering their first-contact intro → real opt-in. The
+    // intro sweep leaves them at 'intro_sent', which deliberately keeps them
+    // out of the daily availability stream; a reply is the signal that they
+    // want it. Must run AFTER stopAllPending, which rebuilds
+    // campaign_engagement from the stored row and would otherwise discard
+    // this. An explicit STOP is caught immediately below and overwrites it
+    // with 'unsubscribed', so a "stop" can never be read as consent.
+    const introStatus = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
+    if (introStatus === 'intro_sent') {
+      const base = patch.campaign_engagement || agent.campaign_engagement || {};
+      patch.campaign_engagement = {
+        ...base,
+        samba: {
+          ...(base.samba || agent.campaign_engagement.samba || {}),
+          status: 'opted_in',
+          opted_in_at: timestamp,
+          opted_in_via: 'intro_reply',
+        },
+      };
     }
 
     // OPT-OUT DETECTION — intercept stop/unsubscribe before Maya sees the message.
