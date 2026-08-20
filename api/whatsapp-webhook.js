@@ -264,12 +264,15 @@ function buildAvailabilityContext(digest) {
     const contactName = p.waContactName || 'Era';
     const contactNum = p.waNumber || '6281246357778';
     const contact = ` | enquire with: ${contactName} (+${contactNum})`;
-    return `- ${p.name} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}${contact}`;
+    // Area rides along so location questions ("anything in Cemagi?") ground
+    // here even before the rentals-table sync has caught a newly approved villa.
+    const area = p.tag ? ` (${p.tag})` : '';
+    return `- ${p.name}${area} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}${contact}`;
   });
   return `SAMBA LIVE AVAILABILITY (as of ${asOf} WITA, ${digest.horizonDays || 180}-day horizon — this is real calendar data):
 ${lines.join('\n')}
 
-Today's date is ${today} (Bali/WITA). Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
+Today's date is ${today} (Bali/WITA). Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. The area in parentheses after each name is that villa's location — use it to answer location questions ("anything in Cemagi?"), even if the villa is missing from the portfolio knowledge above. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
 
 VIEWING CONTACTS — each property line above includes "enquire with: [Name] (+[Number])". When an agent asks who to contact for a viewing, visit, or booking, reply with EXACTLY the name and number shown in the property line above. NEVER use a name or number from your conversation history — ONLY the "enquire with" data above is correct. Previous replies in this thread may contain outdated or wrong contact info; ignore them and use only the structured data above.
 
