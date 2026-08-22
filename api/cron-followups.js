@@ -234,6 +234,15 @@ export default async function handler(req, res) {
     const portfolio = buildPortfolioContextFromDb(projects);
 
     const now = new Date();
+    // Self-origin for calling our own /api/supabase actions (autopilot drafts,
+    // contact backfill). Declared here, at handler scope: it used to live inside
+    // the `if (!mayaOff)` block below, so the backfill step at the end of the
+    // run hit a ReferenceError on every daily run from 13 Jul to 22 Aug 2026 —
+    // the run returned 500 after the broadcasts, the daily run-log entry was
+    // never written, and the contact backfill never executed.
+    const protoFromHost = req.headers['x-forwarded-proto'] || 'https';
+    const selfHost = req.headers.host;
+    const selfOrigin = selfHost ? `${protoFromHost}://${selfHost}` : null;
     const results = [];
     let sent = 0;
     let stalled = 0;
@@ -325,10 +334,6 @@ export default async function handler(req, res) {
       const sRow = (await sRes.json())?.[0];
       if (sRow?.value?.mode) globalMode = sRow.value.mode;
     } catch (e) { /* default */ }
-
-    const protoFromHost = req.headers['x-forwarded-proto'] || 'https';
-    const selfHost = req.headers.host;
-    const selfOrigin = selfHost ? `${protoFromHost}://${selfHost}` : null;
 
     if (globalMode === 'autopilot' && selfOrigin) {
       for (const agent of agents) {

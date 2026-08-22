@@ -1190,7 +1190,7 @@ export default async function handler(req, res) {
     }
 
     // Generate a reply with Claude — load live project + rental data from DB first
-    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock }
+    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest }
       = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
     // Vision: when the agent sent an image, fetch its bytes so Maya can
     // actually look at it (listing screenshots, property photos, documents
@@ -1858,7 +1858,10 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
       if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
     } catch (e) { /* non-fatal */ }
   }
-  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock };
+  // `digest` rides along: the handler's ask_owner branch resolves the listing's
+  // "enquire with" contact from it (it went missing from handler scope when
+  // this helper was extracted on 22 Aug 2026 — ReferenceError on every relay).
+  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest };
 }
 
 // DRY RUN — run the full agent reply pipeline (live KB, availability, thread,
