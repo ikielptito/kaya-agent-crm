@@ -12,6 +12,51 @@ import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMark
 import { parseImageMarker } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
+// Dry-run of the webhook's full agent reply pipeline (console preview).
+import { previewAgentReply } from './whatsapp-webhook.js';
+
+// JSON Schema for the console/catch-up reply contract (suggest_reply action),
+// enforced via output_config.format so the model can only emit the object.
+// Mirrors the contract text in that action's systemRest and what
+// lib/crm-apply.js reads. The webhook's fuller contract (cards, relays,
+// availability) has its own schema in whatsapp-webhook.js.
+const SUGGEST_REPLY_SCHEMA = {
+  type: 'object',
+  properties: {
+    reply: { type: 'string' },
+    crm_updates: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          field: { type: 'string' },
+          value: { anyOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }] },
+          reason: { type: 'string' },
+        },
+        required: ['field', 'value', 'reason'],
+        additionalProperties: false,
+      },
+    },
+    crm_actions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          name: { type: 'string' },
+          wa_num: { type: 'string' },
+          reason: { type: 'string' },
+          service_type: { type: 'string' },
+          replace: { type: 'boolean' },
+        },
+        required: ['type', 'name', 'wa_num', 'reason', 'service_type', 'replace'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['reply', 'crm_updates', 'crm_actions'],
+  additionalProperties: false,
+};
 
 // Normalise a raw number string to an Indonesian mobile in 628… form, or null.
 // Filters out prices/landlines/garbage (must be a 62 8xx mobile, 10–15 digits).
@@ -677,32 +722,44 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
           headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: 'claude-sonnet-4-6',
-            max_tokens: 1100,
+            // Output is constrained to the contract object, so this is
+            // headroom. 1100 was hit once when Maya narrated her reasoning
+            // before the JSON (22 Aug 2026) — structured outputs below stops
+            // the narration; the cap just has to be safely above any reply.
+            max_tokens: 4000,
             system,
-            messages: [{ role: 'user', content: 'Generate the reply now.' }]
+            messages: [{ role: 'user', content: 'Generate the reply now.' }],
+            // Constrain the turn to the reply contract — no preamble, no
+            // reasoning narration, no code fences.
+            output_config: { format: { type: 'json_schema', schema: SUGGEST_REPLY_SCHEMA } },
           })
         });
         const data = await r.json();
+        if (!r.ok || data.type === 'error') {
+          return res.status(502).json({ error: 'Claude API error: ' + (data?.error?.message || `HTTP ${r.status}`) });
+        }
         const raw = (data.content?.[0]?.text || '').trim();
 
-        // Parse Maya's JSON contract (reply + crm_updates + crm_actions). Fall
-        // back to treating the raw text as the reply if she didn't emit JSON,
-        // so the console/catch-up never break on a malformed response.
-        let reply = '', crmUpdates = [], crmActions = [];
+        // Parse Maya's JSON contract (reply + crm_updates + crm_actions). A
+        // truncated, missing, or malformed object is a generation failure:
+        // return an error (the console shows it, the catch-up cron skips the
+        // agent) rather than shipping raw text — a 700-word internal
+        // monologue once landed in an agent's draft box that way.
+        if (data.stop_reason === 'max_tokens') {
+          return res.status(502).json({ error: `Maya's output was truncated at max_tokens (${raw.length} chars) — regenerate or reply manually.` });
+        }
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        // Raw-text fallback is only safe when Maya wrote prose. If the output
-        // looks like JSON or a code fence (truncated/malformed contract), ship
-        // NOTHING — raw JSON once went out to an agent as the message body.
-        const rawFallback = /^[`{\[]/.test(raw) ? '' : raw;
-        if (jsonMatch) {
-          try {
-            const parsed = JSON.parse(jsonMatch[0]);
-            reply = (parsed.reply || '').trim();
-            if (Array.isArray(parsed.crm_updates)) crmUpdates = parsed.crm_updates;
-            if (Array.isArray(parsed.crm_actions)) crmActions = parsed.crm_actions;
-          } catch (_) { reply = rawFallback; }
-        } else {
-          reply = rawFallback;
+        if (!jsonMatch) {
+          return res.status(502).json({ error: `Maya produced no JSON reply: "${raw.slice(0, 120)}${raw.length > 120 ? '…' : ''}"` });
+        }
+        let reply = '', crmUpdates = [], crmActions = [];
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          reply = (parsed.reply || '').trim();
+          if (Array.isArray(parsed.crm_updates)) crmUpdates = parsed.crm_updates;
+          if (Array.isArray(parsed.crm_actions)) crmActions = parsed.crm_actions;
+        } catch (e) {
+          return res.status(502).json({ error: `Maya's JSON reply would not parse (${e.message}) — regenerate or reply manually.` });
         }
 
         // Apply the CRM changes Maya recognised — SAME helpers the webhook uses.
@@ -722,6 +779,32 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(200).json({ reply, cost_usd, crm_updates: crmUpdates.length, crm_actions: crmActions.length });
       } catch (e) {
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
+      }
+
+    } else if (action === 'preview_reply') {
+      // DRY RUN of the real webhook pipeline for one agent: what would Maya say
+      // to their latest inbound (or to payload.inbound) right now? Returns the
+      // full structured result (action, reply, cards, relay, alerts, model,
+      // cost) and changes NOTHING — no draft saved, nothing sent, no CRM
+      // writes, no spend counted. For checking prompt/KB changes against a
+      // real thread before they meet a real agent.
+      const { agentId, inbound, mode, debug } = payload || {};
+      if (!agentId) return res.status(400).json({ error: 'agentId required' });
+      const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+      if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=*`, { headers });
+      const agent = (await aRes.json())?.[0];
+      if (!agent) return res.status(404).json({ error: 'Agent not found' });
+      let effMode = mode;
+      if (!effMode) {
+        const mRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.automation&select=value`, { headers });
+        effMode = agent.automation_override || (await mRes.json())?.[0]?.value?.mode || 'draft';
+      }
+      try {
+        const out = await previewAgentReply({ SUPABASE_URL, sbHeaders: headers, ANTHROPIC_KEY, agent, inbound, mode: effMode, debug: !!debug });
+        return res.status(out.error ? 502 : 200).json({ mode: effMode, ...out });
+      } catch (e) {
+        return res.status(500).json({ error: 'preview failed: ' + e.message });
       }
 
     } else if (action === 'translate') {

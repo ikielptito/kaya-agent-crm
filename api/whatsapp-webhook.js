@@ -377,13 +377,19 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
 6. For live booking calendar availability, direct agents to the portal: sambarentals.com
 7. COMMISSION STRUCTURE (zero ambiguity): the 10% is ALREADY INCLUDED in the portal price. Agent quotes the portal price to their client; the agent's 10% comes out of what we collect. If the agent wants 20%, they may quote portal price + 10% to their client (the extra 10% comes from the client, not from us). Never say "commission is paid on top" or "you can earn 10% in addition to the price" — those phrasings break the deal structure.
 
-CLIENT MATCHING RULES (when an agent gives criteria — bedrooms, budget, features, area — follow these exactly):
+CLIENT MATCHING RULES (when an agent gives criteria — bedrooms, budget, features, area, dates — follow these exactly):
 1. Scan EVERY property in the portfolio above before answering. Never claim nothing matches until you have checked all of them against each stated criterion.
-2. Lead with the properties that tick ALL the stated boxes within budget. The closest full match ALWAYS comes first in your reply — this is the agent's actual request; alternatives never displace it.
-3. After the full matches, you may add one or two near-miss options (slightly over budget, or missing one feature) clearly framed as such ("a bit above budget at 35jt/mo, but..."). Rates are often negotiable so near-budget options are worth surfacing — but only AFTER the exact matches, never instead of them.
-4. AVAILABILITY: if the agent did NOT name dates, a property that fits the criteria still counts as a match even if it is occupied now or booked soon — recommend it and note when it is next free (from the live availability data). Only rule a match out on availability when the agent gave specific dates and the calendar conflicts.
-5. Budget phrasing like "27 mil" / "27jt" / "27 juta" means IDR 27,000,000 per month.
-6. BEDROOM COUNT is a hard criterion: when the agent asks for N bedrooms, list every exact-N property FIRST (rule 1 scan — do not skip any; e.g. a 2BR request must surface every 2BR in the portfolio). Only after the exact-N options (or when none exist, saying so plainly) may you offer other sizes, always labeled with their actual bedroom count.`;
+2. Lead with the properties that tick ALL the stated boxes. The closest full match ALWAYS comes first in your reply — this is the agent's actual request; alternatives never displace it.
+3. BUDGET IS A CEILING, never a floor. "40-45M", "up to 45M", "max 45M", "around 40M", "budget 45jt" all mean: anything priced AT OR BELOW the top number qualifies. A cheaper property is a BETTER match, not a worse one — a client with a 45M ceiling is delighted by a 35M villa. NEVER exclude, demote, or apologise for a property because it is "under budget", and never label a price as "under budget" / "below the range" — just state the monthly rate; the agent can see it is within their ceiling. Only a price ABOVE the ceiling is a budget miss; if it is within ~15% over, you may add it AFTER the in-budget options as a clearly-framed near-miss ("a bit above budget at 49jt, but..."). Rates are often negotiable, so near-budget options are worth surfacing — but only after the in-budget matches, never instead of them.
+4. BEDROOMS: "N bedrooms minimum" / "at least N" / "N+" / "N or more" means N AND larger all qualify — list exact-N first, then larger sizes, each labeled with its actual count. A plain "N bedrooms" means list every exact-N property FIRST (rule 1 scan — do not skip any; a 2BR request must surface every 2BR in the portfolio), and only after those (or when none exist, saying so plainly) offer other sizes, always labeled. Bedroom count is a hard criterion; bathroom count, when stated, works the same way.
+5. PROPERTY TYPE is hard: "villa" excludes apartments and townhouses unless you say so explicitly ("not a villa, but..."). Never relabel an apartment as a villa.
+6. AREA: match on the area/location fields in the data. If the agent names a micro-zone (specific streets, "south of Raya Canggu", "walking distance to X beach"), you can only confirm the neighbourhood (Pererenan, Canggu, Berawa, Buduk...), not the street — say "in Pererenan" and share the map pin rather than claiming a villa sits inside their exact pocket. If nothing is in the named area, offer the nearest neighbourhoods and say plainly that they are outside the requested zone.
+   NEIGHBOURHOOD GUIDE (west to east along the coast): Cemagi — Pererenan — Canggu (its beach-side pockets are Padang Linjong, Batu Bolong, Nelayan/Echo Beach) — Berawa — Umalas / Kerobokan — Seminyak. Buduk and Tumbak Bayuh are inland, roughly 5-10 minutes north of Pererenan. "Kuta Utara" is the district name that covers Canggu, Berawa and Umalas — an area listed only as "Kuta Utara" is somewhere in that district, so treat it as a possible match and point to the map pin. A request for "Pererenan / Canggu" is satisfied by Pererenan or any Canggu pocket; Buduk and Umalas are nearby alternatives, not the same area.
+7. FEATURES & POLICIES (pool, AC, enclosed/air-conditioned living room, garden, BBQ space, pets, parking, workspace...): check the data. A feature that IS in the data and contradicts the brief is a miss; a feature the data simply does not mention is UNKNOWN, not a miss — the property still counts. For the single most decision-critical unknown (pets is the classic), use ask_owner on your best candidate in the same reply and tell the agent you are checking; for the rest, say which features you can confirm and which you're confirming.
+8. AVAILABILITY: if the agent did NOT name dates, a property that fits still counts as a match even if it is occupied now or booked soon — recommend it and note when it is next free (from the live availability data). When the agent DID give dates: run need_availability on your single best candidate (one per reply), and for the other candidates use the live summary (next free / long-term window) and say you will confirm exact dates. For a long lease, a property that frees up within ~2 weeks of the requested start date is still worth offering — say the date and let the agent decide; do not silently drop it.
+9. OPEN-ENDED OR VAGUE BRIEFS ("any villa available?", "looking for something for a client", a long wish-list pasted in, a brief with no budget): the agent wants RECOMMENDATIONS, not a questionnaire. Never answer with only a question, and never with "nothing matches". Always: (a) lead with your best 1-3 candidates with the facts that matter (type, beds, area, monthly rate, next free), attached as cards; (b) state honestly, in one line, what in the brief you could NOT match; (c) at most ONE clarifying question, and only if it would genuinely change the shortlist (e.g. no area or no budget given). Treat a wish-list as "as many of these as possible" — nothing has to tick every box to be worth showing.
+10. HONEST NO-MATCH: when nothing fits the hard criteria (type, bedrooms, budget ceiling), say so in one plain sentence, then give the one or two closest options with exactly what differs ("3BR in Padang Linjong at 35jt — in budget, but Canggu rather than Pererenan"), and ask which of the constraints has the most give.
+11. Budget phrasing like "27 mil" / "27jt" / "27 juta" means IDR 27,000,000 per month.`;
 }
 
 async function loadProjects(supabaseUrl, sbHeaders) {
@@ -488,6 +494,79 @@ const MODEL_RATES = {
 // clearly-trivial traffic (~3x cheaper) when MAYA_HAIKU_ROUTING is enabled.
 const SONNET_MODEL = 'claude-sonnet-4-6';
 const HAIKU_MODEL = 'claude-haiku-4-5';
+
+// Output cap for one reply hop. With the response constrained to the JSON
+// contract below, a hop is just the object itself — 4000 is headroom, not a
+// target. It replaces the old 800, which Maya hit on 22 Aug 2026 when she
+// narrated her property-matching reasoning before the JSON: the output was cut
+// mid-object, the no-JSON fallback shipped the whole monologue as the draft.
+const REPLY_MAX_TOKENS = 4000;
+
+// JSON Schema for Maya's agent-reply contract, enforced server-side via
+// output_config.format (structured outputs). This makes "prose before the
+// JSON" impossible — the API only emits the object — so the regex-and-pray
+// parse below is now a belt-and-braces check, not the primary defence.
+// Every object needs additionalProperties:false and a full `required` list;
+// optional fields are expressed as anyOf [null, …]. Keep in sync with the
+// contract text in generateReply's systemRest and with what
+// lib/crm-apply.js reads (field/value/reason; type/name/wa_num/reason/
+// service_type/replace).
+const nullable = (schema) => ({ anyOf: [{ type: 'null' }, schema] });
+const strObj = (props, required = Object.keys(props)) => ({ type: 'object', properties: props, required, additionalProperties: false });
+const MAYA_REPLY_SCHEMA = strObj({
+  // Filled BEFORE reply (schema order = generation order): when the agent gave
+  // client criteria, one entry per Samba rental with a fit verdict. Forces the
+  // "scan every property" rule to actually happen — in free text Maya skipped
+  // in-budget villas she never got round to considering (22 Aug 2026).
+  match_scan: { type: 'array', items: strObj({
+    slug: { type: 'string' },
+    verdict: { type: 'string', enum: ['fit', 'near_miss', 'out'] },
+    why: { type: 'string' },
+  }) },
+  action: { type: 'string', enum: ['auto', 'escalate', 'need_availability'] },
+  reply: { type: 'string' },
+  availability_query: nullable(strObj({ slug: { type: 'string' }, check_in: { type: 'string' }, check_out: { type: 'string' } })),
+  send_doc: nullable({ type: 'string' }),
+  send_cards: { type: 'array', items: { type: 'string' } },
+  send_contact: nullable(strObj({ name: { type: 'string' }, phone: { type: 'string' } })),
+  reply_buttons: { type: 'array', items: { type: 'string' } },
+  notify_team: nullable(strObj({ to: { type: 'string', enum: ['era', 'ikiel'] }, summary: { type: 'string' }, share_agent_contact: { type: 'boolean' } })),
+  ask_owner: nullable(strObj({ slug: { type: 'string' }, question: { type: 'string' } })),
+  crm_updates: { type: 'array', items: strObj({
+    field: { type: 'string' },
+    value: { anyOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }] },
+    reason: { type: 'string' },
+  }) },
+  crm_actions: { type: 'array', items: strObj({
+    type: { type: 'string' },
+    name: { type: 'string' },
+    wa_num: { type: 'string' },
+    reason: { type: 'string' },
+    service_type: { type: 'string' },
+    replace: { type: 'boolean' },
+  }) },
+});
+const MAYA_REPLY_FORMAT = { type: 'json_schema', schema: MAYA_REPLY_SCHEMA };
+
+// Pull the JSON object out of a model turn. Returns { parsed } on success or
+// { error } describing why there is nothing usable — a truncated output
+// (stop_reason max_tokens), no object at all, or an object that won't parse.
+// Callers MUST treat `error` as a generation failure (loud draft marker +
+// alert), never fall back to shipping the raw text: that is exactly how a
+// 700-word internal monologue once landed in an agent's draft box.
+function parseReplyJson(data) {
+  const raw = (data.content?.[0]?.text || '').trim();
+  if (data.stop_reason === 'max_tokens') {
+    return { error: `output truncated at max_tokens (${raw.length} chars)`, raw };
+  }
+  const m = raw.match(/\{[\s\S]*\}/);
+  if (!m) return { error: `no JSON object in output: "${raw.slice(0, 120)}${raw.length > 120 ? '…' : ''}"`, raw };
+  try {
+    return { parsed: JSON.parse(m[0]), raw };
+  } catch (e) {
+    return { error: `malformed JSON (${e.message})`, raw };
+  }
+}
 
 // Conservative router: default to Sonnet, drop to Haiku ONLY for short,
 // single-intent, low-stakes messages (greetings/acks, commission questions,
@@ -1111,29 +1190,8 @@ export default async function handler(req, res) {
     }
 
     // Generate a reply with Claude — load live project + rental data from DB first
-    const playbookBlock = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
-    const projects = await loadProjects(SUPABASE_URL, sbHeaders);
-    const rentals = await loadRentals(SUPABASE_URL, sbHeaders);
-    const digest = await loadDigest();
-    const liveContext = buildPortfolioContext(projects);
-    const rentalsContext = buildRentalsContext(rentals);
-    const availabilityContext = buildAvailabilityContext(digest);
-    const liveBrochures = buildBrochures(projects);
-    const rentalSlugs = buildRentalSlugs(rentals);
-    // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
-    const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
-    // If this agent is engaged in an active campaign, fetch the campaign's context
-    // so Maya knows the specific focus / promo / framing for this batch. With two
-    // possible engagements (KAYA + Samba), use the most-recently-active one.
-    let campaignContext = null;
-    const recentEng = mostRecentEngagement(agent.campaign_engagement);
-    if (recentEng?.eng?.campaign_id) {
-      try {
-        const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${recentEng.eng.campaign_id}&select=name,context,purpose`, { headers: sbHeaders });
-        const cRow = (await cRes.json())?.[0];
-        if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
-      } catch (e) { /* non-fatal */ }
-    }
+    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock }
+      = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
     // Vision: when the agent sent an image, fetch its bytes so Maya can
     // actually look at it (listing screenshots, property photos, documents
     // photographed by agents). Falls back to the "couldn't open it" prompt.
@@ -1773,6 +1831,59 @@ async function fetchRecentThread(url, headers, agentId) {
   }
 }
 
+// Everything generateReply needs that comes from the DB / portal, assembled
+// the same way for a live inbound and for a console preview (previewAgentReply
+// below) so the two never drift.
+async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
+  const playbookBlock = await loadPlaybookBlock(SUPABASE_URL, sbHeaders).catch(() => '');
+  const projects = await loadProjects(SUPABASE_URL, sbHeaders);
+  const rentals = await loadRentals(SUPABASE_URL, sbHeaders);
+  const digest = await loadDigest();
+  const liveContext = buildPortfolioContext(projects);
+  const rentalsContext = buildRentalsContext(rentals);
+  const availabilityContext = buildAvailabilityContext(digest);
+  const liveBrochures = buildBrochures(projects);
+  const rentalSlugs = buildRentalSlugs(rentals);
+  // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
+  const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
+  // If this agent is engaged in an active campaign, fetch the campaign's context
+  // so Maya knows the specific focus / promo / framing for this batch. With two
+  // possible engagements (KAYA + Samba), use the most-recently-active one.
+  let campaignContext = null;
+  const recentEng = mostRecentEngagement(agent.campaign_engagement);
+  if (recentEng?.eng?.campaign_id) {
+    try {
+      const cRes = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?id=eq.${recentEng.eng.campaign_id}&select=name,context,purpose`, { headers: sbHeaders });
+      const cRow = (await cRes.json())?.[0];
+      if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
+    } catch (e) { /* non-fatal */ }
+  }
+  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock };
+}
+
+// DRY RUN — run the full agent reply pipeline (live KB, availability, thread,
+// playbook, model routing, the need_availability round trip) for one agent
+// and return Maya's structured result. Nothing is saved, sent, alerted, or
+// applied: no agent patch, no WhatsApp, no CRM updates, no spend counter.
+// Used by the console's preview (api/supabase.js 'preview_reply') to see what
+// Maya WOULD say to the agent's latest message — e.g. to check a prompt change
+// against a real thread before it meets a real agent. `inbound` defaults to
+// the agent's most recent inbound message.
+export async function previewAgentReply({ SUPABASE_URL, sbHeaders, ANTHROPIC_KEY, agent, inbound, mode, debug = false }) {
+  let text = inbound;
+  if (!text) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${agent.id}&direction=eq.inbound&order=timestamp.desc&limit=1&select=content`, { headers: sbHeaders });
+    text = (await r.json())?.[0]?.content || '';
+  }
+  if (!text) return { error: 'no inbound message to reply to' };
+  const ctx = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
+  const result = await generateReply(ANTHROPIC_KEY, agent, text, mode || 'hybrid', ctx.liveContext, ctx.liveBrochures, ctx.recentThread, ctx.rentalsContext, ctx.campaignContext, ctx.rentalSlugs, ctx.availabilityContext, null, ctx.playbookBlock);
+  // debug: also return the data blocks Maya was reasoning over, so a wrong
+  // recommendation can be traced to the data vs the prompt.
+  const extra = debug ? { context: { thread: ctx.recentThread, availability: ctx.availabilityContext, rentals: ctx.rentalsContext } } : {};
+  return { inbound: text, ...result, ...extra };
+}
+
 async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '') {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
@@ -1875,6 +1986,7 @@ ${CRM_SIGNALS_INSTRUCTIONS}
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
+  "match_scan": [] | one entry per Samba rental when the agent has given client criteria, e.g. { "slug": "villa_saturno", "verdict": "fit", "why": "3BR villa, 35jt under 45jt ceiling, pool, Canggu; free 14 Sep" },
   "action": "auto" | "escalate" | "need_availability",
   "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability",
   "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
@@ -1891,9 +2003,10 @@ Respond with ONLY a JSON object (no markdown, no prose):
     { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "service_type": "rental", "replace": false }
   ]
 }
+MATCH SCAN ("match_scan") — fill this FIRST, before the reply, whenever the agent's latest message or the thread contains a client brief (any of: budget, bedrooms, area, dates, property type, features). One entry for EVERY Samba rental in the portfolio, no skipping: "fit" = meets every hard criterion (property type, bedroom minimum, price at or BELOW the budget ceiling — cheaper is still a fit — and, if dates were given, free or freeing up by the start date); "near_miss" = exactly one hard criterion missed by a little (price up to ~15% over the ceiling, one bedroom short, right neighbourhood but not the named street, or frees up within ~2 weeks after the requested start); "out" = clearly fails, with the reason. Unknown features are NOT a miss. Every "fit" MUST then appear in your reply and (up to 4) in send_cards — if more than 4 fit, card the best 4 and name the rest in the text. Near-misses come after the fits, clearly framed. Leave match_scan [] when there is no brief (greetings, commission questions, a single named property, KAYA sales talk).
 Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
 ${isHybrid
-  ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, price, availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends).`
+  ? `Set "action" to "auto" ONLY if the message is a simple, factual question you can answer with full confidence from the portfolio knowledge (e.g. commission %, a single property's price, a single property's availability, sending a brochure). For anything involving negotiation, scheduling, complaints, commitments, or ambiguity, set "action" to "escalate" (Ikiel will review your draft before it sends). A CLIENT BRIEF — an agent giving criteria (budget, bedrooms, area, dates, features) and asking what you have — is ALWAYS "escalate": your shortlist, near-miss framing, and any over-budget or out-of-area suggestion get a human look before they reach the agent.`
   : `Set "action" to "auto" by default. Use "escalate" only when one of your escalation triggers fires (negotiation, complaint, legal questions, request to speak to Ikiel, low confidence, etc).`}
 Set "send_doc" ONLY when the agent EXPLICITLY requests the brochure/PDF/document for a specific KAYA sales project. Examples that trigger send_doc: "send me the brochure", "do you have a PDF for Clay House", "can you share the documents", "send over the info pack". Do NOT set send_doc just because the agent mentioned a project name or asked a general question about it — describe the project in text first and let them ask for the brochure if they want it. The system also auto-dedupes: if a brochure was already sent in the last 14 days (e.g. via a campaign attachment), it will silently skip the re-send.
 LISTING CARDS ("send_cards") — MANDATORY whenever you share Samba rentals:
@@ -1955,9 +2068,12 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
         body: JSON.stringify(deepWellFormed({
           model: replyModel,
-          max_tokens: 800,
+          max_tokens: REPLY_MAX_TOKENS,
           system,
           messages,
+          // Constrain the turn to the contract object — no preamble, no
+          // reasoning narration, no code fences (see MAYA_REPLY_SCHEMA).
+          output_config: { format: MAYA_REPLY_FORMAT },
         }))
       });
       llmCalls++;
@@ -1974,25 +2090,32 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
       }
       // Charge actual token spend for this hop (falls back if usage is absent).
       costUsd += data.usage ? costOfUsage(data.usage, replyModel) : FALLBACK_COST_PER_REPLY_USD;
-      const raw = data.content?.[0]?.text || '';
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        return { action: 'escalate', reply: raw.trim(), send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd };
+      // A truncated, missing, or malformed object is a GENERATION FAILURE, same
+      // as an API error: loud marker in the draft box + alert. Never ship the
+      // raw text as the reply — there is no reading of a non-JSON turn that is
+      // safe to send to an agent.
+      const { parsed, raw, error: parseErr } = parseReplyJson(data);
+      if (parseErr) {
+        console.warn('generateReply unusable output:', parseErr);
+        return { action: 'escalate', reply: '', error: parseErr, send_doc: null, send_cards: [], send_contact: null, reply_buttons: [], crm_updates: [], llm_calls: llmCalls, cost_usd: costUsd, model: replyModel };
       }
-      const parsed = JSON.parse(jsonMatch[0]);
 
       // Maya wants a live calendar check for a specific range — do it, then
       // feed the result back for a final reply. Only on the first hop.
       if (parsed.action === 'need_availability' && parsed.availability_query && hop < MAX_LLM_CALLS - 1) {
         const result = await checkPortalAvailability(parsed.availability_query);
         messages.push({ role: 'assistant', content: raw });
-        messages.push({ role: 'user', content: `Live calendar result: ${result}\n\nNow reply to the agent with a final JSON response (action "auto" or "escalate"). Quote the dates and be specific. If not available, mention the next free option if helpful.` });
+        messages.push({ role: 'user', content: `Live calendar result: ${result}\n\nNow reply to the agent with a final JSON response (action "auto" or "escalate"). Quote the dates and be specific. If not available, mention the next free option if helpful.\n\nThis result covers ONLY the one property you checked. If the agent gave a client brief (budget, bedrooms, area, features), your reply must still follow the CLIENT MATCHING RULES in full: re-scan the whole portfolio, lead with EVERY candidate that fits the hard criteria — remember the budget is a ceiling, so cheaper properties are in, not out — using the live availability summary for the ones you did not calendar-check (say you'll confirm their exact dates), and only then add any over-budget near-miss, clearly framed. Do not let the property you happened to check crowd out better-fitting ones. Attach cards for every property you recommend.` });
         continue;
       }
 
       return {
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
+        // Maya's per-property fit verdicts (client briefs only). Not acted on
+        // by the handler; surfaced by preview_reply so a recommendation can be
+        // audited against what she actually considered.
+        match_scan: Array.isArray(parsed.match_scan) ? parsed.match_scan : [],
         send_doc: parsed.send_doc || null,
         // send_photo is the legacy single-photo field — fold it into cards.
         send_cards: Array.isArray(parsed.send_cards) ? parsed.send_cards.slice(0, 4)
@@ -2264,7 +2387,9 @@ Use "report" to fetch real numbers before answering a performance question (set 
       const res = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-        body: JSON.stringify(deepWellFormed({ model: 'claude-sonnet-4-6', max_tokens: 700, system, messages })),
+        // 2500 (was 700): intake turns carry a whole listing object, and a
+        // truncated one is now a hard failure rather than a garbled draft.
+        body: JSON.stringify(deepWellFormed({ model: 'claude-sonnet-4-6', max_tokens: 2500, system, messages })),
       });
       llmCalls++;
       const data = await res.json();
@@ -2272,10 +2397,13 @@ Use "report" to fetch real numbers before answering a performance question (set 
         return { action: 'escalate', reply: '', error: data?.error?.message || `HTTP ${res.status}`, llm_calls: llmCalls, cost_usd: costUsd };
       }
       costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
-      const raw = data.content?.[0]?.text || '';
-      const m = raw.match(/\{[\s\S]*\}/);
-      if (!m) return { action: 'escalate', reply: raw.trim(), llm_calls: llmCalls, cost_usd: costUsd };
-      const parsed = JSON.parse(m[0]);
+      // Truncated / non-JSON output is a generation failure (loud marker via
+      // ai.error), never a draft — same rule as the agent path.
+      const { parsed, raw, error: parseErr } = parseReplyJson(data);
+      if (parseErr) {
+        console.warn('owner generateReply unusable output:', parseErr);
+        return { action: 'escalate', reply: '', error: parseErr, llm_calls: llmCalls, cost_usd: costUsd };
+      }
 
       if (parsed.action === 'report' && parsed.report_slug && hop < MAX - 1) {
         const summary = await fetchOwnerReportSummary(parsed.report_slug, secret);
