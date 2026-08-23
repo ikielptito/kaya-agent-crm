@@ -18,6 +18,7 @@ import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
+import { announceListingLive } from '../lib/listing-live.js';
 import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
@@ -149,7 +150,15 @@ export default async function handler(req, res) {
       && req.body?.slug && (action === 'upsert' || action === 'delete')) {
     try {
       const out = await syncRental({ SUPABASE_URL, headers }, req.body.slug, action);
-      return res.status(out.error ? 500 : 200).json(out);
+      // First time an owner listing is public (Approve in the admin): Maya
+      // congratulates the owner with the link, the weekly report, the portal,
+      // and what's still missing. Once per slug; best-effort.
+      let live = null;
+      if (action === 'upsert' && !out.error && process.env.META_WA_TOKEN && process.env.META_WA_PHONE_ID) {
+        try { live = await announceListingLive({ SUPABASE_URL, sbHeaders: headers }, { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, req.body.slug); }
+        catch (e) { live = { sent: false, reason: e.message }; }
+      }
+      return res.status(out.error ? 500 : 200).json({ ...out, live_notice: live });
     } catch (e) {
       return res.status(500).json({ error: 'rental sync failed: ' + e.message });
     }
@@ -832,6 +841,19 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       if (ownerId == null || !slug) return res.status(400).json({ error: 'ownerId and slug required' });
       try { return res.status(200).json(await attachOwnerPhotos({ SUPABASE_URL, sbHeaders: headers, ownerId, slug })); }
       catch (e) { return res.status(500).json({ error: e.message }); }
+
+    } else if (action === 'announce_listing_live') {
+      // Send (or re-send with force) the "your listing is live" message for a slug.
+      const { slug, force } = payload || {};
+      if (!slug) return res.status(400).json({ error: 'slug required' });
+      try {
+        if (force) {
+          const cur = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.listing_live_announced&select=value`, { headers }).then(r => r.json());
+          const v = cur?.[0]?.value || {}; delete v[slug];
+          await fetch(`${SUPABASE_URL}/rest/v1/settings`, { method: 'POST', headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ key: 'listing_live_announced', value: v }) });
+        }
+        return res.status(200).json(await announceListingLive({ SUPABASE_URL, sbHeaders: headers }, { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, slug));
+      } catch (e) { return res.status(500).json({ error: e.message }); }
 
     } else if (action === 'relay_sweep') {
       // Run the hourly relay sweep now (nudge / expire / repair failed sends).
