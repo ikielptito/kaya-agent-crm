@@ -23,6 +23,7 @@ import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rent
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { sweepRelays } from '../lib/relay.js';
+import { sweepUnanswered } from '../lib/sla.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import crypto from 'node:crypto';
 
@@ -142,7 +143,9 @@ export default async function handler(req, res) {
         { SUPABASE_URL, sbHeaders },
         { phoneId: WA_PHONE_ID, token: WA_TOKEN },
       );
-      return res.status(200).json({ relay_sweep: out });
+      // Same hourly beat: holding lines + a page for agents waiting >30 min.
+      const sla = await sweepUnanswered({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }).catch(e => ({ error: e.message }));
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }

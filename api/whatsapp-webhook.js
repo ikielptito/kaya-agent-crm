@@ -1129,8 +1129,19 @@ export default async function handler(req, res) {
     // OPT-OUT DETECTION — intercept stop/unsubscribe before Maya sees the message.
     // Sets samba_alerts_opt_out, marks samba engagement as 'unsubscribed', sends
     // a brief confirmation, and short-circuits (no Claude call).
+    // Exact keywords, plus the natural-language refusals the logs showed being
+    // ignored for weeks ("Not interested bye" → 27 more broadcasts; "please
+    // dont send me daily updates … or i will block this number" → 3 more).
+    // Natural-language matches only count on short messages, so "not
+    // interested in Saturno, but do you have a 2BR?" still reaches Maya.
     const OPT_OUT_RE = /^(stop|unsubscribe|please stop|remove me|don'?t contact|opt out|berhenti)$/i;
-    if (text && OPT_OUT_RE.test(text.trim())) {
+    const OPT_OUT_NL_RE = /\b(not interested|no thanks?|no thank you|don'?t (send|message|text|contact)|stop (sending|messaging|texting)|please stop|remove (me|us|my (number|contact))|unsubscribe|take me off|leave me alone|wrong (person|number)|block (this|your) number|tidak tertarik|ga tertarik|gak tertarik|jangan (kirim|hubungi)|hapus (nomor|kontak)|salah (nomor|orang)|berhenti kirim)\b/i;
+    const trimmed = String(text || '').trim();
+    // A refusal that continues into a question or a "but" is a conversation,
+    // not an opt-out — leave it to Maya.
+    const OPT_OUT_NOT_RE = /\?|\b(but|tapi|however|do you have|ada (villa|unit|yang)|looking for|cari|instead)\b/i;
+    const optOutHit = trimmed && (OPT_OUT_RE.test(trimmed) || (trimmed.length <= 160 && OPT_OUT_NL_RE.test(trimmed) && !OPT_OUT_NOT_RE.test(trimmed)));
+    if (optOutHit) {
       patch.samba_alerts_opt_out = true;
       const eng = { ...(agent.campaign_engagement || {}) };
       if (eng.samba) {
@@ -1139,7 +1150,10 @@ export default async function handler(req, res) {
       patch.campaign_engagement = eng;
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
 
-      const confirmText = 'Noted — you\'ve been removed from availability updates. If you ever want to re-subscribe, just let me know.';
+      const bahasa = /\b(tidak|ga|gak|jangan|hapus|salah|berhenti|nomor)\b/i.test(trimmed);
+      const confirmText = bahasa
+        ? 'Siap, noted — nomor ini sudah saya hapus dari update Samba. Kalau suatu saat mau menerima info lagi, tinggal kabari saya ya 🙏'
+        : 'Noted — you\'ve been removed from availability updates. If you ever want to re-subscribe, just let me know.';
       if (WA_TOKEN && WA_PHONE_ID) {
         const confirmMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
         await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText, confirmMid);
@@ -1152,7 +1166,7 @@ export default async function handler(req, res) {
           agent_id: agent.id,
           field: 'samba_alerts_opt_out',
           new_value: 'true',
-          reason: 'Agent sent opt-out keyword',
+          reason: OPT_OUT_RE.test(trimmed) ? 'Agent sent opt-out keyword' : 'Agent declined in natural language',
           evidence: text.trim().slice(0, 200),
           by_maya: false,
           created_at: new Date().toISOString(),

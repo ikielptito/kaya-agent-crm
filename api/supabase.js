@@ -16,6 +16,7 @@ import webpush from 'web-push';
 import { previewAgentReply } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
+import { sweepUnanswered } from '../lib/sla.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -824,7 +825,8 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
       try {
         const out = await sweepRelays({ SUPABASE_URL, sbHeaders: headers }, { phoneId: WA_PHONE_ID, token: WA_TOKEN });
-        return res.status(200).json(out);
+        const sla = await sweepUnanswered({ SUPABASE_URL, sbHeaders: headers }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }).catch(e => ({ error: e.message }));
+        return res.status(200).json({ ...out, sla });
       } catch (e) { return res.status(500).json({ error: 'sweep failed: ' + e.message }); }
 
     } else if (action === 'chase_listing_info') {
@@ -1232,7 +1234,8 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         // unanswered). Broadcasts don't count as answers: a cron digest that
         // happens to land after an agent's question must not mask it (that hid
         // a real 27 Jul "1BR, 22jt budget" lead behind an availability digest).
-        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&or=(source.neq.cron,source.is.null)&order=timestamp.desc&limit=1&select=direction,timestamp`, { headers });
+        // A holding line (source 'sla') is not an answer either.
+        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&or=(source.not.in.(cron,sla),source.is.null)&order=timestamp.desc&limit=1&select=direction,timestamp`, { headers });
         const last = (await lastRes.json())?.[0];
         if (!last || last.direction !== 'inbound') {
           await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0 }) }).catch(() => {});
