@@ -1295,7 +1295,17 @@ export default async function handler(req, res) {
     // [[send-cards:...]] suffix that the inbox strips into an attachment chip
     // and sends (via /api/whatsapp-send action 'cards') when the draft goes out.
     const cardSlugs = Array.isArray(aiResult.send_cards) ? aiResult.send_cards.filter(Boolean).slice(0, 4) : [];
-    const draftCardsSuffix = cardSlugs.length ? `\n[[send-cards:${cardSlugs.join(',')}]]` : '';
+    // Drafts carry their side effects as a trailing marker the consoles strip
+    // into a chip and whatsapp-send executes on approval (see
+    // executeReplySideEffects). Cards keep their legacy marker for older UI.
+    const sideFx = {};
+    if (aiResult.send_contact) sideFx.send_contact = aiResult.send_contact;
+    if (aiResult.notify_team) sideFx.notify_team = aiResult.notify_team;
+    if (aiResult.ask_owner) sideFx.ask_owner = aiResult.ask_owner;
+    if (aiResult.send_doc) sideFx.send_doc = aiResult.send_doc;
+    if (Array.isArray(aiResult.reply_buttons) && aiResult.reply_buttons.length) sideFx.reply_buttons = aiResult.reply_buttons;
+    const draftCardsSuffix = (cardSlugs.length ? `\n[[send-cards:${cardSlugs.join(',')}]]` : '')
+      + (Object.keys(sideFx).length ? `\n[[actions:${Buffer.from(JSON.stringify(sideFx)).toString('base64url')}]]` : '');
 
     if (mode === 'draft') {
       patch.suggested_reply = (aiResult.reply || '') && (aiResult.reply + draftCardsSuffix);
@@ -1329,108 +1339,7 @@ export default async function handler(req, res) {
       // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
       forwardMayaReply(agent, aiResult.reply).catch(() => {});
 
-      // Send brochure if Claude requested one (use live brochure map from DB)
-      // Dedup: skip if the same filename was sent in the last 14 days (e.g. via campaign attachment).
-      const doc = aiResult.send_doc && liveBrochures[aiResult.send_doc];
-      if (doc && doc.url) {
-        const recentlySent = await wasDocRecentlySent(SUPABASE_URL, sbHeaders, agent.id, doc.filename, 14);
-        if (!recentlySent) {
-          await sendDocument(WA_PHONE_ID, WA_TOKEN, fromNum, doc.url, doc.filename);
-          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Document: ${doc.filename}]`);
-        } else {
-          console.log(`Skipping ${doc.filename} — already sent in last 14 days`);
-        }
-      }
-      // Send rich listing cards for every property Maya referenced — cover
-      // photo + native "View listing" button, one card per property.
-      if (cardSlugs.length) {
-        try {
-          const cards = await resolveListingCards(cardSlugs, 4);
-          for (const card of cards) {
-            const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, fromNum, card);
-            if (sent.waMessageId) {
-              await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, cardMarker(card), sent.waMessageId, 'listing_card');
-            } else {
-              console.warn('listing card send failed:', card.slug, sent.error);
-            }
-          }
-        } catch (e) { console.warn('listing cards failed:', e.message); }
-      }
-      // Native contact card for viewing handoffs ("who do I contact?") —
-      // tappable, saves straight to the agent's phone.
-      const contact = aiResult.send_contact;
-      if (contact && contact.phone && contact.phone.length >= 9 && contact.phone.length <= 15) {
-        const contactMid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, fromNum, contact.name, contact.phone);
-        if (contactMid) {
-          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, `[Contact card: ${contact.name} — +${contact.phone}]`, contactMid);
-        }
-      }
-      // TEAM ALERT — Maya promised a follow-up she can't do herself, or a
-      // guest issue needs Era. Ping the right person on WhatsApp NOW, mirror
-      // to the PWA push, and leave an audit row so the promise is traceable.
-      if (aiResult.notify_team) {
-        const nt = aiResult.notify_team;
-        try {
-          await notifyTeam(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, { to: nt.to, summary: nt.summary, shareContact: nt.share_contact }, agent);
-          await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
-            method: 'POST', headers: sbHeaders,
-            body: JSON.stringify({
-              agent_id: agent.id, field: 'team_alert', new_value: nt.to,
-              reason: nt.summary.slice(0, 300), evidence: (text || '').slice(0, 200),
-              by_maya: true, created_at: new Date().toISOString(),
-            }),
-          }).catch(() => {});
-        } catch (e) { console.warn('notifyTeam failed:', e.message); }
-        sendPushNotifications(SUPABASE_URL, sbHeaders, {
-          title: `Maya → ${nt.to === 'era' ? 'Era' : 'Ikiel'}: ${agent.name || '+' + fromNum}`,
-          body: nt.summary.slice(0, 160), agentId: agent.id,
-          badgeCount: (agent.unread_count || 0) + 1,
-        }).catch(() => {});
-      }
-      // QUESTION RELAY — the agent asked something checkable that isn't in the
-      // KB. Maya puts it to that listing's "enquire with" contact and carries
-      // the answer back herself, instead of leaving the agent to chase it.
-      if (aiResult.ask_owner) {
-        const ao = aiResult.ask_owner;
-        // Maya emits the CRM slug (villa_rice); the digest carries the portal
-        // slug (villa-rice). Compare on the normalised form — the exact match
-        // never hit, so every relay went to Era instead of the listed contact.
-        const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
-        const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ao.slug));
-        const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
-        const contactName = prop?.waContactName || 'Era';
-        try {
-          // Thread it into the owner's inbox when we know them as an owner.
-          let ownerId = null;
-          try {
-            const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${contactWa}&select=id&limit=1`, { headers: sbHeaders });
-            ownerId = (await oRes.json())?.[0]?.id ?? null;
-          } catch { /* owner link is a nicety, not a requirement */ }
-
-          const r = await openRelay(relayDb, relayWa, {
-            agent, question: ao.question, slug: ao.slug,
-            propertyName: prop?.name || ao.slug, contactName, contactWa, ownerId,
-          });
-          if (r.ok) {
-            await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
-              method: 'POST', headers: sbHeaders,
-              body: JSON.stringify({
-                agent_id: agent.id, field: 'relay_opened', new_value: contactName,
-                reason: `${prop?.name || ao.slug}: ${ao.question}`.slice(0, 300),
-                evidence: (text || '').slice(0, 200), by_maya: true,
-                created_at: new Date().toISOString(),
-              }),
-            }).catch(() => {});
-            sendPushNotifications(SUPABASE_URL, sbHeaders, {
-              title: `Maya asked ${contactName}: ${prop?.name || ao.slug}`,
-              body: ao.question.slice(0, 160), agentId: agent.id,
-              badgeCount: (agent.unread_count || 0) + 1,
-            }).catch(() => {});
-          } else {
-            console.log('relay not opened:', r.reason);
-          }
-        } catch (e) { console.warn('openRelay failed:', e.message); }
-      }
+      await executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, toNum: fromNum, actions: aiResult, evidence: text, brochures: liveBrochures, digest });
       // Auto-sent: clear suggestion, don't mark unread
       patch.suggested_reply = '';
       patch.unread_count = 0;
@@ -1730,7 +1639,7 @@ async function sendText(phoneId, token, to, text) {
 // 'button' message). Falls back to a plain text send when there are no valid
 // buttons, the body exceeds Meta's 1024-char interactive limit, or Meta
 // rejects the interactive shape — the reply itself must never be lost.
-async function sendTextWithButtons(phoneId, token, to, text, buttons) {
+export async function sendTextWithButtons(phoneId, token, to, text, buttons) {
   const titles = (buttons || []).map(b => String(b).trim().slice(0, 20)).filter(Boolean).slice(0, 3);
   if (!titles.length || text.length > 1024) return sendText(phoneId, token, to, text);
   try {
@@ -1880,6 +1789,122 @@ async function fetchRecentThread(url, headers, agentId) {
     }).join('\n');
   } catch (e) {
     return '';
+  }
+}
+
+
+// Everything a reply carries besides its text — brochure, listing cards,
+// contact card, team alert, owner relay — executed the same way whether the
+// reply was auto-sent by the webhook or approved from a draft in the console
+// (api/whatsapp-send.js). Before this, drafts kept only the cards: approving
+// a viewing request sent the words and dropped the Era ping and the card.
+// `actions` = { send_doc, send_cards, send_contact, notify_team, ask_owner }.
+export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, toNum, actions, evidence = '', brochures = null, digest = null }) {
+  if (!actions || !WA_TOKEN || !WA_PHONE_ID) return;
+  if (!brochures) { try { brochures = buildBrochures(await loadProjects(SUPABASE_URL, sbHeaders)); } catch { brochures = FALLBACK_BROCHURES; } }
+  if (!digest) { try { digest = await loadDigest(); } catch { digest = null; } }
+  const cardSlugs = Array.isArray(actions.send_cards) ? actions.send_cards.filter(Boolean).slice(0, 4) : [];
+  // Send brochure if Claude requested one (use live brochure map from DB)
+  // Dedup: skip if the same filename was sent in the last 14 days (e.g. via campaign attachment).
+  const doc = actions.send_doc && brochures[actions.send_doc];
+  if (doc && doc.url) {
+    const recentlySent = await wasDocRecentlySent(SUPABASE_URL, sbHeaders, agent.id, doc.filename, 14);
+    if (!recentlySent) {
+      await sendDocument(WA_PHONE_ID, WA_TOKEN, toNum, doc.url, doc.filename);
+      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, `[Document: ${doc.filename}]`);
+    } else {
+      console.log(`Skipping ${doc.filename} — already sent in last 14 days`);
+    }
+  }
+  // Send rich listing cards for every property Maya referenced — cover
+  // photo + native "View listing" button, one card per property.
+  if (cardSlugs.length) {
+    try {
+      const cards = await resolveListingCards(cardSlugs, 4);
+      for (const card of cards) {
+        const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, toNum, card);
+        if (sent.waMessageId) {
+          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, cardMarker(card), sent.waMessageId, 'listing_card');
+        } else {
+          console.warn('listing card send failed:', card.slug, sent.error);
+        }
+      }
+    } catch (e) { console.warn('listing cards failed:', e.message); }
+  }
+  // Native contact card for viewing handoffs ("who do I contact?") —
+  // tappable, saves straight to the agent's phone.
+  const contact = actions.send_contact;
+  if (contact && contact.phone && contact.phone.length >= 9 && contact.phone.length <= 15) {
+    const contactMid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, toNum, contact.name, contact.phone);
+    if (contactMid) {
+      await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, `[Contact card: ${contact.name} — +${contact.phone}]`, contactMid);
+    }
+  }
+  // TEAM ALERT — Maya promised a follow-up she can't do herself, or a
+  // guest issue needs Era. Ping the right person on WhatsApp NOW, mirror
+  // to the PWA push, and leave an audit row so the promise is traceable.
+  if (actions.notify_team) {
+    const nt = actions.notify_team;
+    try {
+      await notifyTeam(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, { to: nt.to, summary: nt.summary, shareContact: nt.share_contact }, agent);
+      await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({
+          agent_id: agent.id, field: 'team_alert', new_value: nt.to,
+          reason: nt.summary.slice(0, 300), evidence: (evidence || '').slice(0, 200),
+          by_maya: true, created_at: new Date().toISOString(),
+        }),
+      }).catch(() => {});
+    } catch (e) { console.warn('notifyTeam failed:', e.message); }
+    sendPushNotifications(SUPABASE_URL, sbHeaders, {
+      title: `Maya → ${nt.to === 'era' ? 'Era' : 'Ikiel'}: ${agent.name || '+' + toNum}`,
+      body: nt.summary.slice(0, 160), agentId: agent.id,
+      badgeCount: (agent.unread_count || 0) + 1,
+    }).catch(() => {});
+  }
+  // QUESTION RELAY — the agent asked something checkable that isn't in the
+  // KB. Maya puts it to that listing's "enquire with" contact and carries
+  // the answer back herself, instead of leaving the agent to chase it.
+  if (actions.ask_owner) {
+    const ao = actions.ask_owner;
+    // Maya emits the CRM slug (villa_rice); the digest carries the portal
+    // slug (villa-rice). Compare on the normalised form — the exact match
+    // never hit, so every relay went to Era instead of the listed contact.
+    const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
+    const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ao.slug));
+    const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
+    const contactName = prop?.waContactName || 'Era';
+    try {
+      // Thread it into the owner's inbox when we know them as an owner.
+      let ownerId = null;
+      try {
+        const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${contactWa}&select=id&limit=1`, { headers: sbHeaders });
+        ownerId = (await oRes.json())?.[0]?.id ?? null;
+      } catch { /* owner link is a nicety, not a requirement */ }
+
+      const r = await openRelay({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, {
+        agent, question: ao.question, slug: ao.slug,
+        propertyName: prop?.name || ao.slug, contactName, contactWa, ownerId,
+      });
+      if (r.ok) {
+        await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+          method: 'POST', headers: sbHeaders,
+          body: JSON.stringify({
+            agent_id: agent.id, field: 'relay_opened', new_value: contactName,
+            reason: `${prop?.name || ao.slug}: ${ao.question}`.slice(0, 300),
+            evidence: (evidence || '').slice(0, 200), by_maya: true,
+            created_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        sendPushNotifications(SUPABASE_URL, sbHeaders, {
+          title: `Maya asked ${contactName}: ${prop?.name || ao.slug}`,
+          body: ao.question.slice(0, 160), agentId: agent.id,
+          badgeCount: (agent.unread_count || 0) + 1,
+        }).catch(() => {});
+      } else {
+        console.log('relay not opened:', r.reason);
+      }
+    } catch (e) { console.warn('openRelay failed:', e.message); }
   }
 }
 

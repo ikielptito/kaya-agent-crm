@@ -4933,7 +4933,15 @@ function draftCardSlugs(text) {
   return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 function stripDraftCards(text) {
-  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').trim();
+  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').replace(/\s*\[\[actions:[^\]]+\]\]/g, '').trim();
+}
+// Side effects Maya attached to a draft ([[actions:base64url]] — contact
+// card, team alert, relay, brochure, buttons); /api/whatsapp-send executes
+// them when the draft is approved.
+function draftActions(text) {
+  const m = String(text || '').match(/\[\[actions:([A-Za-z0-9_-]+)\]\]/);
+  if (!m) return null;
+  try { return JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (_) { return null; }
 }
 
 function openInboxAttachMenu(agentId) {
@@ -5700,7 +5708,11 @@ async function sendReply(agentId) {
     if (msg) {
       const resp = await fetch('/api/whatsapp-send', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ waNum, message: msg, useTemplate: false, agentId: a.id })
+        body: JSON.stringify({
+          waNum, message: msg, useTemplate: false, agentId: a.id, source: 'manual',
+          ...(draftActions(a.suggested_reply) ? { actions: draftActions(a.suggested_reply) } : {}),
+          approved: !!(a.suggested_reply && msg === stripDraftCards(a.suggested_reply)),
+        })
       });
       const result = await resp.json();
       if (result.success) {
@@ -5741,10 +5753,12 @@ async function sendReply(agentId) {
       box.value = '';
       inboxAttachments = [];
       renderInboxAttachChips();
-      if (a.suggested_reply) { a.suggested_reply = ''; saveAgent(a.id, { suggested_reply: '' }); }
-      // Manual reply pauses Maya for this agent — she stays silent until Ikiel clicks "Resume Maya"
-      a.automation_override = 'paused';
-      saveAgent(a.id, { automation_override: 'paused', suggested_reply: '' });
+      // Clear Maya's draft. A human send no longer pauses Maya here: in hybrid
+      // mode every escalated reply is approved by hand, and pausing on
+      // approval was switching her off for a week on the conversations that
+      // mattered. Use "Pause Maya" to take over explicitly.
+      if (a.suggested_reply) { a.suggested_reply = ''; }
+      saveAgent(a.id, { suggested_reply: '' });
       // Invalidate inbox cache so next render fetches fresh
       window._inboxMsgAgentIds = null;
       openConversation(agentId); // refresh thread (will show "Maya paused" banner)

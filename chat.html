@@ -1650,6 +1650,7 @@ function openConv(id) {
   // Prefer Maya's pending draft; else restore a saved local draft. Any
   // [[send-cards:...]] suffix becomes an attachment (state.draftCards).
   state.draftCards = draftCardSlugs(a.suggested_reply);
+  state.draftActions = draftActions(a.suggested_reply);
   document.getElementById('replyBox').value = stripDraftCards(a.suggested_reply) || localStorage.getItem('maya_draft_' + id) || '';
   autoGrow(document.getElementById('replyBox'));
   document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
@@ -1818,7 +1819,11 @@ function renderBanner(a) {
     const cardsBit = nCards
       ? ` with ${nCards} listing card${nCards > 1 ? 's' : ''} <button onclick="dropDraftCards()" style="margin-left:6px;font-size:11px;border:1px solid currentColor;background:none;border-radius:8px;padding:1px 8px;color:inherit;cursor:pointer">${icm('x',12)} cards</button>`
       : '';
-    html += `<div class="draft-banner">${icm('spark',15)} Maya drafted a reply${cardsBit} — review &amp; send</div>`;
+    const fx = a.id === state.activeId ? describeActions(state.draftActions) : describeActions(draftActions(a.suggested_reply));
+    const fxBit = fx.length
+      ? ` + ${fx.join(', ')} <button onclick="dropDraftActions()" style="margin-left:6px;font-size:11px;border:1px solid currentColor;background:none;border-radius:8px;padding:1px 8px;color:inherit;cursor:pointer">${icm('x',12)} actions</button>`
+      : '';
+    html += `<div class="draft-banner">${icm('spark',15)} Maya drafted a reply${cardsBit}${fxBit} — review &amp; send</div>`;
   }
   el.innerHTML = html;
 }
@@ -1928,7 +1933,30 @@ function draftCardSlugs(text) {
   return m ? m[1].split(',').map(s => s.trim()).filter(Boolean) : [];
 }
 function stripDraftCards(text) {
-  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').trim();
+  return String(text || '').replace(/\s*\[\[send-cards:[^\]]+\]\]/g, '').replace(/\s*\[\[actions:[^\]]+\]\]/g, '').trim();
+}
+// Side effects Maya attached to a draft (contact card, Era alert, relay,
+// brochure, buttons) — carried as a [[actions:base64url]] marker and executed
+// by /api/whatsapp-send when the draft is approved.
+function draftActions(text) {
+  const m = String(text || '').match(/\[\[actions:([A-Za-z0-9_-]+)\]\]/);
+  if (!m) return null;
+  try { return JSON.parse(atob(m[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (_) { return null; }
+}
+function describeActions(ax) {
+  if (!ax) return [];
+  const out = [];
+  if (ax.send_contact) out.push(`${ax.send_contact.name || 'contact'}'s card`);
+  if (ax.notify_team) out.push(`alert ${ax.notify_team.to === 'era' ? 'Era' : 'Ikiel'}`);
+  if (ax.ask_owner) out.push('ask the villa');
+  if (ax.send_doc) out.push('brochure');
+  if (ax.reply_buttons) out.push(`${ax.reply_buttons.length} buttons`);
+  return out;
+}
+function dropDraftActions() {
+  state.draftActions = null;
+  const a = state.agents.find(x => x.id === state.activeId);
+  if (a) renderBanner(a);
 }
 function dropDraftCards() {
   state.draftCards = [];
@@ -2431,13 +2459,13 @@ function onReplyInput() {
   else localStorage.removeItem('maya_draft_' + state.activeId);
 }
 function pauseMayaAfterManual(a) {
-  // If the user has explicitly pinned this chat to a mode (off / draft / hybrid
-  // / autopilot), respect that — a manual send shouldn't silently un-pin it.
-  // Still clear any pending Maya draft so it doesn't auto-send underneath them.
-  const pinned = a.automation_override && a.automation_override !== 'paused';
+  // A human send clears Maya's pending draft — and that is all. It no longer
+  // pauses Maya for the agent: in hybrid mode every escalated reply is
+  // approved by hand, and pausing on approval was silently switching Maya
+  // off for a week on exactly the conversations that mattered (22 Aug 2026
+  // audit). Use the Pause button / per-chat mode to take over explicitly.
   const patch = { suggested_reply: '' };
   a.suggested_reply = '';
-  if (!pinned) { a.automation_override = 'paused'; patch.automation_override = 'paused'; }
   api('patch_agent', { id: a.id, fields: patch }).catch(() => {});
   renderBanner(a);
 }
@@ -2595,7 +2623,13 @@ async function send() {
   try {
     const r = await fetch('/api/whatsapp-send', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ waNum: getWaNum(a), message: msg, agentId: a.id, source: 'manual', ...(replyTo ? { replyTo } : {}) }),
+      body: JSON.stringify({
+        waNum: getWaNum(a), message: msg, agentId: a.id, source: 'manual',
+        ...(replyTo ? { replyTo } : {}),
+        // Approved draft: carry Maya's side effects and mark the attribution.
+        ...(state.draftActions ? { actions: state.draftActions } : {}),
+        approved: !!(a.suggested_reply && msg === stripDraftCards(a.suggested_reply)),
+      }),
     });
     const res = await r.json();
     if (!res.success) throw new Error(res.error || 'send failed');
@@ -2608,6 +2642,7 @@ async function send() {
     // text is already out either way).
     const cardSlugs = (state.draftCards || []).slice(0, 4);
     state.draftCards = [];
+    state.draftActions = null;
     if (cardSlugs.length) {
       try {
         const cr = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' },

@@ -20,6 +20,7 @@
 // view will reflect the intent even if the agent's chat doesn't.
 
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
+import { executeReplySideEffects, sendTextWithButtons } from './whatsapp-webhook.js';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -87,6 +88,8 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     agentId, campaignId,
     replyTo,            // wa_message_id this send quotes (reply context), optional
     source,             // 'manual' when a human sends from the chat inbox; defaults to 'api'
+    actions,            // side effects of an approved Maya draft ({ send_contact, notify_team, ask_owner, send_doc, reply_buttons }) — see executeReplySideEffects
+    approved,           // true when the operator sent Maya's draft as-is (attribution: logged category 'draft_approved')
   } = body;
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
@@ -147,16 +150,26 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     logContent = message;
   }
 
-  const waRes = await fetch(`${GRAPH}/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-    body: JSON.stringify(metaBody)
-  });
-  const waData = await waRes.json();
-  if (!waRes.ok) {
-    return res.status(waRes.status).json({ error: waData.error?.message || 'WhatsApp API error', details: waData });
+  let waMessageId;
+  const buttons = type === 'text' && actions && Array.isArray(actions.reply_buttons) ? actions.reply_buttons.slice(0, 3) : [];
+  if (buttons.length) {
+    // An approved draft that carried quick-reply buttons goes out as the same
+    // interactive message Maya would have sent (falls back to plain text inside).
+    waMessageId = await sendTextWithButtons(PHONE_ID, TOKEN, waNum, message, buttons);
+    if (!waMessageId) return res.status(502).json({ error: 'WhatsApp API error (interactive send)' });
+    logContent = message + `\n[Buttons: ${buttons.join(' | ')}]`;
+  } else {
+    const waRes = await fetch(`${GRAPH}/${PHONE_ID}/messages`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify(metaBody)
+    });
+    const waData = await waRes.json();
+    if (!waRes.ok) {
+      return res.status(waRes.status).json({ error: waData.error?.message || 'WhatsApp API error', details: waData });
+    }
+    waMessageId = waData.messages?.[0]?.id;
   }
-  const waMessageId = waData.messages?.[0]?.id;
 
   if (sbHeaders && waMessageId) {
     await fetch(SUPABASE_URL + '/rest/v1/wa_messages', {
@@ -169,6 +182,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         wa_message_id: waMessageId,
         timestamp: new Date().toISOString(),
         source: source === 'manual' ? 'manual' : 'api',
+        category: approved ? 'draft_approved' : null,
         campaign_id: campaignId || null,
         reply_to: replyTo || null,
         status: 'sent',
@@ -183,7 +197,23 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     }).catch(e => console.warn('Failed to log outbound message:', e.message));
   }
 
-  return res.status(200).json({ success: true, waMessageId });
+  // Side effects of an approved draft (contact card, team alert, relay,
+  // brochure). Cards are sent by the console's separate 'cards' call, so they
+  // are dropped here to avoid a double send. Best-effort: the text is out.
+  let sideEffects = null;
+  if (type === 'text' && actions && typeof actions === 'object' && sbHeaders) {
+    const { send_cards, reply_buttons, ...rest } = actions;
+    if (Object.keys(rest).length) {
+      try {
+        const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=*`, { headers: sbHeaders });
+        const agent = (await aRes.json())?.[0] || { id: agentId ?? null, wa_num: waNum, name: null };
+        await executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHONE_ID: PHONE_ID, WA_TOKEN: TOKEN, agent, toNum: waNum, actions: rest, evidence: '(draft approved in console)' });
+        sideEffects = Object.keys(rest);
+      } catch (e) { sideEffects = { error: e.message }; }
+    }
+  }
+
+  return res.status(200).json({ success: true, waMessageId, sideEffects });
 }
 
 // ── CARDS (rich listing cards, e.g. attached to an approved Maya draft) ──
