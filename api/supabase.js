@@ -14,6 +14,7 @@ import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderIm
 import webpush from 'web-push';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
 import { previewAgentReply } from './whatsapp-webhook.js';
+import { chaseMissingListingInfo } from '../lib/listing-info.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -805,6 +806,26 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(out.error ? 502 : 200).json({ mode: effMode, ...out });
       } catch (e) {
         return res.status(500).json({ error: 'preview failed: ' + e.message });
+      }
+
+    } else if (action === 'chase_listing_info') {
+      // Run the listing-completeness chase now (the daily cron runs it at 9am
+      // WITA). payload.contact = digits of one contact's number to restrict the
+      // round to them (e.g. Era); payload.dry = true → report gaps, send nothing.
+      const { contact, dry } = payload || {};
+      const WA_TOKEN = process.env.META_WA_TOKEN, WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!dry && (!WA_TOKEN || !WA_PHONE_ID)) return res.status(500).json({ error: 'WhatsApp env not configured' });
+      try {
+        if (dry) {
+          const { missingFacts } = await import('../lib/listing-info.js');
+          const { fetchPortalListings } = await import('../lib/rental-sync.js');
+          const L = await fetchPortalListings();
+          return res.status(200).json({ dry: true, gaps: L.filter(l => !l.hidden).map(l => ({ slug: l.slug, contact: l.waContactName || null, missing: missingFacts(l) })).filter(x => x.missing.length) });
+        }
+        const out = await chaseMissingListingInfo({ SUPABASE_URL, sbHeaders: headers }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, { onlyContact: contact || null });
+        return res.status(200).json(out);
+      } catch (e) {
+        return res.status(500).json({ error: 'chase failed: ' + e.message });
       }
 
     } else if (action === 'translate') {
