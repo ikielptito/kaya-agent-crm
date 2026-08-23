@@ -23,6 +23,7 @@ import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rent
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { sweepRelays } from '../lib/relay.js';
+import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import crypto from 'node:crypto';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
@@ -619,6 +620,17 @@ export default async function handler(req, res) {
       catch (e) { rentalsReconcile = { error: e.message }; }
     }
 
+    // ── LISTING COMPLETENESS (daily) ─────────────────────────────────
+    // Maya asks each villa's listed contact for the key facts still missing
+    // from its listing (deposit, electricity, wifi, pool, min stay, pets) —
+    // one message per contact, every 5 days, max 4 rounds per listing. Replies
+    // land in the relay answer path and are staged for Ikiel's approval.
+    let listingInfo = null;
+    if (!previewMode) {
+      try { listingInfo = await chaseMissingListingInfo({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }); }
+      catch (e) { listingInfo = { error: e.message }; }
+    }
+
     // ── OWNER SYNC (daily) ───────────────────────────────────────────
     // Refresh the owners table from the portal's authed owner-contact feed so
     // Maya can reach villa owners/managers by their listing's WhatsApp number.
@@ -851,6 +863,7 @@ export default async function handler(req, res) {
       intro_sweep: introSweep,
       unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
+      listing_info_chase: listingInfo && { listings_with_gaps: listingInfo.listings_with_gaps, contacts_messaged: listingInfo.contacts_messaged, exhausted: listingInfo.exhausted, error: listingInfo.error },
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
       prospect_flags: prospectFlags,
