@@ -10,6 +10,7 @@ import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_ME
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
+import { AUTO_REPLY_RE } from '../lib/sla.js';
 import crypto from 'node:crypto';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
@@ -990,7 +991,9 @@ export async function nodeHandler(req, res) {
     // agent and an owner stays in the agent flow (zero regression) — dual-role
     // routing is refined later. `owner` is only ever set when OWNERS_ENABLED is
     // on, so this whole branch is dormant until then.
-    if (owner && !agent) {
+    // Owner mode for numbers with no agent row — or an agent row that turned
+    // out to be an owner (crm action convert_to_owner sets role 'owner').
+    if (owner && (!agent || agent.campaign_engagement?.role === 'owner')) {
       try {
         await handleOwnerConversation({
           SUPABASE_URL, sbHeaders, owner, fromNum,
@@ -1152,7 +1155,10 @@ export async function nodeHandler(req, res) {
     // this. An explicit STOP is caught immediately below and overwrites it
     // with 'unsubscribed', so a "stop" can never be read as consent.
     const introStatus = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
-    if (introStatus === 'intro_sent') {
+    // An agency's auto-responder ("Thank you for contacting BAM…") is not a
+    // person saying yes — it used to promote the contact to opted_in and
+    // start the daily stream on the strength of a bot reply.
+    if (introStatus === 'intro_sent' && !AUTO_REPLY_RE.test(String(text || ''))) {
       const base = patch.campaign_engagement || agent.campaign_engagement || {};
       patch.campaign_engagement = {
         ...base,
