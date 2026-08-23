@@ -1021,7 +1021,7 @@ export async function nodeHandler(req, res) {
               wa_num: fromNum, name: null, opt_in: true,
               onboarding_status: 'in_conversation',
               consent_note: 'Self-initiated via the portal "List with Maya" WhatsApp button',
-              promo_code: 'PRELAUNCH90',
+              promo_code: 'FOUNDING25',
             }),
           });
           const newOwner = (await oRes.json().catch(() => []))?.[0];

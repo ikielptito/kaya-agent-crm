@@ -338,7 +338,7 @@ export default async function handler(req, res) {
           onboarding_status: 'agreed', opt_in: true,
           consent_note: String(consentNote || '').trim() || null,
           lang: lang === 'id' ? 'id' : 'en',
-          promo_code: String(promoCode || 'PRELAUNCH90').trim().toUpperCase(),
+          promo_code: String(promoCode || 'FOUNDING25').trim().toUpperCase(),
         })
       });
       const created = await r.json().catch(() => null);
