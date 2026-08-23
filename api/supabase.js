@@ -17,6 +17,7 @@ import { previewAgentReply } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
+import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -116,9 +117,7 @@ function extractPhoneCandidates(text) {
 }
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setConsoleCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
@@ -154,6 +153,10 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: 'rental sync failed: ' + e.message });
     }
   }
+
+  // Console gate — after the portal's own-secret sync path above, before any
+  // action that reads or sends.
+  if (!consoleAuthorized(req)) return res.status(401).json({ error: 'Console key required' });
 
   try {
     let r;
@@ -296,7 +299,7 @@ export default async function handler(req, res) {
       // A Maya draft may be an image suggestion ("[image:key]\ncaption") from
       // onboarding mode — approve-and-send turns it into a real image message.
       const img = parseImageMarker(text);
-      const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+      const send = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify(img
@@ -353,7 +356,7 @@ export default async function handler(req, res) {
       if (!own) return res.status(404).json({ error: 'Owner not found' });
       if (own.onboarding_status === 'declined') return res.status(400).json({ error: 'This owner opted out — not contacting them again' });
       const wantLang = own.lang === 'id' ? 'id' : 'en';
-      const tl = await fetch(`https://graph.facebook.com/v19.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
+      const tl = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
         headers: { Authorization: 'Bearer ' + TOKEN }
       }).then(x => x.json()).catch(() => ({}));
       const candidates = (tl.data || []).filter(t => /^samba_owner_onboard/.test(t.name) && t.status === 'APPROVED');
@@ -369,7 +372,7 @@ export default async function handler(req, res) {
       if ((btnComp?.buttons || []).some(b => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || ''))) {
         comps.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: 'portal' }] });
       }
-      const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+      const send = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
         method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messaging_product: 'whatsapp', to: own.wa_num, type: 'template',
@@ -1256,7 +1259,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         let reply = '', cost = 0.02;
         try {
           const sg = await fetch(`${selfOrigin}/api/supabase`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
             body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: a.id } })
           });
           if (sg.ok) { const d = await sg.json(); reply = (d?.reply || '').trim(); if (typeof d?.cost_usd === 'number') cost = d.cost_usd; }
@@ -1272,7 +1275,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         }
 
         // Hybrid / autopilot: send via WhatsApp, clear unread + any stale draft.
-        const sr = await fetch(`https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`, {
+        const sr = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
           method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
           body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: reply } })
         });

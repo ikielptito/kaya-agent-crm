@@ -26,6 +26,7 @@ import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import crypto from 'node:crypto';
+import { consoleAuthHeaders } from '../lib/auth.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -55,7 +56,7 @@ FOLLOW-UP STYLE:
 - Match the warmth to the follow-up number: gentle → social proof → offer help → last nudge.
 - Always leave the agent an easy out (e.g. "no rush, just keeping it on your radar").`;
 
-const GRAPH = 'https://graph.facebook.com/v19.0';
+const GRAPH = 'https://graph.facebook.com/v24.0';
 const FOLLOWUP_INTERVAL_DAYS = 3;
 const MAX_FOLLOWUPS = 4;
 const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
@@ -356,7 +357,7 @@ export default async function handler(req, res) {
         let freshReply = null, freshCost = COST_PER_REPLY_USD;
         try {
           const sgRes = await fetch(`${selfOrigin}/api/supabase`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
             body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: agent.id } })
           });
           if (sgRes.ok) {
@@ -606,7 +607,7 @@ export default async function handler(req, res) {
     if (!previewMode) {
       try {
         const swRes = await fetch('https://kaya-agent-crm.vercel.app/api/supabase', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
           body: JSON.stringify({ action: 'resume_unanswered', payload: { since_days: 4, limit: 40 } }),
         });
         unansweredSweep = swRes.ok ? await swRes.json() : { error: 'HTTP ' + swRes.status };
@@ -824,7 +825,7 @@ export default async function handler(req, res) {
     if (!previewMode && selfOrigin) {
       try {
         const bf = await fetch(`${selfOrigin}/api/supabase`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
           body: JSON.stringify({ action: 'backfill_contacts', payload: { since_days: 3, limit: 40 } })
         });
         backfill = bf.ok ? await bf.json() : { error: `HTTP ${bf.status}` };
@@ -1530,7 +1531,7 @@ export async function runAvailabilityNotifications(ctx) {
       ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
       : [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }];
     try {
-      const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {
+      const r = await fetch(`https://graph.facebook.com/v24.0/${waPhoneId}/messages`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1701,7 +1702,7 @@ export async function runIntroSweep(ctx) {
     let metaErr = null;
     let waMessageId = null;
     try {
-      const r = await fetch(`https://graph.facebook.com/v19.0/${waPhoneId}/messages`, {
+      const r = await fetch(`https://graph.facebook.com/v24.0/${waPhoneId}/messages`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
         body: JSON.stringify({

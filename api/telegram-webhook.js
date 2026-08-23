@@ -8,7 +8,7 @@
 
 import { postToTelegram, extractAgentIdFromReply, telegramEnabled } from '../lib/telegram.js';
 
-const GRAPH = 'https://graph.facebook.com/v19.0';
+const GRAPH = 'https://graph.facebook.com/v24.0';
 
 export default async function handler(req, res) {
   // GET = one-time setup (registers this URL as the Telegram bot's webhook)

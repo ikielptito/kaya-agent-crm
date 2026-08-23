@@ -40,7 +40,7 @@ export default async function handler(req, res) {
   // already message — printed on the portal's "chat with Maya" buttons).
   if (req.method === 'GET' && req.query?.phone === '1') {
     try {
-      const pr = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}?fields=display_phone_number,verified_name`, {
+      const pr = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}?fields=display_phone_number,verified_name`, {
         headers: { Authorization: 'Bearer ' + TOKEN },
       });
       const pd = await pr.json();
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     let wabaId = WABA_ID;
     if (!wabaId) {
       const phoneRes = await fetch(
-        `https://graph.facebook.com/v19.0/${PHONE_ID}?fields=whatsapp_business_account`,
+        `https://graph.facebook.com/v24.0/${PHONE_ID}?fields=whatsapp_business_account`,
         { headers: { 'Authorization': 'Bearer ' + TOKEN } }
       );
       const phoneData = await phoneRes.json();
@@ -87,7 +87,7 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && req.body?.action === 'delete') {
       const { name } = req.body;
       if (!name) return res.status(400).json({ error: 'name required' });
-      const dr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`, {
+      const dr = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates?name=${encodeURIComponent(name)}`, {
         method: 'DELETE',
         headers: { 'Authorization': 'Bearer ' + TOKEN }
       });
@@ -115,7 +115,7 @@ export default async function handler(req, res) {
       const { waNum, kind, firstName, templateName, params, buttonSlug } = req.body;
       const to = String(waNum || '').replace(/\D/g, '');
       if (!to) return res.status(400).json({ error: 'waNum required' });
-      const GRAPH19 = 'https://graph.facebook.com/v19.0';
+      const GRAPH19 = 'https://graph.facebook.com/v24.0';
       let template;
       if (kind === 'carousel') {
         const cards = await listingCarouselCards();
@@ -162,13 +162,13 @@ export default async function handler(req, res) {
       // live. Requires the template id — look it up by name.
       const { name, body, example, language } = req.body;
       if (!name || !body) return res.status(400).json({ error: 'name and body required' });
-      const lookup = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=id,name,language&name=${encodeURIComponent(name)}&limit=20`, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
+      const lookup = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates?fields=id,name,language&name=${encodeURIComponent(name)}&limit=20`, { headers: { 'Authorization': 'Bearer ' + TOKEN } });
       const found = (await lookup.json())?.data || [];
       const target = found.find(t => !language || t.language === language) || found[0];
       if (!target?.id) return res.status(404).json({ error: `template "${name}" not found` });
       const bodyComponent = { type: 'BODY', text: body };
       if (Array.isArray(example) && example.length) bodyComponent.example = { body_text: [example] };
-      const er = await fetch(`https://graph.facebook.com/v19.0/${target.id}`, {
+      const er = await fetch(`https://graph.facebook.com/v24.0/${target.id}`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({ components: [bodyComponent] })
@@ -207,7 +207,7 @@ export default async function handler(req, res) {
           buttons: req.body.quickReplies.slice(0, 3).map(text => ({ type: 'QUICK_REPLY', text }))
         });
       }
-      const cr = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/message_templates`, {
+      const cr = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates`, {
         method: 'POST',
         headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -258,7 +258,7 @@ export default async function handler(req, res) {
         const tok = mkReportToken(slug);
         const masked = to.length > 4 ? '···' + to.slice(-4) : to;
         if (dryRun) { results.push({ to: masked, slug, name, views, enq, reportUrl: `https://sambarentals.com/r/${tok}`, dryRun: true }); continue; }
-        const send = await fetch(`https://graph.facebook.com/v19.0/${PHONE_ID}/messages`, {
+        const send = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
           method: 'POST', headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             messaging_product: 'whatsapp', to, type: 'template',
@@ -278,7 +278,7 @@ export default async function handler(req, res) {
     }
 
     const r = await fetch(
-      `https://graph.facebook.com/v19.0/${wabaId}/message_templates?fields=name,status,category,language,components,quality_score&limit=100`,
+      `https://graph.facebook.com/v24.0/${wabaId}/message_templates?fields=name,status,category,language,components,quality_score&limit=100`,
       { headers: { 'Authorization': 'Bearer ' + TOKEN } }
     );
     const data = await r.json();

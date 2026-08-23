@@ -10,8 +10,9 @@ import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_ME
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
+import crypto from 'node:crypto';
 
-const GRAPH = 'https://graph.facebook.com/v19.0';
+const GRAPH = 'https://graph.facebook.com/v24.0';
 
 // ── Team alerts (Maya → Ikiel / Era on WhatsApp) ───────────────────────
 // When Maya promises "I'll check with Ikiel" or needs villa manager Era on a
@@ -616,7 +617,27 @@ function costOfUsage(u, model = SONNET_MODEL) {
     + (u.cache_creation_input_tokens || 0) * r.cw;
 }
 
-export default async function handler(req, res) {
+// Raw body for signature verification. Vercel's Node helper parses JSON
+// bodies before we see them; with the parser disabled (config below) we read
+// the stream ourselves. If a runtime still hands us a parsed body, fall back
+// to it — the signature check is then skipped with a warning rather than
+// breaking inbound delivery.
+// The raw request bytes come from the Web-standard adapter at the bottom of
+// this file (request.text()). Vercel's Node helpers buffer and parse the body
+// before a (req, res) handler runs, so there is no other way to get the
+// exact bytes Meta signed.
+async function readRawBody(req) {
+  return req.rawBody != null ? Buffer.from(req.rawBody) : null;
+}
+function signatureValid(raw, header, secret) {
+  const sig = String(header || '');
+  if (!sig.startsWith('sha256=')) return false;
+  const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+  const a = Buffer.from(sig.slice(7)), b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+export async function nodeHandler(req, res) {
   const VERIFY_TOKEN = process.env.META_WA_VERIFY_TOKEN;
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
@@ -646,8 +667,26 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
+  // Meta signs every delivery with X-Hub-Signature-256 (HMAC-SHA256 of the
+  // raw body with the app secret). With META_APP_SECRET set, anything that
+  // doesn't verify is dropped — a forged POST could otherwise make Maya
+  // reply to a real agent, ping Era, and spend the Claude budget.
+  let body;
   try {
-    const body = req.body;
+    const raw = await readRawBody(req);
+    const APP_SECRET = process.env.META_APP_SECRET;
+    if (APP_SECRET) {
+      if (!raw) console.warn('webhook: raw body unavailable, signature check skipped');
+      else if (!signatureValid(raw, req.headers['x-hub-signature-256'], APP_SECRET)) {
+        return res.status(403).json({ error: 'Bad signature' });
+      }
+    }
+    body = raw ? JSON.parse(raw.toString('utf8') || '{}') : req.body;
+  } catch (e) {
+    return res.status(400).json({ error: 'Bad body: ' + e.message });
+  }
+
+  try {
     if (body.object !== 'whatsapp_business_account') return res.status(200).end();
 
     const value = body.entry?.[0]?.changes?.[0]?.value;
@@ -1622,7 +1661,7 @@ async function logOutbound(url, headers, agentId, waNum, content, waMessageId = 
 // callers fall back to the text-only "couldn't open it" prompt.
 async function fetchWaMediaBase64(mediaId, token) {
   const MAX_BYTES = 4.5 * 1024 * 1024; // Claude rejects images >5MB base64
-  const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+  const metaRes = await fetch(`https://graph.facebook.com/v24.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!metaRes.ok) return null;
   const meta = await metaRes.json();
   const mime = meta.mime_type || '';
@@ -1642,7 +1681,7 @@ async function fetchWaMediaBase64(mediaId, token) {
 async function archiveInboundDoc(supabaseUrl, supabaseKey, mediaId, filename, token) {
   const MAX_BYTES = 25 * 1024 * 1024;
   try {
-    const metaRes = await fetch(`https://graph.facebook.com/v19.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
+    const metaRes = await fetch(`https://graph.facebook.com/v24.0/${mediaId}`, { headers: { Authorization: `Bearer ${token}` } });
     if (!metaRes.ok) return null;
     const meta = await metaRes.json();
     if (!meta.url) return null;
@@ -2106,6 +2145,13 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${threadBlock}
+
+CONTINUITY — this is ONE running conversation, not a series of first contacts. Read the thread above before writing:
+- If you have already messaged this person in the thread, do not greet or introduce yourself again ("Hi Made --", "Saya Maya, asisten…"). Start with the substance. Introduce yourself only when the thread shows no message from you yet, or the person explicitly asks who they are talking to — and then in one clause, not a paragraph.
+- Mention Ikiel by name only if "Ikiel" does not already appear in any of your previous messages in the thread.
+- If your previous message asked a question that has not been answered, keep it alive: answer what they just said, then bring the open question back in one line. Never let a question you asked evaporate because the agent changed the subject.
+- Match the language of their LAST message, and stay in it; when they switch to Bahasa, switch with them without commenting on it beyond a word.
+- Never restate what you told them in your previous message; refer to it ("the list I sent above").
 ${campaignContext ? `
 
 CAMPAIGN-SPECIFIC FOCUS (this agent was reached via the "${campaignContext.name}" campaign — use this as your North Star for the current conversation; weave it in naturally rather than reciting it):
@@ -2876,3 +2922,40 @@ async function patchOwner(url, headers, ownerId, patch) {
     method: 'PATCH', headers, body: JSON.stringify(patch),
   }).catch(e => console.warn('patchOwner failed:', e.message));
 }
+
+// ── Web-standard entry point ──────────────────────────────────────────────
+// Vercel's (req, res) helpers consume the body before the handler runs, which
+// makes X-Hub-Signature-256 verification impossible. The Web signature hands
+// us the Request intact; this adapter gives nodeHandler the same `req`/`res`
+// shape it has always used, plus `req.rawBody` for the signature check.
+function makeRes() {
+  const r = { _status: 200, _headers: {}, _body: null, _type: null };
+  r.status = (c) => { r._status = c; return r; };
+  r.setHeader = (k, v) => { r._headers[k] = v; return r; };
+  r.json = (o) => { r._body = JSON.stringify(o); r._type = 'application/json'; return r; };
+  r.send = (b) => { r._body = b == null ? '' : (typeof b === 'string' ? b : String(b)); r._type = r._type || 'text/plain'; return r; };
+  r.end = (b) => { if (b != null) r._body = String(b); return r; };
+  r.toResponse = () => new Response(r._body, { status: r._status, headers: { ...(r._type ? { 'content-type': r._type } : {}), ...r._headers } });
+  return r;
+}
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const query = Object.fromEntries(url.searchParams.entries());
+    const headers = {};
+    for (const [k, v] of request.headers) headers[k.toLowerCase()] = v;
+    const rawBody = request.method === 'POST' ? await request.text() : '';
+    const req = {
+      method: request.method, url: request.url, query, headers, rawBody,
+      get body() { return rawBody ? JSON.parse(rawBody) : undefined; },
+    };
+    const res = makeRes();
+    try {
+      await nodeHandler(req, res);
+    } catch (e) {
+      console.error('webhook adapter: handler threw', e);
+      if (res._body == null) res.status(500).json({ error: e.message });
+    }
+    return res.toResponse();
+  },
+};

@@ -21,13 +21,12 @@
 
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { executeReplySideEffects, sendTextWithButtons } from './whatsapp-webhook.js';
+import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 
-const GRAPH = 'https://graph.facebook.com/v19.0';
+const GRAPH = 'https://graph.facebook.com/v24.0';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  setConsoleCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // fetch_media supports GET too so <img src="/api/whatsapp-send?fetch_media=ID"> works
@@ -35,6 +34,7 @@ export default async function handler(req, res) {
     return await handleFetchMedia(req, res, req.query.fetch_media, process.env.META_WA_TOKEN);
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (!consoleAuthorized(req)) return res.status(401).json({ error: 'Console key required' });
 
   const TOKEN = process.env.META_WA_TOKEN;
   const PHONE_ID = process.env.META_WA_PHONE_ID;

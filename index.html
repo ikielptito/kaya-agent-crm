@@ -23,6 +23,37 @@
 <link rel="apple-touch-icon" sizes="180x180" href="/brand/apple-touch-icon.png">
 <link rel="manifest" href="/samba.webmanifest">
 <meta name="theme-color" content="#F4F1ED">
+<script>
+// Console key: every same-origin /api/ call carries x-console-key (stored in
+// localStorage). A 401 prompts for the key once and retries. Set the server
+// side with the CONSOLE_SECRET env var; without it the gate is open.
+(function () {
+  const KEY = 'maya_console_key';
+  const orig = window.fetch.bind(window);
+  const isApi = (u) => { try { const x = new URL(u, location.href); return x.origin === location.origin && x.pathname.startsWith('/api/'); } catch (_) { return false; } };
+  async function ask() {
+    const v = window.prompt('Console key (from CONSOLE_SECRET):', '');
+    if (v && v.trim()) { localStorage.setItem(KEY, v.trim()); return v.trim(); }
+    return null;
+  }
+  window.fetch = async function (input, init) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (!isApi(url)) return orig(input, init);
+    const withKey = (i) => {
+      const key = localStorage.getItem(KEY);
+      const h = new Headers((i && i.headers) || (typeof input !== 'string' && input.headers) || {});
+      if (key) h.set('x-console-key', key);
+      return { ...(i || {}), headers: h };
+    };
+    let r = await orig(input, withKey(init));
+    if (r.status === 401) {
+      const k = await ask();
+      if (k) r = await orig(input, withKey(init));
+    }
+    return r;
+  };
+})();
+</script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
