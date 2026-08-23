@@ -2063,6 +2063,18 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
 // Maya WOULD say to the agent's latest message — e.g. to check a prompt change
 // against a real thread before it meets a real agent. `inbound` defaults to
 // the agent's most recent inbound message.
+// Console: attach an owner's chat-photo folder to one of their listings
+// (re-submits the existing slug with photosLink only; the portal fills gaps
+// and keeps everything else). Used to repair intakes submitted without photos.
+export async function attachOwnerPhotos({ SUPABASE_URL, sbHeaders, ownerId, slug }) {
+  const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}&select=*`, { headers: sbHeaders });
+  const owner = (await oRes.json())?.[0];
+  if (!owner) return { ok: false, error: 'owner not found' };
+  if (!owner.drive_folder_id || /^pending:/.test(owner.drive_folder_id)) return { ok: false, error: 'owner has no photo folder' };
+  const secret = process.env.LISTING_SYNC_SECRET;
+  return submitOwnerIntake(owner, { slug, photosLink: folderLink(owner.drive_folder_id), features: [] }, secret);
+}
+
 export async function previewAgentReply({ SUPABASE_URL, sbHeaders, ANTHROPIC_KEY, agent, inbound, mode, debug = false }) {
   let text = inbound;
   if (!text) {
@@ -2772,11 +2784,16 @@ async function submitOwnerIntake(owner, listing, secret) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
   const email = sanitizeOwnerEmail(listing.ownerEmail) || sanitizeOwnerEmail(owner.email);
+  // Photos the owner sent in chat live in their Drive folder; if Maya left
+  // photosLink empty the listing would go to review with "no photos" (Vila
+  // Lestari, 23 Aug 2026 — 13 photos saved, none on the listing). Fall back.
+  const ownerFolder = owner.drive_folder_id && !/^pending:/.test(String(owner.drive_folder_id)) ? folderLink(owner.drive_folder_id) : '';
+  const photosLink = String(listing.photosLink || '').trim() || ownerFolder;
   try {
     const data = {
       name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
       bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: normalizeMonthly(listing.monthly),
-      overview: listing.overview, photosLink: listing.photosLink, icalUrl: ical,
+      overview: listing.overview, photosLink, icalUrl: ical,
       features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
     };
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {

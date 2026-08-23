@@ -13,7 +13,7 @@ import { parseImageMarker } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
-import { previewAgentReply } from './whatsapp-webhook.js';
+import { previewAgentReply, attachOwnerPhotos } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
@@ -825,6 +825,13 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
 
     } else if (action === 'spend_allowance') {
       return res.status(200).json(await getSpendAllowance({ SUPABASE_URL, sbHeaders: headers }));
+
+    } else if (action === 'attach_owner_photos') {
+      // Attach an owner's chat-photo Drive folder to one of their listings.
+      const { ownerId, slug } = payload || {};
+      if (ownerId == null || !slug) return res.status(400).json({ error: 'ownerId and slug required' });
+      try { return res.status(200).json(await attachOwnerPhotos({ SUPABASE_URL, sbHeaders: headers, ownerId, slug })); }
+      catch (e) { return res.status(500).json({ error: e.message }); }
 
     } else if (action === 'relay_sweep') {
       // Run the hourly relay sweep now (nudge / expire / repair failed sends).
