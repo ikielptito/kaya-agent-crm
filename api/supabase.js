@@ -15,6 +15,7 @@ import webpush from 'web-push';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
 import { previewAgentReply } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
+import { sweepRelays } from '../lib/relay.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -816,6 +817,15 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       } catch (e) {
         return res.status(500).json({ error: 'preview failed: ' + e.message });
       }
+
+    } else if (action === 'relay_sweep') {
+      // Run the hourly relay sweep now (nudge / expire / repair failed sends).
+      const WA_TOKEN = process.env.META_WA_TOKEN, WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
+      try {
+        const out = await sweepRelays({ SUPABASE_URL, sbHeaders: headers }, { phoneId: WA_PHONE_ID, token: WA_TOKEN });
+        return res.status(200).json(out);
+      } catch (e) { return res.status(500).json({ error: 'sweep failed: ' + e.message }); }
 
     } else if (action === 'chase_listing_info') {
       // Run the listing-completeness chase now (the daily cron runs it at 9am
