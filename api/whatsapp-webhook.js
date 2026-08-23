@@ -271,10 +271,14 @@ function buildAvailabilityContext(digest) {
     const area = p.tag ? ` (${p.tag})` : '';
     return `- ${p.name}${area} [slug: ${p.slug}] — ${nowState}; ${next}; ${longw}${contact}`;
   });
-  return `SAMBA LIVE AVAILABILITY (as of ${asOf} WITA, ${digest.horizonDays || 180}-day horizon — this is real calendar data):
+  // NOTE: no timestamp in this block — it sits inside the cached prompt
+  // prefix, and "as of 09:05" changing every five minutes made every reply
+  // rewrite the cache instead of reading it. The date rides in systemRest.
+  void asOf; void today;
+  return `SAMBA LIVE AVAILABILITY (${digest.horizonDays || 180}-day horizon — this is real calendar data, refreshed every few minutes):
 ${lines.join('\n')}
 
-Today's date is ${today} (Bali/WITA). Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. The area in parentheses after each name is that villa's location — use it to answer location questions ("anything in Cemagi?"), even if the villa is missing from the portfolio knowledge above. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
+Use this block to answer Samba rental availability questions directly and confidently — whether a unit is free now, when it is next available, and what is open for a monthly (30+ night) stay. Refer to properties by name. The area in parentheses after each name is that villa's location — use it to answer location questions ("anything in Cemagi?"), even if the villa is missing from the portfolio knowledge above. You no longer need to push every availability question to the portal; the portal is still where agents get photos and share listings with clients.
 
 VIEWING CONTACTS — each property line above includes "enquire with: [Name] (+[Number])". When an agent asks who to contact for a viewing, visit, or booking, reply with EXACTLY the name and number shown in the property line above. NEVER use a name or number from your conversation history — ONLY the "enquire with" data above is correct. Previous replies in this thread may contain outdated or wrong contact info; ignore them and use only the structured data above.
 
@@ -478,7 +482,10 @@ const ACTIVE_HOUR_END = 21;   // 9pm WITA (inclusive of 9:xx, exclusive of 10pm)
 // dollars. At ~1.5–2¢ per real reply, $2.00 leaves room for ~100+ replies/day.
 // (Was briefly 0.75 while the flat estimate over-charged ~4×; raised to 2.00
 // once accurate costing landed.)
-const DAILY_SPEND_CAP_USD = 2.00;
+// One cap for the whole system (webhook, cron, catch-up): MAYA_DAILY_CAP_USD.
+// $2.00 was hit by early afternoon on 23 Aug 2026 and silently parked every
+// reply for the rest of the day (Anastasia's "1 br villa?" went unanswered).
+const DAILY_SPEND_CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10.00;
 
 // claude-sonnet-4-6 pricing (USD per token): $3/M input, $15/M output.
 // Cache read ≈ $0.30/M (0.1×), cache write ≈ $3.75/M (1.25×) — both 0 today
@@ -1286,9 +1293,11 @@ export async function nodeHandler(req, res) {
     if (!isTestContact) {
       const todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
       if (todaySpend >= DAILY_SPEND_CAP_USD) {
-        // Over cap: log + escalate as draft (no Claude call)
-        patch.suggested_reply = '[Maya is paused: daily spend cap reached. Please reply manually.]';
+        // Over cap: park as a draft (no Claude call) AND page Ikiel — this used
+        // to be silent, and a manual reply then wiped the only trace of it.
+        patch.suggested_reply = `[Maya is paused: daily spend cap reached ($${todaySpend.toFixed(2)} of $${DAILY_SPEND_CAP_USD.toFixed(2)}). Please reply manually or raise MAYA_DAILY_CAP_USD.]`;
         await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+        await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, `daily spend cap reached ($${todaySpend.toFixed(2)} of $${DAILY_SPEND_CAP_USD.toFixed(2)}) — Maya is paused for everyone until midnight WITA`);
         return res.status(200).end();
       }
     }
@@ -2151,6 +2160,8 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${threadBlock}
+
+Today's date is ${new Date().toISOString().slice(0, 10)} (Bali/WITA) — resolve "next week", "end of the month" etc. against it.
 
 CONTINUITY — this is ONE running conversation, not a series of first contacts. Read the thread above before writing:
 - If you have already messaged this person in the thread, do not greet or introduce yourself again ("Hi Made --", "Saya Maya, asisten…"). Start with the substance. Introduce yourself only when the thread shows no message from you yet, or the person explicitly asks who they are talking to — and then in one clause, not a paragraph.

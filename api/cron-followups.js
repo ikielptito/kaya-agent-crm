@@ -64,7 +64,7 @@ const STAGES_NEEDING_FOLLOWUP = ['agreement_requested', 'signed'];
 // this is the effective ceiling for the whole CRM's Claude spend. With accurate
 // per-token costing (see costOfUsage) + Haiku routing, this allows several
 // hundred replies/day, minus the weekly Opus self-review's ~$0.40 on Sundays.
-const DAILY_SPEND_CAP_USD = 2.50;
+const DAILY_SPEND_CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10.00;   // shared with the webhook
 // Forward-looking estimate used ONLY to gate whether the next Claude call would
 // exceed the cap. Actual spend is charged from real token usage (costOfUsage),
 // so this just needs to be a safe upper bound on one reply (~1.5-2¢ real).

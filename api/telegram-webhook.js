@@ -163,7 +163,7 @@ async function handleCommand(cmd, argsStr) {
       `📤 Outbound today: ${stats.outboundToday}\n` +
       `🔴 Unread agents: ${stats.unreadCount}\n` +
       `⏸ Paused conversations: ${stats.pausedCount}\n` +
-      `💰 Claude spend today: $${stats.spendToday.toFixed(2)} of $2.00`
+      `💰 Claude spend today: $${stats.spendToday.toFixed(2)} of $${(Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10).toFixed(2)}`
     );
     return;
   }

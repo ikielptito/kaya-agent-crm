@@ -1198,7 +1198,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!ANTHROPIC_KEY || !WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'Maya messaging env not configured' });
 
-      const CAP_USD = 2.00;
+      const CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10.00;   // shared cap
       const maxAgents = Math.min(Number(payload?.limit) || 60, 120);
       const sinceDays = Number(payload?.since_days) || 4;
       const sinceIso = new Date(Date.now() - sinceDays * 86400000).toISOString();
