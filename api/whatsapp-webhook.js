@@ -768,6 +768,16 @@ export default async function handler(req, res) {
         db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
       });
       if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
+      // Anything else from a team number is logged and left for a human. Era
+      // is never an agent lead and never an owner — the portal's owner sync
+      // can put her number on an owners row (Hostex overrides list her as
+      // the contact), and without this guard her free-text replies would be
+      // answered by owner-mode Maya as if she were listing a villa.
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: sbHeaders,
+        body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook' }),
+      }).catch(() => {});
+      return res.status(200).end();
     }
 
     // Find matching agent

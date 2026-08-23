@@ -1488,11 +1488,11 @@ const TEAM_NUMS = { '6281246357778': 'Era · villa manager' };
 // bare number. Matches by id first, then by number.
 function whoOf(m) {
   const num = String(m.wa_num || '').replace(/\D/g, '');
+  if (TEAM_NUMS[num]) return { kind: 'number', id: num, name: TEAM_NUMS[num], sub: 'Team line', init: 'E' };
   const a = (m.agent_id != null && state.agents.find(x => x.id === m.agent_id)) || state.agents.find(x => String(x.wa_num || '').replace(/\D/g, '') === num);
   if (a) return { kind: 'agent', id: a.id, name: a.name || a.agency || ('+' + num), sub: a.agency || '', init: initials(a.name, a.agency) };
   const o = (m.owner_id != null && state.owners.find(x => x.id === m.owner_id)) || state.owners.find(x => String(x.wa_num || '').replace(/\D/g, '') === num);
   if (o) return { kind: 'owner', id: o.id, name: o.name || ('+' + num), sub: 'Owner', init: initials(o.name, '') };
-  if (TEAM_NUMS[num]) return { kind: 'number', id: num, name: TEAM_NUMS[num], sub: 'Team line', init: 'E' };
   return { kind: 'number', id: num, name: '+' + num, sub: 'No record', init: '#' };
 }
 
