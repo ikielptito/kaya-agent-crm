@@ -1346,7 +1346,11 @@ export default async function handler(req, res) {
       // the answer back herself, instead of leaving the agent to chase it.
       if (aiResult.ask_owner) {
         const ao = aiResult.ask_owner;
-        const prop = (digest?.properties || []).find(p => p.slug === ao.slug);
+        // Maya emits the CRM slug (villa_rice); the digest carries the portal
+        // slug (villa-rice). Compare on the normalised form — the exact match
+        // never hit, so every relay went to Era instead of the listed contact.
+        const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
+        const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ao.slug));
         const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
         const contactName = prop?.waContactName || 'Era';
         try {
