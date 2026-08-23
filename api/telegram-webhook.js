@@ -7,6 +7,7 @@
 // register the webhook URL with Telegram and send a confirmation message.
 
 import { postToTelegram, extractAgentIdFromReply, telegramEnabled } from '../lib/telegram.js';
+import { computeAllowance } from '../lib/spend.js';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
 
@@ -163,7 +164,7 @@ async function handleCommand(cmd, argsStr) {
       `📤 Outbound today: ${stats.outboundToday}\n` +
       `🔴 Unread agents: ${stats.unreadCount}\n` +
       `⏸ Paused conversations: ${stats.pausedCount}\n` +
-      `💰 Claude spend today: $${stats.spendToday.toFixed(2)} of $${(Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10).toFixed(2)}`
+      `💰 Claude spend today: $${stats.spendToday.toFixed(2)} of $${(stats.cap || 10).toFixed(2)} (incl. rollover)`
     );
     return;
   }
@@ -261,13 +262,15 @@ async function getStats() {
       fetch(`${process.env.SUPABASE_URL}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers: sbHeaders() }).then(r => r.json())
     ]);
     const today = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const spendToday = settings?.[0]?.value?.[today] || 0;
+    const usage = settings?.[0]?.value || {};
+    const spendToday = usage[today] || 0;
+    const cap = computeAllowance(usage, today).cap;
     return {
       inboundToday: Array.isArray(inbound) ? inbound.length : 0,
       outboundToday: Array.isArray(outbound) ? outbound.length : 0,
       unreadCount: Array.isArray(unread) ? unread.length : 0,
       pausedCount: Array.isArray(paused) ? paused.length : 0,
-      spendToday
+      spendToday, cap
     };
   } catch (e) {
     return { inboundToday: 0, outboundToday: 0, unreadCount: 0, pausedCount: 0, spendToday: 0 };

@@ -24,6 +24,7 @@ import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
+import { getSpendAllowance } from '../lib/spend.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
@@ -259,9 +260,11 @@ export default async function handler(req, res) {
 
     // Initial spend check — abort if already over cap from inbox auto-replies today
     let todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
-    if (todaySpend >= DAILY_SPEND_CAP_USD) {
+    // Effective cap for today = base + unused rollover (lib/spend.js).
+    const SPEND_CAP_TODAY = (await getSpendAllowance({ SUPABASE_URL, sbHeaders })).cap;
+    if (todaySpend >= SPEND_CAP_TODAY) {
       await logCronRun({ kind: 'suspended', spend: +todaySpend.toFixed(2) });
-      return res.status(200).json({ ran_at: now.toISOString(), suspended: true, reason: `daily spend cap ($${DAILY_SPEND_CAP_USD}) already reached: $${todaySpend.toFixed(2)}` });
+      return res.status(200).json({ ran_at: now.toISOString(), suspended: true, reason: `spend cap ($${SPEND_CAP_TODAY.toFixed(2)} incl. rollover) already reached: $${todaySpend.toFixed(2)}` });
     }
 
     // Prune wa_messages older than retention window before doing anything else
@@ -348,7 +351,7 @@ export default async function handler(req, res) {
         if (existingDraft.startsWith('[')) continue;   // system status messages
         if (!agent.wa_num) continue;
         // Spend gate — regeneration costs ~$0.02 in Claude
-        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+        if (todaySpend + COST_PER_REPLY_USD >= SPEND_CAP_TODAY) {
           results.push({ agent: agent.name || agent.id, action: 'draft_skipped', reason: 'spend_cap' });
           continue;
         }
@@ -432,7 +435,7 @@ export default async function handler(req, res) {
         }
 
         // Spend gate
-        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+        if (todaySpend + COST_PER_REPLY_USD >= SPEND_CAP_TODAY) {
           results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_skipped', reason: 'spend_cap' });
           continue;
         }
@@ -493,7 +496,7 @@ export default async function handler(req, res) {
         }
 
         // Spend gate — abort if next Claude call would push us over the cap
-        if (todaySpend + COST_PER_REPLY_USD >= DAILY_SPEND_CAP_USD) {
+        if (todaySpend + COST_PER_REPLY_USD >= SPEND_CAP_TODAY) {
           results.push({ agent: agent.name || agent.id, project: projectName, action: 'skipped_spend_cap' });
           continue;
         }

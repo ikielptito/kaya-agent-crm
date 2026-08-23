@@ -17,6 +17,7 @@ import { previewAgentReply } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
+import { getSpendAllowance } from '../lib/spend.js';
 import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
@@ -822,6 +823,9 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(500).json({ error: 'preview failed: ' + e.message });
       }
 
+    } else if (action === 'spend_allowance') {
+      return res.status(200).json(await getSpendAllowance({ SUPABASE_URL, sbHeaders: headers }));
+
     } else if (action === 'relay_sweep') {
       // Run the hourly relay sweep now (nudge / expire / repair failed sends).
       const WA_TOKEN = process.env.META_WA_TOKEN, WA_PHONE_ID = process.env.META_WA_PHONE_ID;
@@ -1198,7 +1202,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!ANTHROPIC_KEY || !WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'Maya messaging env not configured' });
 
-      const CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10.00;   // shared cap
+      const CAP_USD = (await getSpendAllowance({ SUPABASE_URL, sbHeaders: headers })).cap;   // base + rollover (lib/spend.js)
       const maxAgents = Math.min(Number(payload?.limit) || 60, 120);
       const sinceDays = Number(payload?.since_days) || 4;
       const sinceIso = new Date(Date.now() - sinceDays * 86400000).toISOString();

@@ -11,6 +11,7 @@ import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } 
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
+import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
 import crypto from 'node:crypto';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
@@ -485,6 +486,7 @@ const ACTIVE_HOUR_END = 21;   // 9pm WITA (inclusive of 9:xx, exclusive of 10pm)
 // One cap for the whole system (webhook, cron, catch-up): MAYA_DAILY_CAP_USD.
 // $2.00 was hit by early afternoon on 23 Aug 2026 and silently parked every
 // reply for the rest of the day (Anastasia's "1 br villa?" went unanswered).
+// Base cap; the effective cap (with rollover) comes from lib/spend.js.
 const DAILY_SPEND_CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(process.env.MAYA_DAILY_CAP_USD) : 10.00;
 
 // claude-sonnet-4-6 pricing (USD per token): $3/M input, $15/M output.
@@ -1291,13 +1293,14 @@ export async function nodeHandler(req, res) {
 
     // SPEND CAP CHECK — pause Maya for the day if over $2 daily Claude spend
     if (!isTestContact) {
-      const todaySpend = await getTodaySpend(SUPABASE_URL, sbHeaders);
-      if (todaySpend >= DAILY_SPEND_CAP_USD) {
+      // Daily cap with rollover of unused allowance (lib/spend.js).
+      const allowance = await getSpendAllowance({ SUPABASE_URL, sbHeaders });
+      if (allowance.over) {
         // Over cap: park as a draft (no Claude call) AND page Ikiel — this used
         // to be silent, and a manual reply then wiped the only trace of it.
-        patch.suggested_reply = `[Maya is paused: daily spend cap reached ($${todaySpend.toFixed(2)} of $${DAILY_SPEND_CAP_USD.toFixed(2)}). Please reply manually or raise MAYA_DAILY_CAP_USD.]`;
+        patch.suggested_reply = `[Maya is paused: spend cap reached — ${describeAllowance(allowance)}. Reply manually or raise MAYA_DAILY_CAP_USD.]`;
         await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
-        await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, `daily spend cap reached ($${todaySpend.toFixed(2)} of $${DAILY_SPEND_CAP_USD.toFixed(2)}) — Maya is paused for everyone until midnight WITA`);
+        await alertGenerationFailure(SUPABASE_URL, sbHeaders, agent, `spend cap reached — ${describeAllowance(allowance)} — Maya is paused for everyone until midnight WITA`);
         return res.status(200).end();
       }
     }
