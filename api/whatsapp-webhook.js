@@ -1868,27 +1868,53 @@ function humanizeMarker(content) {
   } catch (_) { return `[Sent listing ${m[1]}]`; }
 }
 
-// Fetch the last 30 messages (both directions) for an agent, ordered oldest→newest.
-// Returns a formatted string like:
-//   [09:44] KAYA: Hi jules, I'm reaching out from KAYA Developments...
-//   [09:45] Agent: Yes please
-async function fetchRecentThread(url, headers, agentId) {
+// Titles carried by a [[card]]/[[carousel]] row, or null if the row isn't one.
+function cardTitles(content) {
+  const m = String(content || '').match(/^\s*\[\[(card|carousel)\]\]([\s\S]+)$/);
+  if (!m) return null;
+  try {
+    const data = JSON.parse(m[2]);
+    if (m[1] === 'card') return data.title ? [data.title] : [];
+    return (data.cards || []).map(x => x.title).filter(Boolean);
+  } catch (_) { return []; }
+}
+
+// Fetch the recent message thread (both directions) for an agent, oldest→newest.
+// Card/carousel rows are collapsed: a run of them (a single shortlist turn can
+// emit 5+ card rows) becomes ONE summary line instead of eating five slots, so
+// the window holds real conversational turns — where the client's criteria
+// (budget, bedrooms, pets, dates) live — far deeper into a long negotiation.
+// Ikiel, 23 Aug 2026: a stated budget was falling out of context behind a wall
+// of listing cards, and Maya lost the ceiling on the next refinement.
+async function fetchRecentThread(url, headers, agentId, limit = 45) {
   try {
     const r = await fetch(
-      `${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&order=timestamp.desc&limit=30`,
+      `${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&order=timestamp.desc&limit=${limit}`,
       { headers }
     );
     if (!r.ok) return '';
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return '';
-    // Reverse so oldest first
-    rows.reverse();
-    return rows.map(m => {
+    rows.reverse();                                        // oldest first
+    const lines = [];
+    let burst = [];                                        // pending collapsed cards
+    let burstTime = '';
+    const flushBurst = () => {
+      if (!burst.length) return;
+      const uniq = [...new Set(burst)];
+      lines.push(`[${burstTime}] KAYA Listings (Maya): [Sent ${uniq.length} listing card${uniq.length > 1 ? 's' : ''}: ${uniq.join(', ')}]`);
+      burst = [];
+    };
+    for (const m of rows) {
       const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
+      const titles = cardTitles(m.content);
+      if (titles) { burst.push(...titles); burstTime = t; continue; }
+      flushBurst();
       const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
-      const content = humanizeMarker(m.content || '').slice(0, 200);
-      return `[${t}] ${sender}: ${content}`;
-    }).join('\n');
+      lines.push(`[${t}] ${sender}: ${humanizeMarker(m.content || '').slice(0, 200)}`);
+    }
+    flushBurst();
+    return lines.join('\n');
   } catch (e) {
     return '';
   }
