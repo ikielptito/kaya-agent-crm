@@ -1545,10 +1545,8 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       //
       // Idempotent: files are named wa-<mediaId>, so anything already in the
       // target folder is skipped. Safe to re-run.
-      const secret = process.env.MAINT_SECRET;
-      if (!secret || (req.headers.authorization || '') !== `Bearer ${secret}`) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      // Gated by the console key (checked above for every action); the older
+      // MAINT_SECRET bearer is still accepted for scripts.
       const { ownerId, folderId: forceFolder, dryRun, limit } = payload || {};
       if (ownerId == null) return res.status(400).json({ error: 'ownerId required' });
       const WA_TOKEN = process.env.META_WA_TOKEN;
@@ -1560,8 +1558,12 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!owner) return res.status(404).json({ error: 'Unknown owner' });
 
       // Oldest → newest so the folder ends up in the order the owner sent them.
+      // Match by owner_id OR by the owner's number: photos an owner sent while
+      // still filed as an agent (Dony, 23 Aug 2026 — agent row converted to
+      // owner afterwards) carry agent_id, not owner_id.
+      const num = String(owner.wa_num || '').replace(/\D/g, '');
       const mRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${ownerId}&direction=eq.inbound&media_type=eq.image`
+        `${SUPABASE_URL}/rest/v1/wa_messages?or=(owner_id.eq.${ownerId}${num ? `,wa_num.eq.${num}` : ''})&direction=eq.inbound&media_type=eq.image`
         + `&media_id=not.is.null&order=timestamp.asc&limit=1000&select=media_id,timestamp`, { headers });
       const rows = await mRes.json();
       const mediaIds = [...new Set((Array.isArray(rows) ? rows : []).map(r => r.media_id).filter(Boolean))];
