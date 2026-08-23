@@ -1521,8 +1521,19 @@ function renderList() {
   if (state.seg === 'all') {
     const el = document.getElementById('convList');
     const q = state.query.trim().toLowerCase();
-    const rows = state.allMsgs
-      .filter(m => !q || `${whoOf(m).name} ${m.wa_num || ''} ${m.content || ''}`.toLowerCase().includes(q))
+    // One row per number — the latest message of each conversation — so the
+    // feed reads like an inbox, not a log. Search still matches any message
+    // in the window, but shows the conversation once.
+    const latest = new Map();
+    for (const m of state.allMsgs) {
+      const k = String(m.wa_num || '').replace(/\D/g, '') || ('id' + (m.agent_id ?? m.owner_id ?? m.id));
+      const cur = latest.get(k);
+      if (!cur || new Date(m.timestamp) > new Date(cur.timestamp)) latest.set(k, m);
+    }
+    const matches = q ? new Set(state.allMsgs.filter(m => `${whoOf(m).name} ${m.wa_num || ''} ${m.content || ''}`.toLowerCase().includes(q)).map(m => String(m.wa_num || '').replace(/\D/g, ''))) : null;
+    const rows = [...latest.entries()]
+      .filter(([k]) => !matches || matches.has(k))
+      .map(([, m]) => m)
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
     el.innerHTML = rows.length ? rows.map(feedRow).join('')
       : `<div class="empty">${q ? 'No messages match “' + esc(q) + '”' : 'No messages yet.'}</div>`;
