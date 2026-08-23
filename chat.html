@@ -727,6 +727,7 @@
       <input id="searchInput" type="text" placeholder="Search" oninput="state.query=this.value; renderList()">
     </div>
     <div class="people-seg" id="peopleSeg">
+      <button id="segAll" onclick="setSeg('all')" title="Every message on the Maya line, newest first — including the team line and numbers with no agent or owner record">All</button>
       <button id="segAgents" onclick="setSeg('agents')">Agents</button>
       <button id="segOwners" onclick="setSeg('owners')">Owners<span class="seg-badge" id="ownerSegBadge" style="display:none">0</span></button>
     </div>
@@ -861,7 +862,8 @@ const MODE_HINTS = {
 const state = {
   agents: [],          // all agent records
   owners: [],          // villa owners/managers (owner-mode threads)
-  seg: localStorage.getItem('maya_seg') === 'owners' ? 'owners' : 'agents',
+  seg: ['owners', 'all'].includes(localStorage.getItem('maya_seg')) ? localStorage.getItem('maya_seg') : 'agents',
+  allMsgs: [],
   msgMap: {},          // agent_id -> { lastTimestamp, lastContent, direction }
   activeId: null,
   query: '',
@@ -1094,6 +1096,10 @@ async function refreshAll(manual) {
     updateSegBadge();
     const newInboundAgents = [];
     if (Array.isArray(allMsgs)) {
+      // The unfiltered stream for the "All" segment — every row the line has
+      // seen lately, including team-line traffic (Era) and numbers that have
+      // no agent or owner record, which the other two segments can't show.
+      state.allMsgs = allMsgs.filter(m => !m.deleted_at);
       const map = {};
       const inbound = {};
       allMsgs.forEach(m => {
@@ -1435,12 +1441,13 @@ function timeAgo(d) {
 }
 
 function setSeg(seg) {
-  state.seg = seg === 'owners' ? 'owners' : 'agents';
+  state.seg = ['owners', 'all'].includes(seg) ? seg : 'agents';
   try { localStorage.setItem('maya_seg', state.seg); } catch (_) {}
   renderList();
 }
 function updateSegBadge() {
-  const sa = document.getElementById('segAgents'), so = document.getElementById('segOwners');
+  const sa = document.getElementById('segAgents'), so = document.getElementById('segOwners'), sl = document.getElementById('segAll');
+  if (sl) sl.classList.toggle('on', state.seg === 'all');
   if (sa) sa.classList.toggle('on', state.seg === 'agents');
   if (so) so.classList.toggle('on', state.seg === 'owners');
   const b = document.getElementById('ownerSegBadge');
@@ -1473,8 +1480,54 @@ function ownerRow(o) {
     </div>
   </div>`;
 }
+// Numbers that belong to our own team. Messages to/from them have no agent or
+// owner row, so they only ever surface in the "All" feed.
+const TEAM_NUMS = { '6281246357778': 'Era · villa manager' };
+
+// Who a message belongs to, for the "All" feed: agent, owner, team line, or a
+// bare number. Matches by id first, then by number.
+function whoOf(m) {
+  const num = String(m.wa_num || '').replace(/\D/g, '');
+  const a = (m.agent_id != null && state.agents.find(x => x.id === m.agent_id)) || state.agents.find(x => String(x.wa_num || '').replace(/\D/g, '') === num);
+  if (a) return { kind: 'agent', id: a.id, name: a.name || a.agency || ('+' + num), sub: a.agency || '', init: initials(a.name, a.agency) };
+  const o = (m.owner_id != null && state.owners.find(x => x.id === m.owner_id)) || state.owners.find(x => String(x.wa_num || '').replace(/\D/g, '') === num);
+  if (o) return { kind: 'owner', id: o.id, name: o.name || ('+' + num), sub: 'Owner', init: initials(o.name, '') };
+  if (TEAM_NUMS[num]) return { kind: 'number', id: num, name: TEAM_NUMS[num], sub: 'Team line', init: 'E' };
+  return { kind: 'number', id: num, name: '+' + num, sub: 'No record', init: '#' };
+}
+
+function feedRow(m) {
+  const w = whoOf(m);
+  const open = w.kind === 'agent' ? `openConv(${w.id})` : w.kind === 'owner' ? `openOwnerConv(${w.id})` : `openNumberConv('${w.id}')`;
+  const card = parseCardMarker(m.content);
+  const text = card ? (card.type === 'carousel' ? 'Property carousel' : 'Property listing') : String(m.content || '');
+  const by = m.direction === 'inbound' ? '' : (m.source === 'manual' ? 'You: ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
+  const st = m.status === 'failed' ? '<span class="pill pill-paused">Failed</span>' : '';
+  return `<div class="conv" onclick="${open}">
+    <div class="avatar">${esc(w.init)}</div>
+    <div class="conv-mid">
+      <div class="conv-name">${esc(w.name)}${w.sub ? ` <span style="font-weight:400;color:var(--wa-ink-2);font-size:12px">· ${esc(w.sub)}</span>` : ''}</div>
+      <div class="conv-snip">${esc(by + text.slice(0, 90))}</div>
+    </div>
+    <div class="conv-right">
+      <span class="conv-time">${timeAgo(new Date(m.timestamp))}</span>
+      <div class="conv-badges">${st}</div>
+    </div>
+  </div>`;
+}
+
 function renderList() {
   updateSegBadge();
+  if (state.seg === 'all') {
+    const el = document.getElementById('convList');
+    const q = state.query.trim().toLowerCase();
+    const rows = state.allMsgs
+      .filter(m => !q || `${whoOf(m).name} ${m.wa_num || ''} ${m.content || ''}`.toLowerCase().includes(q))
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    el.innerHTML = rows.length ? rows.map(feedRow).join('')
+      : `<div class="empty">${q ? 'No messages match “' + esc(q) + '”' : 'No messages yet.'}</div>`;
+    return;
+  }
   if (state.seg === 'owners') {
     const el = document.getElementById('convList');
     const q = state.query.trim().toLowerCase();
@@ -1651,6 +1704,39 @@ function openOwnerConv(id) {
   refreshThread(true);
 }
 
+// ── Number threads ('n'+digits): the team line (Era) and numbers with no
+// agent/owner record. Read-only — there is no record to attach a send to.
+function numberOf(activeId) {
+  return (typeof activeId === 'string' && activeId[0] === 'n') ? activeId.slice(1) : null;
+}
+function openNumberConv(num) {
+  state.activeId = 'n' + num;
+  document.getElementById('app').classList.add('show-thread');
+  document.getElementById('threadEmpty').style.display = 'none';
+  document.getElementById('threadView').style.display = 'flex';
+  setAssistantChrome(true);
+  document.getElementById('thAvatar').style.background = '';
+  state.replyTarget = null; renderReplyChip();
+  state.search = { q: '', matches: [], idx: 0 };
+  document.getElementById('threadSearch').style.display = 'none';
+  document.getElementById('emojiPop').style.display = 'none';
+  document.getElementById('qrPop').style.display = 'none';
+  state.threadMsgs = []; state.msgIndex = {};
+  state.threadHtml = null;
+  state.threadLastRead = null;
+  state.translateOn = false; updateTranslateBtn();
+  state.draftCards = [];
+  const label = TEAM_NUMS[num] || ('+' + num);
+  document.getElementById('thAvatar').textContent = TEAM_NUMS[num] ? 'E' : '#';
+  document.getElementById('thName').textContent = label;
+  document.getElementById('thSub').textContent = '+' + num + (TEAM_NUMS[num] ? ' · Team line' : ' · No agent or owner record');
+  document.getElementById('replyBox').value = '';
+  document.getElementById('threadBanner').innerHTML = '<div class="win-banner"><span>Read-only: this number has no agent or owner record. Add it as an agent or owner to reply from here.</span></div>';
+  document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
+  renderList();
+  refreshThread(true);
+}
+
 function renderOwnerBanner(o) {
   const el = document.getElementById('threadBanner');
   let html = '';
@@ -1730,9 +1816,12 @@ async function refreshThread(scroll) {
   const id = state.activeId;
   if (!id || id === ASSIST_ID) return;   // assistant thread renders locally
   const oid = ownerIdOf(id);
+  const num = numberOf(id);
   let msgs;
   try {
-    msgs = oid != null
+    msgs = num != null
+      ? await api('get_number_messages', { waNum: num })
+      : oid != null
       ? await api('get_owner_messages', { ownerId: oid })
       : await api('get_messages', { agentId: id });
   } catch (e) { return; }
@@ -2482,6 +2571,7 @@ async function suggest() {
 async function send() {
   const id = state.activeId; if (!id) return;
   if (id === ASSIST_ID) return sendAssistant();
+  if (numberOf(id) != null) return toast('Read-only thread — add this number as an agent or owner to reply.');
   const owner = activeOwner();
   if (owner) return sendOwner(owner);
   const a = state.agents.find(x => x.id === id); if (!a) return;

@@ -224,6 +224,15 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(r.status).json(data);
 
+    } else if (action === 'get_number_messages') {
+      // Every message to/from one number regardless of whether it has an
+      // agent or owner record — the team line (Era), orphans. Read-only use.
+      const num = String(payload?.waNum || '').replace(/\D/g, '');
+      if (!num) return res.status(400).json({ error: 'waNum required' });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&order=timestamp.desc&limit=200`, { headers });
+      const data = await r.json();
+      return res.status(r.status).json(data);
+
     } else if (action === 'get_last_inbound') {
       // For each agent_id in payload.agentIds, return the timestamp of their most recent inbound message
       const { agentIds } = payload || {};
