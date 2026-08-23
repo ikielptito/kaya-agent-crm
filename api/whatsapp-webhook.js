@@ -504,6 +504,14 @@ const HAIKU_MODEL = 'claude-haiku-4-5';
 // mid-object, the no-JSON fallback shipped the whole monologue as the draft.
 const REPLY_MAX_TOKENS = 4000;
 
+// Burst settle: how long an inbound waits before the supersede check, so two
+// messages that land seconds apart (or a run of photos, or a button tap plus
+// a line of text) see each other's rows and only the newest one replies.
+// Without it both invocations passed the check before either had stored its
+// row — the source of every double/triple reply in the logs (22 Aug 2026).
+const BURST_SETTLE_MS = 12_000;
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
 // JSON Schema for Maya's agent-reply contract, enforced server-side via
 // output_config.format (structured outputs). This makes "prose before the
 // JSON" impossible — the API only emits the object — so the regex-and-pray
@@ -1232,6 +1240,7 @@ export default async function handler(req, res) {
     // Fixes the duplicate-reply bug (e.g. Maya answering the same question
     // twice when an agent sends two messages seconds apart). Also saves the
     // Claude call for the superseded message.
+    await sleep(BURST_SETTLE_MS);
     if (await hasNewerInbound(SUPABASE_URL, sbHeaders, agent.id, timestamp, waMessageId)) {
       await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
       return res.status(200).end();
@@ -1333,6 +1342,14 @@ export default async function handler(req, res) {
       // Quick-reply buttons ride on the reply bubble when Maya offered any
       // (interactive message; falls back to plain text on any Meta rejection).
       const buttons = Array.isArray(aiResult.reply_buttons) ? aiResult.reply_buttons : [];
+      // Never send the same words twice within ten minutes (a retry or a
+      // second invocation that slipped past the supersede checks).
+      if (await sentRecently(SUPABASE_URL, sbHeaders, fromNum, aiResult.reply, 10)) {
+        console.log('duplicate reply suppressed for', fromNum);
+        patch.suggested_reply = ''; patch.unread_count = 0;
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+        return res.status(200).end();
+      }
       const replyMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply, buttons);
       const buttonsNote = buttons.length ? `\n[Buttons: ${buttons.join(' | ')}]` : '';
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply + buttonsNote, replyMid, null, aiResult.model);
@@ -1526,6 +1543,20 @@ async function hasNewerInbound(url, headers, agentId, ownTimestamp, ownWaMessage
     if (latestT > ownT) return true;
     return latestT === ownT && String(latest.wa_message_id) > String(ownWaMessageId);
   } catch (_) { return false; }
+}
+
+// True if an identical outbound text went to this number in the last N
+// minutes. Compares on a whitespace-normalised prefix so a trailing
+// "[Buttons: …]" note doesn't hide a repeat.
+async function sentRecently(url, headers, waNum, text, minutes = 10) {
+  try {
+    const since = new Date(Date.now() - minutes * 60e3).toISOString();
+    const r = await fetch(`${url}/rest/v1/wa_messages?wa_num=eq.${waNum}&direction=eq.outbound&timestamp=gte.${since}&select=content&limit=10`, { headers });
+    const rows = await r.json();
+    const norm = (t) => String(t || '').replace(/\n\[Buttons:.*$/s, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    const mine = norm(text);
+    return Array.isArray(rows) && rows.some(m => norm(m.content) === mine);
+  } catch { return false; }
 }
 
 async function logOutbound(url, headers, agentId, waNum, content, waMessageId = null, category = null, model = null) {
@@ -1820,7 +1851,19 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
   // photo + native "View listing" button, one card per property.
   if (cardSlugs.length) {
     try {
-      const cards = await resolveListingCards(cardSlugs, 4);
+      // One card per property per day to this number: the same four cards on
+      // eight consecutive turns was the most visible spam in the logs.
+      const fresh = [];
+      for (const slug of cardSlugs) {
+        const portalSlug = String(slug).replace(/_/g, '-');
+        try {
+          const since = new Date(Date.now() - 24 * 3600e3).toISOString();
+          const r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${toNum}&direction=eq.outbound&category=eq.listing_card&timestamp=gte.${since}&content=like.*property%3D${encodeURIComponent(portalSlug)}*&select=id&limit=1`, { headers: sbHeaders });
+          if ((await r.json())?.length) continue;
+        } catch { /* on doubt, send */ }
+        fresh.push(slug);
+      }
+      const cards = fresh.length ? await resolveListingCards(fresh, 4) : [];
       for (const card of cards) {
         const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, toNum, card);
         if (sent.waMessageId) {
@@ -2326,6 +2369,7 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   // 24 contradictory "all set!" messages in 43 seconds. The photo upload above
   // still runs for every image; only the REPLY is left to the newest message,
   // which sees the whole burst in its thread.
+  await sleep(BURST_SETTLE_MS);
   if (await hasNewerOwnerInbound(SUPABASE_URL, sbHeaders, owner.id, timestamp, waMessageId)) {
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
     return;
