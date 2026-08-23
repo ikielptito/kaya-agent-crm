@@ -1232,11 +1232,20 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         // unanswered). Broadcasts don't count as answers: a cron digest that
         // happens to land after an agent's question must not mask it (that hid
         // a real 27 Jul "1BR, 22jt budget" lead behind an availability digest).
-        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&or=(source.neq.cron,source.is.null)&order=timestamp.desc&limit=1&select=direction`, { headers });
+        const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${a.id}&or=(source.neq.cron,source.is.null)&order=timestamp.desc&limit=1&select=direction,timestamp`, { headers });
         const last = (await lastRes.json())?.[0];
         if (!last || last.direction !== 'inbound') {
           await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0 }) }).catch(() => {});
           results.push({ agent: a.name || a.id, skipped: 'already_answered' });
+          continue;
+        }
+        // WhatsApp only delivers free text within 24h of the agent's last
+        // message; outside it Meta accepts the send and fails it with 131047
+        // (every catch-up failure in the logs). Leave it for a human / a
+        // template rather than burning a Claude call on a message that
+        // cannot arrive. The draft stays so the inbox still shows it.
+        if (Date.now() - Date.parse(last.timestamp) > 24 * 3600e3) {
+          results.push({ agent: a.name || a.id, skipped: 'window_closed' });
           continue;
         }
 

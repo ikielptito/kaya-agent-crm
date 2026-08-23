@@ -1271,6 +1271,7 @@ export async function runAvailabilityNotifications(ctx) {
 
   // ── Kill switch + cohort filter ─────────────────────────────────
   const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
   if (!config.enabled) {
     summary.skipped_reason = 'samba_availability.enabled = false';
     return summary;
@@ -1629,6 +1630,7 @@ export async function runIntroSweep(ctx) {
   const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
 
   const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
   const cap = parseInt(config.intro_sweep_daily_cap, 10) || 0;
   if (!config.enabled || cap <= 0) {
     summary.skipped_reason = !config.enabled
@@ -1839,6 +1841,7 @@ function passesSambaBaseGate(agent, config) {
 // introduce them — it only ever served already-opted-in agents who happened
 // never to have been messaged.
 function isIntroEligible(agent, config) {
+  if (isMarketingCapped(agent, config)) return false;
   if (!passesSambaBaseGate(agent, config)) return false;
   // Already introduced and waiting on a reply — don't send a second one.
   const status = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
@@ -1846,8 +1849,17 @@ function isIntroEligible(agent, config) {
   return true;
 }
 
+// Meta per-user marketing cap (131049) recorded by the status webhook:
+// skip anyone capped until later than now. Missing/old entries → eligible.
+function isMarketingCapped(agent, config) {
+  const caps = config.marketingCaps || {};
+  const num = String(agent.wa_num || '').replace(/\D/g, '');
+  const c = caps[num];
+  return !!(c && c.until && Date.parse(c.until) > Date.now());
+}
 function isAvailabilityEligible(agent, config) {
   if (!agent.wa_num) return false;
+  if (isMarketingCapped(agent, config)) return false;
   if (agent.samba_alerts_opt_out) return false;
   if (agent.automation_override === 'paused' || agent.automation_override === 'off') return false;
   if (config.test_agents_only && !agent.is_test) return false;

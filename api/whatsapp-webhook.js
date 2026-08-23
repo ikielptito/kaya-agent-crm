@@ -680,9 +680,45 @@ export default async function handler(req, res) {
             try {
               const num = String(st.recipient_id).replace(/\D/g, '');
               const okRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&status=in.(delivered,read)&select=id&limit=1`, { headers: sh });
-              if (!((await okRes.json())?.length)) {
+              const neverDelivered = !((await okRes.json())?.length);
+              // …or the number HAS delivered before but the last two sends both
+              // failed undeliverable — a contact that went dead later (one
+              // agent took eleven consecutive failures before anyone noticed).
+              let twoInARow = false;
+              if (!neverDelivered) {
+                const lastRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&direction=eq.outbound&status=not.is.null&order=timestamp.desc&limit=2&select=status,error`, { headers: sh });
+                const last = await lastRes.json();
+                twoInARow = Array.isArray(last) && last.length === 2 && last.every(m => m.status === 'failed' && /\b131026\b/.test(m.error || ''));
+              }
+              if (neverDelivered || twoInARow) {
                 await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}`, {
                   method: 'PATCH', headers: sh, body: JSON.stringify({ dead_number: true })
+                }).catch(() => {});
+              }
+            } catch (_) {}
+          }
+          // 131049 = Meta's per-user marketing cap: this person doesn't engage
+          // with marketing templates and Meta is throttling us. Retrying within
+          // 24h can get us blocked for another 24h, so back off: record a cap
+          // until tomorrow (settings.marketing_caps, read by every broadcast
+          // loop). A third cap in a row drops them to a monthly digest.
+          if (errInfo && /\b131049\b/.test(errInfo) && st.recipient_id) {
+            try {
+              const num = String(st.recipient_id).replace(/\D/g, '');
+              const capRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.marketing_caps&select=value`, { headers: sh });
+              const caps = (await capRes.json())?.[0]?.value || {};
+              const prev = caps[num] || { count: 0 };
+              caps[num] = { until: new Date(Date.now() + 24 * 3600e3).toISOString(), count: (prev.count || 0) + 1, last: new Date().toISOString() };
+              // Prune entries older than 30 days so the blob stays small.
+              const cutoff = Date.now() - 30 * 86400e3;
+              for (const k of Object.keys(caps)) if (Date.parse(caps[k].last || 0) < cutoff) delete caps[k];
+              await fetch(`${SUPABASE_URL}/rest/v1/settings`, {
+                method: 'POST', headers: { ...sh, Prefer: 'resolution=merge-duplicates,return=minimal' },
+                body: JSON.stringify({ key: 'marketing_caps', value: caps })
+              }).catch(() => {});
+              if (caps[num].count >= 3) {
+                await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}&or=(contact_frequency.is.null,contact_frequency.eq.,contact_frequency.eq.weekly)`, {
+                  method: 'PATCH', headers: sh, body: JSON.stringify({ contact_frequency: 'monthly' })
                 }).catch(() => {});
               }
             } catch (_) {}
