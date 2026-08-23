@@ -25,6 +25,8 @@ import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
+import { sendNewArrivals } from '../lib/new-arrivals.js';
+import { noteNewArrivals } from '../lib/listing-live.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
@@ -625,6 +627,13 @@ export default async function handler(req, res) {
     if (!previewMode) {
       try { rentalsReconcile = await reconcileAllRentals({ SUPABASE_URL, headers: sbHeaders }); }
       catch (e) { rentalsReconcile = { error: e.message }; }
+      // Queue any listing seen live for the first time as a new arrival (the
+      // portal's save hook does this too; this is the safety net).
+      try {
+        const { fetchPortalListings } = await import('../lib/rental-sync.js');
+        const feed = await fetchPortalListings();
+        rentalsReconcile = { ...(rentalsReconcile || {}), new_arrivals: await noteNewArrivals({ SUPABASE_URL, sbHeaders }, feed.filter(l => !l.hidden).map(l => l.slug)) };
+      } catch (e) { /* best-effort */ }
     }
 
     // ── LISTING COMPLETENESS (daily) ─────────────────────────────────
@@ -1352,6 +1361,34 @@ export async function runAvailabilityNotifications(ctx) {
       ? diffImprovements(prevSnapshot, digest.properties)
       : { isFirstRun: true, items: [] };
 
+    // ── NEW ARRIVALS (wave 0, before the quiet-day early return) ──────
+    // Listings that went live since the last pass get their own carousel,
+  // ahead of (and excluded from) the regular availability alert. Audience:
+  // the event-alert tiers, not on a reduced frequency, no touch in 6h.
+  {
+    try {
+      const arrivalsAudience = agents.filter(a => isAvailabilityEligible(a, config)).filter(a => {
+        const tier = TIER_ALIASES[String(a.engagement_tier || '').toLowerCase()] || String(a.engagement_tier || '').toLowerCase() || DEFAULT_TIER;
+        if (TIER_EVENT_ALERTS[tier] !== true) return false;
+        const freq = String(a.contact_frequency || '').toLowerCase();
+        if (freq === 'paused' || freq === 'weekly' || freq === 'monthly') return false;
+        if (a.last_availability_alert_at && (now.getTime() - new Date(a.last_availability_alert_at).getTime()) < 6 * 3.6e6) return false;
+        return true;
+      });
+      summary.new_arrivals = await sendNewArrivals({ SUPABASE_URL: supabaseUrl, sbHeaders }, { phoneId: waPhoneId, token: waToken }, { eligible: arrivalsAudience, digestProperties: digest.properties, previewMode });
+      // Refresh the list so the regular alert respects the 6h touch guard.
+      if (summary.new_arrivals?.sent) {
+        const stamp = new Date().toISOString();
+        const sentIds = new Set(arrivalsAudience.map(a => a.id));
+        agents.forEach(a => { if (sentIds.has(a.id)) a.last_availability_alert_at = stamp; });
+      }
+      // Don't repeat an announced arrival as a "New:" bullet today.
+      const announced = (await loadSetting(supabaseUrl, sbHeaders, 'new_arrivals_announced')) || {};
+      if (improvements?.items?.length) improvements.items = improvements.items.filter(i => !(i.reason === 'new' && announced[i.slug]));
+    } catch (e) { summary.new_arrivals = { error: e.message }; }
+  }
+
+
     // First-ever run on this CRM: persist snapshot, send nothing (no baseline to diff against).
     if (improvements.isFirstRun && !isMonday) {
       await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
@@ -1380,6 +1417,7 @@ export async function runAvailabilityNotifications(ctx) {
 
   // ── Recipient filter ────────────────────────────────────────────
   const eligible = agents.filter(a => isAvailabilityEligible(a, config));
+
   // Staggered runs send to this wave's cohort only; bare runs send to everyone.
   const cohort = waveCount > 1 ? eligible.filter(a => a.id % waveCount === wave) : eligible;
   summary.recipients = cohort.length;

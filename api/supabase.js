@@ -18,7 +18,7 @@ import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
-import { announceListingLive } from '../lib/listing-live.js';
+import { announceListingLive, noteNewArrivals } from '../lib/listing-live.js';
 import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
@@ -153,12 +153,15 @@ export default async function handler(req, res) {
       // First time an owner listing is public (Approve in the admin): Maya
       // congratulates the owner with the link, the weekly report, the portal,
       // and what's still missing. Once per slug; best-effort.
-      let live = null;
+      let live = null, arrivals = null;
+      if (action === 'upsert' && !out.error) {
+        try { const { fetchPortalListings } = await import('../lib/rental-sync.js'); const feed = await fetchPortalListings(); arrivals = await noteNewArrivals({ SUPABASE_URL, sbHeaders: headers }, feed.filter(l => !l.hidden).map(l => l.slug)); } catch (e) { arrivals = { error: e.message }; }
+      }
       if (action === 'upsert' && !out.error && process.env.META_WA_TOKEN && process.env.META_WA_PHONE_ID) {
         try { live = await announceListingLive({ SUPABASE_URL, sbHeaders: headers }, { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, req.body.slug); }
         catch (e) { live = { sent: false, reason: e.message }; }
       }
-      return res.status(out.error ? 500 : 200).json({ ...out, live_notice: live });
+      return res.status(out.error ? 500 : 200).json({ ...out, live_notice: live, new_arrivals: arrivals });
     } catch (e) {
       return res.status(500).json({ error: 'rental sync failed: ' + e.message });
     }
@@ -841,6 +844,15 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       if (ownerId == null || !slug) return res.status(400).json({ error: 'ownerId and slug required' });
       try { return res.status(200).json(await attachOwnerPhotos({ SUPABASE_URL, sbHeaders: headers, ownerId, slug })); }
       catch (e) { return res.status(500).json({ error: e.message }); }
+
+    } else if (action === 'new_arrivals_note') {
+      // Scan the live feed for first-seen listings (seeds the seen-set on the
+      // very first call so the existing catalogue never broadcasts as new).
+      try {
+        const { fetchPortalListings } = await import('../lib/rental-sync.js');
+        const feed = await fetchPortalListings();
+        return res.status(200).json(await noteNewArrivals({ SUPABASE_URL, sbHeaders: headers }, feed.filter(l => !l.hidden).map(l => l.slug)));
+      } catch (e) { return res.status(500).json({ error: e.message }); }
 
     } else if (action === 'announce_listing_live') {
       // Send (or re-send with force) the "your listing is live" message for a slug.
