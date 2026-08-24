@@ -9,7 +9,7 @@ import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../l
 // plus the send/log machinery — shared with Maya's autoresponder and the
 // whatsapp-send 'cards' action.
 import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
-import { parseImageMarker } from '../lib/owner-onboarding.js';
+import { parseImageMarker, isColdProspect } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
@@ -375,9 +375,19 @@ export default async function handler(req, res) {
       const tl = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates?fields=name,status,language,components&limit=100`, {
         headers: { Authorization: 'Bearer ' + TOKEN }
       }).then(x => x.json()).catch(() => ({}));
-      const candidates = (tl.data || []).filter(t => /^samba_owner_onboard/.test(t.name) && t.status === 'APPROVED');
-      const tpl = candidates.find(t => (t.language || '').startsWith(wantLang)) || candidates[0];
-      if (!tpl) return res.status(400).json({ error: 'No approved samba_owner_onboard template yet — check template status' });
+      // A cold prospect (found advertising their villa, no prior contact) must
+      // NOT get the warm onboarding template — it claims "he mentioned you're
+      // happy to list", which is false for them. Prefer an approved cold
+      // template (samba_owner_cold*); only fall back to the warm one if no cold
+      // template exists yet, and flag that in the response so it's visible.
+      const cold = isColdProspect(own);
+      const approved = (tl.data || []).filter(t => t.status === 'APPROVED');
+      const coldTpls = approved.filter(t => /^samba_owner_cold/.test(t.name));
+      const warmTpls = approved.filter(t => /^samba_owner_onboard/.test(t.name));
+      const pool = cold ? (coldTpls.length ? coldTpls : warmTpls) : warmTpls;
+      const usedWarmForCold = cold && !coldTpls.length;
+      const tpl = pool.find(t => (t.language || '').startsWith(wantLang)) || pool[0];
+      if (!tpl) return res.status(400).json({ error: 'No approved owner intro template yet — check template status' });
       const fName = String(own.name || '').trim().split(/\s+/)[0] || 'there';
       const comps = [];
       const headerComp = (tpl.components || []).find(c => c.type === 'HEADER' && c.format === 'IMAGE');
@@ -411,7 +421,8 @@ export default async function handler(req, res) {
         method: 'PATCH', headers,
         body: JSON.stringify({ onboarding_status: 'contacted', suggested_reply: '' })
       }).catch(() => {});
-      return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language });
+      return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language,
+        ...(usedWarmForCold ? { warning: 'Cold prospect but no cold template approved — sent the WARM template, which implies a prior agreement. Create + approve a samba_owner_cold template so cold sends open honestly.' } : {}) });
 
     } else if (action === 'upsert_campaign') {
       r = await fetch(SUPABASE_URL + '/rest/v1/campaigns', {
