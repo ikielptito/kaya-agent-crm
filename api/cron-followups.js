@@ -1046,8 +1046,8 @@ async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, 
     return r.ok;
   } catch (e) { return false; }
 }
-export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID }) {
-  if (!WA_TOKEN || !WA_PHONE_ID) return { skipped: 'no WhatsApp credentials' };
+export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, preview = false }) {
+  if (!preview && (!WA_TOKEN || !WA_PHONE_ID)) return { skipped: 'no WhatsApp credentials' };
   const secret = process.env.LISTING_SYNC_SECRET;
   const r = await fetch(`${SUPABASE_URL}/rest/v1/owners?opt_in=eq.true&report_enabled=eq.true&select=*`, { headers: sbHeaders });
   if (!r.ok) return { error: `owners fetch ${r.status}` };
@@ -1055,6 +1055,7 @@ export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN
   const list = Array.isArray(owners) ? owners : [];
   const sixDaysAgo = Date.now() - 6 * 86400000;
   let sent = 0, skipped = 0, failed = 0;
+  const plan = [];
 
   // WHO OWNS EACH VILLA'S REPORT. `listing_slugs` is the set of villas a number
   // is connected to, which is not the same question: Era is the enquiry contact
@@ -1096,6 +1097,9 @@ export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN
     const num = String(o.wa_num || '').replace(/\D/g, '');
     const slugs = recipientOf ? linked.filter(s => recipientOf(s) === num) : linked;
     if (!slugs.length) { skipped++; continue; }
+    // Preview: report the routing plan without sending anything or touching
+    // dedupe state, so a report-contact change can be checked immediately.
+    if (preview) { plan.push({ owner: o.name, wa_num: num, villas: slugs }); continue; }
     // Per-owner dedupe stays a single scalar: checked once before the loop,
     // stamped once after. A mid-loop failure therefore won't re-send the
     // earlier villas next run — accepted trade-off; failures are counted.
@@ -1129,7 +1133,7 @@ export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN
       }).catch(() => {});
     }
   }
-  return { considered: list.length, sent, skipped, failed };
+  return { considered: list.length, sent, skipped, failed, ...(preview ? { plan, routing: recipientOf ? 'per-villa (portal owner feed)' : 'per-owner fallback (feed unavailable)' } : {}) };
 }
 
 // Merge an engagement into ONE pipeline bucket, preserving the other pipeline's

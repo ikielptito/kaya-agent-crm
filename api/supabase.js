@@ -478,6 +478,17 @@ export default async function handler(req, res) {
       const pd = await pr.json().catch(() => ({}));
       return res.status(pr.status).json(pd);
 
+    } else if (action === 'report_routing') {
+      // Dry run of the weekly owner report: who would receive which villas.
+      // Runs the real send path with preview, so it can't drift from reality.
+      const { sendWeeklyOwnerReports } = await import('./cron-followups.js');
+      const out = await sendWeeklyOwnerReports({
+        SUPABASE_URL, sbHeaders: headers,
+        WA_TOKEN: process.env.META_WA_TOKEN, WA_PHONE_ID: process.env.META_WA_PHONE_ID,
+        preview: true,
+      });
+      return res.status(200).json(out);
+
     } else if (action === 'sync_owners') {
       // Run the portal owner-sync on demand (normally daily from the cron), so
       // a report-contact change can be verified without waiting a day.
