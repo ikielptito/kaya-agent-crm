@@ -476,6 +476,14 @@ export default async function handler(req, res) {
       const pd = await pr.json().catch(() => ({}));
       return res.status(pr.status).json(pd);
 
+    } else if (action === 'team_numbers') {
+      // The WhatsApp numbers the system already uses to reach the team, so
+      // console data-hygiene work doesn't have to guess which number is whose.
+      return res.status(200).json({
+        era: String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, ''),
+        ikiel: String(process.env.OWNER_WA_NUM || '').replace(/\D/g, '') || null,
+      });
+
     } else if (action === 'wa_template_status') {
       const { name } = payload || {};
       const TOKEN = process.env.META_WA_TOKEN, WABA_ID = process.env.META_WABA_ID;
