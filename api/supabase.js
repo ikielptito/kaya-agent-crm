@@ -478,6 +478,13 @@ export default async function handler(req, res) {
       const pd = await pr.json().catch(() => ({}));
       return res.status(pr.status).json(pd);
 
+    } else if (action === 'sync_owners') {
+      // Run the portal owner-sync on demand (normally daily from the cron), so
+      // a report-contact change can be verified without waiting a day.
+      const { syncOwners } = await import('../lib/rental-sync.js');
+      const out = await syncOwners({ SUPABASE_URL, headers });
+      return res.status(out?.error ? 502 : 200).json(out);
+
     } else if (action === 'team_numbers') {
       // The WhatsApp numbers the system already uses to reach the team, so
       // console data-hygiene work doesn't have to guess which number is whose.
