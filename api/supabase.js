@@ -453,6 +453,58 @@ export default async function handler(req, res) {
       if (!cr.ok) return res.status(cr.status).json({ error: cd?.error?.message || 'template create failed', details: cd?.error || null });
       return res.status(200).json({ ok: true, id: cd.id || null, status: cd.status || null, category: cd.category || null, name: tplBody.name, language: tplBody.language });
 
+    } else if (action === 'owner_prospect_from_image') {
+      // Read a screenshot of a villa rental listing (FB Marketplace / ad / WA)
+      // and extract the owner's name, WhatsApp number and villa details, so a
+      // cold prospect can be created without retyping. Opus 5 — number accuracy
+      // matters (a misread digit messages a stranger) and volume is tiny.
+      const { imageBase64, mediaType } = payload || {};
+      const KEY = process.env.ANTHROPIC_API_KEY;
+      if (!KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+      if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
+      const mt = /^image\/(png|jpe?g|webp|gif)$/.test(mediaType || '') ? mediaType : 'image/jpeg';
+      const sys = `You read a screenshot of a Bali villa RENTAL listing (Facebook Marketplace, an ad, or a WhatsApp/Instagram post) and extract the details needed to reach out to the owner. Return ONLY a JSON object, no prose:
+{"is_listing": true|false (is this actually a villa/property rental listing?),
+ "owner_name": string|null (the person or business advertising — often the poster's name),
+ "wa_num": string|null (the WhatsApp/phone number as DIGITS ONLY in Indonesian international format: convert a leading 0 to 62, e.g. 081339632893 -> 6281339632893; keep a +62/62 number as-is without the plus. If several numbers appear, pick the one labelled WA/WhatsApp/contact. NEVER invent digits — if unsure or none visible, use null),
+ "area": string|null (neighbourhood/area, e.g. Berawa, Canggu),
+ "beds": string|null, "baths": string|null,
+ "price_month": string|null (as written, e.g. "IDR 16,000,000/month"),
+ "price_year": string|null,
+ "lang": "en"|"id" (the language to open the conversation in — "id" if the listing/owner is clearly Indonesian, else "en"),
+ "summary": string (one line describing the villa + price, for a consent/context note),
+ "confidence": "high"|"medium"|"low" (low if the number is unclear or partly hidden),
+ "notes": string (anything ambiguous — multiple numbers, blurry digits, not clearly a rental)}`;
+      const visBody = {
+        model: 'claude-opus-5', max_tokens: 1000, system: sys,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: mt, data: imageBase64 } },
+          { type: 'text', text: 'Extract the listing as JSON.' },
+        ] }],
+      };
+      const ar = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'x-api-key': KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+        body: JSON.stringify(visBody),
+      });
+      const ad = await ar.json().catch(() => ({}));
+      if (!ar.ok || ad.type === 'error') return res.status(502).json({ error: ad?.error?.message || `vision HTTP ${ar.status}` });
+      const txt = (ad.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+      let parsed;
+      try { parsed = JSON.parse((txt.match(/\{[\s\S]*\}/) || [txt])[0]); }
+      catch (e) { return res.status(502).json({ error: 'could not parse extraction', raw: txt.slice(0, 500) }); }
+      const num = normIndoMobile(parsed.wa_num) || String(parsed.wa_num || '').replace(/\D/g, '');
+      // Flag if this number is already an agent or owner, so the UI can warn.
+      let collision = null;
+      if (num && num.length >= 10) {
+        const [ag, ow] = await Promise.all([
+          fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}&select=id,name,agency`, { headers }).then(x => x.json()).catch(() => []),
+          fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${num}&select=id,name,onboarding_status`, { headers }).then(x => x.json()).catch(() => []),
+        ]);
+        if (ag?.[0]) collision = { type: 'agent', ...ag[0] };
+        else if (ow?.[0]) collision = { type: 'owner', ...ow[0] };
+      }
+      return res.status(200).json({ ok: true, extracted: parsed, wa_num: num && num.length >= 10 ? num : null, collision });
+
     } else if (action === 'upsert_campaign') {
       r = await fetch(SUPABASE_URL + '/rest/v1/campaigns', {
         method: 'POST',

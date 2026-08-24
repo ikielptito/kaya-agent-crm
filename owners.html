@@ -131,6 +131,10 @@
   <div class="modal">
     <h2>Add owner prospect</h2>
     <div class="sub2">An owner Maya will onboard on WhatsApp — the intro message only goes out when you press "Send intro" on their thread.</div>
+    <label style="text-transform:none;font-weight:600">📷 From a listing screenshot</label>
+    <div class="sub2">Upload a screenshot of the villa ad — Maya reads the owner's number and details and fills the form below. Always eyeball the number before sending.</div>
+    <input type="file" id="p-image" accept="image/*" onchange="prospectFromImage(this.files[0])" />
+    <div class="sub2" id="p-image-status" style="display:none;margin-top:4px"></div>
     <label>Name *</label>
     <input id="p-name" placeholder="e.g. Made Wirawan" />
     <label>WhatsApp number *</label>
@@ -313,6 +317,33 @@ async function send(){
 // ── Add owner prospect (verbally agreed, Maya onboards them) ──
 function openProspectModal(){ document.getElementById('prospect-modal').classList.add('open'); document.getElementById('p-warn').style.display='none'; }
 document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='p-cold'){ document.getElementById('p-cold-hint').style.display = e.target.checked ? 'block' : 'none'; } });
+
+// Feed Maya a screenshot of a listing → she extracts owner name + WhatsApp
+// number + details and pre-fills the form (marked cold). You verify the number
+// and press Add prospect.
+async function prospectFromImage(file){
+  if(!file) return;
+  const st=document.getElementById('p-image-status'); st.style.display='block'; st.textContent='Maya is reading the screenshot…';
+  try{
+    const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=rej; r.readAsDataURL(file); });
+    const r = await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action:'owner_prospect_from_image',payload:{imageBase64:b64,mediaType:file.type}})});
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
+    const e = d.extracted||{};
+    if(e.is_listing===false){ st.textContent="⚠ That doesn't look like a rental listing — fill the form manually if you like."; return; }
+    if(e.owner_name) document.getElementById('p-name').value = e.owner_name;
+    if(d.wa_num) document.getElementById('p-wa').value = d.wa_num;
+    document.getElementById('p-lang').value = e.lang==='id' ? 'id' : 'en';
+    document.getElementById('p-note').value = 'Cold outreach — ' + (e.summary || 'found the villa advertised for rent') + (e.area ? ' ('+e.area+')' : '');
+    document.getElementById('p-cold').checked = true; document.getElementById('p-cold-hint').style.display='block';
+    let msg = '✓ Read it. ';
+    if(!d.wa_num) msg += 'No clear WhatsApp number found — please add it manually. ';
+    else if(e.confidence!=='high') msg += 'Double-check the number (confidence: '+(e.confidence||'?')+'). ';
+    if(d.collision) msg += `⚠ This number is already a ${d.collision.type} ("${d.collision.name||d.collision.agency||''}"). `;
+    st.textContent = msg + 'Verify, then press Add prospect.';
+  }catch(err){ st.textContent = '⚠ '+(err.message||'could not read image'); }
+}
 function closeProspectModal(){ document.getElementById('prospect-modal').classList.remove('open'); }
 async function saveProspect(){
   const name=document.getElementById('p-name').value.trim();
