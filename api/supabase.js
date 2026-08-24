@@ -457,6 +457,25 @@ export default async function handler(req, res) {
       if (!cr.ok) return res.status(cr.status).json({ error: cd?.error?.message || 'template create failed', details: cd?.error || null });
       return res.status(200).json({ ok: true, id: cd.id || null, status: cd.status || null, category: cd.category || null, name: tplBody.name, language: tplBody.language });
 
+    } else if (action === 'create_portal_listing') {
+      // Create/update a listing on the portal from the console (service-authed
+      // intake, same path Maya's owner intake uses). Lands as pending_review in
+      // the approval queue. payload: { slug?, waNumber, waContactName,
+      // ownerEmail?, data: { name, area, tag, unitType, bedrooms, bathrooms,
+      // monthly, yearly?, overview, photosLink, features, ... } }
+      const { slug, waNumber, waContactName, ownerEmail, data } = payload || {};
+      const secret = process.env.LISTING_SYNC_SECRET;
+      if (!secret) return res.status(500).json({ error: 'LISTING_SYNC_SECRET not configured' });
+      if (!data || !data.name) return res.status(400).json({ error: 'data.name required' });
+      if (!waNumber && !ownerEmail) return res.status(400).json({ error: 'waNumber or ownerEmail required' });
+      const pr = await fetch('https://sambarentals.com/api/portal?action=intake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ slug: slug || '', waNumber: String(waNumber || '').replace(/\D/g, ''), ownerEmail: ownerEmail || '', waContactName: waContactName || '', data }),
+      });
+      const pd = await pr.json().catch(() => ({}));
+      return res.status(pr.status).json(pd);
+
     } else if (action === 'wa_template_status') {
       const { name } = payload || {};
       const TOKEN = process.env.META_WA_TOKEN, WABA_ID = process.env.META_WABA_ID;
