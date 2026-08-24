@@ -457,6 +457,18 @@ export default async function handler(req, res) {
       if (!cr.ok) return res.status(cr.status).json({ error: cd?.error?.message || 'template create failed', details: cd?.error || null });
       return res.status(200).json({ ok: true, id: cd.id || null, status: cd.status || null, category: cd.category || null, name: tplBody.name, language: tplBody.language });
 
+    } else if (action === 'delete_wa_template') {
+      const { name } = payload || {};
+      const TOKEN = process.env.META_WA_TOKEN, WABA_ID = process.env.META_WABA_ID;
+      if (!TOKEN || !WABA_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
+      if (!name) return res.status(400).json({ error: 'name required' });
+      const dr = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates?name=${encodeURIComponent(name)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${TOKEN}` },
+      });
+      const dd = await dr.json().catch(() => ({}));
+      if (!dr.ok) return res.status(dr.status).json({ error: dd?.error?.message || 'delete failed' });
+      return res.status(200).json({ ok: true, deleted: name });
+
     } else if (action === 'owner_prospect_from_image') {
       // Read a screenshot of a villa rental listing (FB Marketplace / ad / WA)
       // and extract the owner's name, WhatsApp number and villa details, so a
