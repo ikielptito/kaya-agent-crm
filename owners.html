@@ -325,9 +325,19 @@ async function prospectFromImage(file){
   if(!file) return;
   const st=document.getElementById('p-image-status'); st.style.display='block'; st.textContent='Maya is reading the screenshot…';
   try{
-    const b64 = await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(',')[1]); r.onerror=rej; r.readAsDataURL(file); });
+    // Downscale large phone screenshots (canvas → JPEG) so the request stays
+    // well under the serverless body limit and uploads fast.
+    const b64 = await new Promise((resolve,reject)=>{
+      const img=new Image();
+      img.onload=()=>{ let w=img.naturalWidth||img.width, h=img.naturalHeight||img.height; const max=1600;
+        if(Math.max(w,h)>max){ const s=max/Math.max(w,h); w=Math.round(w*s); h=Math.round(h*s); }
+        const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(img,0,0,w,h);
+        resolve(c.toDataURL('image/jpeg',0.85).split(',')[1]); };
+      img.onerror=reject;
+      const fr=new FileReader(); fr.onload=()=>{ img.src=fr.result; }; fr.onerror=reject; fr.readAsDataURL(file);
+    });
     const r = await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'owner_prospect_from_image',payload:{imageBase64:b64,mediaType:file.type}})});
+      body:JSON.stringify({action:'owner_prospect_from_image',payload:{imageBase64:b64,mediaType:'image/jpeg'}})});
     const d = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
     const e = d.extracted||{};
