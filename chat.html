@@ -704,6 +704,7 @@
       <div class="list-head-top">
         <div class="list-title">Maya</div>
         <button class="refresh-btn" id="quickAddBtn" onclick="openQuickAdd()" title="Add new agent" aria-label="Add new agent" data-ic="contacts"></button>
+        <button class="refresh-btn" id="addOwnerBtn" onclick="openAddOwner()" title="Add a villa owner — screenshot a listing and Maya reads the number" aria-label="Add villa owner from screenshot" data-ic="camera"></button>
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)" aria-label="Answer waiting agents" data-ic="resume"></button>
         <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats" aria-label="Backfill contacts" data-ic="magnet"></button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics" aria-label="Analytics" data-ic="chart"></button>
@@ -1302,6 +1303,93 @@ function openQuickAdd() {
       <button class="qa-submit" id="qaSubmit" type="submit">Add & Send Welcome</button>
     </form></div></div></div>`;
   document.getElementById('qaName').focus();
+}
+
+// ── Add villa owner (screenshot a listing → Maya reads the number) ────────
+function openAddOwner() {
+  document.getElementById('modalHost').innerHTML =
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add villa owner</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitAddOwner(event, false)">
+      <div class="qa-field"><label>📷 Screenshot a listing</label>
+        <input id="aoImage" type="file" accept="image/*" onchange="extractOwnerImage(this.files[0])">
+        <div style="font-size:12px;color:var(--wa-ink-2)">Upload the villa ad — Maya reads the owner's name, WhatsApp number and details and fills this in. Always eyeball the number before sending.</div>
+        <div id="aoImgStatus" style="font-size:12px;margin-top:4px;display:none"></div></div>
+      <div class="qa-field"><label>Name *</label><input id="aoName" required autocomplete="off"></div>
+      <div class="qa-field"><label>WhatsApp number *</label><input id="aoNum" required placeholder="+62 812 3456 7890" inputmode="tel" autocomplete="off"></div>
+      <div class="qa-field"><label>Language</label><select id="aoLang"><option value="en" selected>English</option><option value="id">Bahasa Indonesia</option></select></div>
+      <div class="qa-field"><label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0"><input id="aoCold" type="checkbox" checked style="width:auto"> Cold outreach (no prior contact — found them advertising)</label></div>
+      <div class="qa-field"><label>Context</label><textarea id="aoNote" rows="2" placeholder="e.g. Advertising the villa for rent on FB Marketplace"></textarea></div>
+      <div id="aoResult"></div>
+      <div style="display:flex;gap:8px">
+        <button class="qa-submit" id="aoSaveBtn" type="submit" style="flex:1;background:var(--wa-panel-2);color:var(--wa-ink)">Add prospect</button>
+        <button class="qa-submit" id="aoSendBtn" type="button" onclick="submitAddOwner(event, true)" style="flex:1">Add &amp; Send intro</button>
+      </div>
+    </form></div></div></div>`;
+}
+
+async function extractOwnerImage(file) {
+  if (!file) return;
+  const st = document.getElementById('aoImgStatus'); st.style.display = 'block'; st.style.color = 'var(--wa-ink-2)'; st.textContent = 'Maya is reading the screenshot…';
+  try {
+    const b64 = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => { let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height; const max = 1600;
+        if (Math.max(w, h) > max) { const s = max / Math.max(w, h); w = Math.round(w*s); h = Math.round(h*s); }
+        const c = document.createElement('canvas'); c.width = w; c.height = h; c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.85).split(',')[1]); };
+      img.onerror = reject;
+      const fr = new FileReader(); fr.onload = () => { img.src = fr.result; }; fr.onerror = reject; fr.readAsDataURL(file);
+    });
+    const d = await api('owner_prospect_from_image', { imageBase64: b64, mediaType: 'image/jpeg' });
+    const e = (d && d.extracted) || {};
+    if (e.is_listing === false) { st.textContent = "⚠ That doesn't look like a rental listing — fill the form manually if you like."; return; }
+    if (e.owner_name) document.getElementById('aoName').value = e.owner_name;
+    if (d.wa_num) document.getElementById('aoNum').value = d.wa_num;
+    document.getElementById('aoLang').value = e.lang === 'id' ? 'id' : 'en';
+    document.getElementById('aoNote').value = 'Cold outreach — ' + (e.summary || 'found the villa advertised for rent') + (e.area ? ' (' + e.area + ')' : '');
+    document.getElementById('aoCold').checked = true;
+    let msg = '✓ Read it. ';
+    if (!d.wa_num) msg += 'No clear WhatsApp number — add it manually. ';
+    else if (e.confidence !== 'high') msg += 'Double-check the number (confidence: ' + (e.confidence || '?') + '). ';
+    if (d.collision) msg += `⚠ Already a ${d.collision.type} ("${d.collision.name || d.collision.agency || ''}"). `;
+    st.textContent = msg + 'Verify, then Add.';
+  } catch (err) { st.style.color = '#c5221f'; st.textContent = '⚠ ' + (err.message || 'could not read image'); }
+}
+
+async function submitAddOwner(e, sendIntro) {
+  e.preventDefault();
+  const result = document.getElementById('aoResult');
+  const saveBtn = document.getElementById('aoSaveBtn'), sendBtn = document.getElementById('aoSendBtn');
+  const name = document.getElementById('aoName').value.trim();
+  const wa = document.getElementById('aoNum').value.trim();
+  if (!name || !wa) { result.className = 'qa-result err'; result.textContent = 'Name and WhatsApp number are required'; return; }
+  const lang = document.getElementById('aoLang').value;
+  const note = document.getElementById('aoNote').value.trim();
+  const cold = document.getElementById('aoCold').checked;
+  saveBtn.disabled = true; sendBtn.disabled = true; sendBtn.textContent = sendIntro ? 'Sending…' : 'Adding…';
+  result.className = 'qa-result'; result.textContent = '';
+  try {
+    // add_owner_prospect can 409 on a duplicate — read the body ourselves.
+    const ar = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add_owner_prospect', payload: { name, waNum: wa, lang, consentNote: note, cold } }) });
+    const ad = await ar.json().catch(() => ({}));
+    if (!ar.ok) throw new Error(ad.error || ('HTTP ' + ar.status));
+    const ownerId = ad.owner && ad.owner.id;
+    let msg = 'Added.';
+    if (ad.agentCollision) msg = `Added — but note this number is also agent "${ad.agentCollision.name || ad.agentCollision.agency || 'unknown'}".`;
+    if (sendIntro && ownerId) {
+      const sr = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send_onboard_intro', payload: { id: ownerId } }) });
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) { result.className = 'qa-result err'; result.textContent = 'Added, but intro NOT sent — ' + (sd.error || ('HTTP ' + sr.status)); refreshAll(true); saveBtn.disabled = false; sendBtn.disabled = false; sendBtn.textContent = 'Add & Send intro'; return; }
+      msg = `Intro sent to ${name} (${sd.template}).`;
+    }
+    result.className = 'qa-result ok'; result.textContent = msg;
+    await refreshAll(true);
+    setTimeout(() => { closeModal(); setSeg('owners'); if (ownerId && state.owners.some(o => o.id === ownerId)) openOwnerConv(ownerId); }, 1600);
+  } catch (err) {
+    result.className = 'qa-result err'; result.textContent = err.message || 'Failed — try again';
+    saveBtn.disabled = false; sendBtn.disabled = false; sendBtn.textContent = 'Add & Send intro';
+  }
 }
 
 async function submitQuickAdd(e) {
