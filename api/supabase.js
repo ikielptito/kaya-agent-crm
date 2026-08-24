@@ -333,7 +333,7 @@ export default async function handler(req, res) {
 
     // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
     } else if (action === 'add_owner_prospect') {
-      const { name, waNum, consentNote, lang, promoCode } = payload || {};
+      const { name, waNum, consentNote, lang, promoCode, cold } = payload || {};
       const num = normIndoMobile(waNum) || String(waNum || '').replace(/\D/g, '');
       if (!num || num.length < 10) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
       if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
@@ -350,6 +350,9 @@ export default async function handler(req, res) {
           wa_num: num, name: String(name).trim(),
           onboarding_status: 'agreed', opt_in: true,
           consent_note: String(consentNote || '').trim() || null,
+          // cold = no prior relationship; the onboarding pitch reads this
+          // (via notes) and opens honestly instead of implying a prior "yes".
+          notes: cold ? 'cold_outreach' : null,
           lang: lang === 'id' ? 'id' : 'en',
           promo_code: String(promoCode || 'FOUNDING25').trim().toUpperCase(),
         })
