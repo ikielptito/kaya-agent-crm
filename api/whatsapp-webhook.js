@@ -6,7 +6,7 @@ import { createAgentRow } from '../lib/agents.js';
 import { patchAgent, applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { transcribeWaAudio } from '../lib/transcribe.js';
-import { isProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
+import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
@@ -2697,6 +2697,12 @@ async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, 
     const agentReach = await fetchAgentReach(db.SUPABASE_URL, db.sbHeaders);
     onboardingBlock = buildOnboardingPitch({ owner, agentReach });
   }
+  // Cold outreach is the hardest, highest-value, lowest-volume conversation
+  // Maya has — a first impression on a skeptical stranger, where tact and
+  // judgement decide whether a villa ever gets listed. Spend the strong model
+  // on it; everything else (warm onboarding, a listed owner's routine question)
+  // stays on Sonnet. Ikiel, 24 Aug 2026.
+  const ownerModel = (prospect && isColdProspect(owner)) ? 'claude-opus-5' : 'claude-sonnet-4-6';
 
   const system = `You are Maya, listings coordinator for Samba Realty in Bali. You are messaging on WhatsApp with a villa OWNER / property manager — a partner and client, not a sales agent. Be warm, concise, first-name friendly, and never salesy.
 
@@ -2761,14 +2767,14 @@ Use "report" to fetch real numbers before answering a performance question (set 
         headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
         // 2500 (was 700): intake turns carry a whole listing object, and a
         // truncated one is now a hard failure rather than a garbled draft.
-        body: JSON.stringify(deepWellFormed({ model: 'claude-sonnet-4-6', max_tokens: 2500, system, messages })),
+        body: JSON.stringify(deepWellFormed({ model: ownerModel, max_tokens: 2500, system, messages })),
       });
       llmCalls++;
       const data = await res.json();
       if (!res.ok || data.type === 'error') {
         return { action: 'escalate', reply: '', error: data?.error?.message || `HTTP ${res.status}`, llm_calls: llmCalls, cost_usd: costUsd };
       }
-      costUsd += data.usage ? costOfUsage(data.usage) : FALLBACK_COST_PER_REPLY_USD;
+      costUsd += data.usage ? costOfUsage(data.usage, ownerModel) : FALLBACK_COST_PER_REPLY_USD;
       // Truncated / non-JSON output is a generation failure (loud marker via
       // ai.error), never a draft — same rule as the agent path.
       const { parsed, raw, error: parseErr } = parseReplyJson(data);
