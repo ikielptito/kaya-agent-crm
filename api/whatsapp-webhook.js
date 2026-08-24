@@ -216,6 +216,61 @@ async function alertGenerationFailure(supabaseUrl, sbHeaders, agent, errMsg) {
   } catch (_) { /* never block or fail the webhook on alerting */ }
 }
 
+// Remove an agent from availability updates, send the gracious goodbye, and log
+// it. Shared by the keyword fast-path (pre-Claude) and the intent path (Maya
+// read the message as an opt-out). Mutates `patch` and patches the agent.
+async function applyOptOut(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, patch, { trimmed, evidence, timestamp, fromNum, reason }) {
+  patch.samba_alerts_opt_out = true;
+  const eng = { ...(agent.campaign_engagement || {}) };
+  if (eng.samba) eng.samba = { ...eng.samba, status: 'unsubscribed', status_updated_at: timestamp };
+  patch.campaign_engagement = eng;
+  await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+
+  const bahasa = /\b(tidak|ga|gak|jangan|hapus|salah|berhenti|nomor)\b/i.test(trimmed || '');
+  const confirmText = bahasa
+    ? 'Siap, noted — nomor ini sudah saya hapus dari update Samba. Kalau suatu saat mau menerima info lagi, tinggal kabari saya ya 🙏'
+    : "Noted — you've been removed from availability updates. If you ever want to hear from us again, just let me know.";
+  if (WA_TOKEN && WA_PHONE_ID) {
+    const confirmMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
+    await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText, confirmMid);
+  }
+  await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+    method: 'POST', headers: sbHeaders,
+    body: JSON.stringify({
+      agent_id: agent.id, field: 'samba_alerts_opt_out', new_value: 'true',
+      reason: reason || 'Agent asked to be removed', evidence: String(evidence || trimmed || '').slice(0, 200),
+      by_maya: false, created_at: new Date().toISOString(),
+    })
+  }).catch(e => console.warn('maya_updates opt-out log failed:', e.message));
+}
+
+// Page Ikiel the moment an agent sounds unhappy — whatever Maya replies. Per-
+// agent 6h throttle so one rough thread doesn't spam. Ikiel, 23 Aug 2026: a
+// prospect wrote "this ai does not work for me" and nobody was told with any
+// urgency; Maya sent a chirp instead.
+async function alertFrustration(supabaseUrl, sbHeaders, agent, msgText) {
+  try {
+    const key = 'frustration_alerts';
+    const r = await fetch(`${supabaseUrl}/rest/v1/settings?key=eq.${key}&select=value`, { headers: sbHeaders });
+    const map = (await r.json())?.[0]?.value || {};
+    const last = map[agent?.id];
+    if (last && (Date.now() - new Date(last).getTime()) < 6 * 3600e3) return;
+    map[agent?.id] = new Date().toISOString();
+    await fetch(`${supabaseUrl}/rest/v1/settings`, {
+      method: 'POST', headers: { ...sbHeaders, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ key, value: map }),
+    }).catch(() => {});
+    const who = agent?.name || agent?.agency || `+${agent?.wa_num}`;
+    const snippet = String(msgText || '').replace(/\s+/g, ' ').slice(0, 140);
+    await sendPushNotifications(supabaseUrl, sbHeaders, {
+      title: '⚠️ Unhappy agent — take a look', body: `${who}: "${snippet}"`, agentId: agent?.id,
+    }).catch(() => {});
+    await postToTelegram(
+      `⚠️ <b>Agent sounds frustrated</b> (${who})\n\n"${snippet.replace(/[<>&]/g, '')}"\n\nOpen the thread in the inbox — Maya has been told to de-escalate and drop the sales motion.`
+    ).catch(() => {});
+  } catch (_) { /* alerting never blocks the webhook */ }
+}
+
 // In-memory cache for projects (warm container only). 60s TTL.
 let _projectsCache = null;
 let _projectsCacheAt = 0;
@@ -536,6 +591,31 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const nullable = (schema) => ({ anyOf: [{ type: 'null' }, schema] });
 const strObj = (props, required = Object.keys(props)) => ({ type: 'object', properties: props, required, additionalProperties: false });
 const MAYA_REPLY_SCHEMA = strObj({
+  // Filled FIRST (schema order = generation order) so the read of WHO Maya is
+  // talking to shapes everything after it. intent = what this message is;
+  // engagement = how warm they are; waiting_on = whose turn it is; wants_out =
+  // they want to be left alone. This is the durable replacement for the pile of
+  // opt-out/hold keyword regexes — routing decisions read these, not phrases.
+  // Ikiel, 23 Aug 2026.
+  counterparty: strObj({
+    intent: { type: 'string', enum: ['asking', 'briefing', 'refining', 'scheduling', 'closing', 'pausing', 'rejecting', 'opting_out', 'frustrated', 'chitchat', 'other'] },
+    engagement: { type: 'string', enum: ['hot', 'warm', 'cooling', 'cold'] },
+    waiting_on: { type: 'string', enum: ['us', 'them', 'nobody'] },
+    wants_out: { type: 'boolean' },
+  }),
+  // The running client brief, updated each turn from the WHOLE thread (null
+  // when there is no client brief in play). Persisted so criteria never fall
+  // out of the message window; injected back on the next turn.
+  client_brief: nullable(strObj({
+    budget_max_month: { type: 'string' },
+    beds: { type: 'string' },
+    baths: { type: 'string' },
+    area: { type: 'string' },
+    pets: { type: 'string' },
+    dates: { type: 'string' },
+    stay_length: { type: 'string' },
+    stage: { type: 'string' },
+  })),
   // Filled BEFORE reply (schema order = generation order): when the agent gave
   // client criteria, one entry per Samba rental with a fit verdict. Forces the
   // "scan every property" rule to actually happen — in free text Maya skipped
@@ -1197,37 +1277,10 @@ export async function nodeHandler(req, res) {
     const OPT_OUT_NOT_RE = /\?|\b(but|tapi|however|do you have|ada (villa|unit|yang)|looking for|cari|instead)\b/i;
     const optOutHit = trimmed && (OPT_OUT_RE.test(trimmed) || (trimmed.length <= 160 && OPT_OUT_NL_RE.test(trimmed) && !OPT_OUT_NOT_RE.test(trimmed)));
     if (optOutHit) {
-      patch.samba_alerts_opt_out = true;
-      const eng = { ...(agent.campaign_engagement || {}) };
-      if (eng.samba) {
-        eng.samba = { ...eng.samba, status: 'unsubscribed', status_updated_at: timestamp };
-      }
-      patch.campaign_engagement = eng;
-      await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
-
-      const bahasa = /\b(tidak|ga|gak|jangan|hapus|salah|berhenti|nomor)\b/i.test(trimmed);
-      const confirmText = bahasa
-        ? 'Siap, noted — nomor ini sudah saya hapus dari update Samba. Kalau suatu saat mau menerima info lagi, tinggal kabari saya ya 🙏'
-        : 'Noted — you\'ve been removed from availability updates. If you ever want to re-subscribe, just let me know.';
-      if (WA_TOKEN && WA_PHONE_ID) {
-        const confirmMid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, confirmText);
-        await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, confirmText, confirmMid);
-      }
-
-      // Audit trail in maya_updates
-      await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
-        method: 'POST', headers: sbHeaders,
-        body: JSON.stringify({
-          agent_id: agent.id,
-          field: 'samba_alerts_opt_out',
-          new_value: 'true',
-          reason: OPT_OUT_RE.test(trimmed) ? 'Agent sent opt-out keyword' : 'Agent declined in natural language',
-          evidence: text.trim().slice(0, 200),
-          by_maya: false,
-          created_at: new Date().toISOString(),
-        })
-      }).catch(e => console.warn('maya_updates opt-out log failed:', e.message));
-
+      await applyOptOut(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, patch, {
+        trimmed, evidence: text, timestamp, fromNum,
+        reason: OPT_OUT_RE.test(trimmed) ? 'Agent sent opt-out keyword' : 'Agent declined in natural language',
+      });
       return res.status(200).end();
     }
 
@@ -1361,6 +1414,42 @@ export async function nodeHandler(req, res) {
     }
     if (Array.isArray(aiResult.crm_actions) && aiResult.crm_actions.length > 0) {
       await applyCrmActions(SUPABASE_URL, sbHeaders, agent, aiResult.crm_actions, text);
+    }
+
+    // Persist Maya's read of the conversation onto the history blob so the SLA
+    // sweep and the next turn use it directly, not a keyword guess. The running
+    // client brief is merged (new non-empty fields win; a field she leaves
+    // blank keeps its earlier value) so criteria never fall out of the window.
+    const cp = aiResult.counterparty || null;
+    {
+      const prevBrief = (agent.conversation_history && agent.conversation_history.brief) || {};
+      const incoming = aiResult.client_brief && typeof aiResult.client_brief === 'object'
+        ? Object.fromEntries(Object.entries(aiResult.client_brief).filter(([, v]) => v != null && String(v).trim() !== ''))
+        : {};
+      const mergedBrief = { ...prevBrief, ...incoming };
+      patch.conversation_history = {
+        ...(patch.conversation_history || updatedHistory),
+        ...(cp ? { state: { intent: cp.intent, engagement: cp.engagement, waiting_on: cp.waiting_on, wants_out: cp.wants_out, at: timestamp } } : {}),
+        ...(Object.keys(mergedBrief).length ? { brief: mergedBrief } : {}),
+      };
+    }
+
+    // INTENT-BASED OPT-OUT — the durable catch the keyword list can't cover.
+    // Maya read the message as wanting out; honour it with the same gracious
+    // removal as the keyword path, and stop. (Obvious opt-outs were already
+    // short-circuited pre-Claude above.)
+    if (cp && (cp.wants_out || cp.intent === 'opting_out')) {
+      await applyOptOut(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, patch, {
+        trimmed: String(text || '').trim(), evidence: text, timestamp, fromNum,
+        reason: 'Maya read the message as an opt-out (intent)',
+      });
+      return res.status(200).end();
+    }
+
+    // FRUSTRATION FLAG — page Ikiel immediately when an agent is unhappy,
+    // whatever Maya is about to reply. Throttled per-agent.
+    if (cp && cp.intent === 'frustrated') {
+      await alertFrustration(SUPABASE_URL, sbHeaders, agent, text);
     }
 
     // SUPERSEDE CHECK #2 (post-generation) — a newer message may have landed
@@ -2198,12 +2287,35 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
   ALWAYS attach native listing cards on this overview — set "send_cards" to up to 4 rental slugs (your best, most-available, most-representative picks; ideally spread across price/area so the agent sees the range). The system sends each as a rich WhatsApp card (cover photo, rate, native "View listing" button) right after your text — that IS how the agent sees the listings.
   Do NOT paste the sambarentals.com URL or any raw link in this message — the cards carry both the photos and the links. You may refer to "the portal" in words ("the rest are on the portal, and you can download photos there to share with clients"), and invite them to ask about any specific property so you can send its card. On subsequent Samba responses, just refer to "the portal" in words if relevant — never paste the bare URL as a stand-in for cards.`;
 
+  // Running client brief carried from earlier turns (stored in
+  // conversation_history.brief). Injected so a stated budget/bedroom count can
+  // never fall out of the message window mid-negotiation.
+  const knownBrief = agent.conversation_history?.brief;
+  const briefBlock = (knownBrief && typeof knownBrief === 'object' && Object.entries(knownBrief).some(([k, v]) => v && k !== 'stage'))
+    ? `\nKNOWN CLIENT BRIEF (carried from earlier in this thread — every non-empty field is still in force unless the agent changes it; keep it current in client_brief):\n${Object.entries(knownBrief).filter(([k, v]) => v).map(([k, v]) => `- ${k.replace(/_/g, ' ')}: ${v}`).join('\n')}\n`
+    : '';
+
   const systemRest = `This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${threadBlock}
-
+${briefBlock}
 Today's date is ${new Date().toISOString().slice(0, 10)} (Bali/WITA) — resolve "next week", "end of the month" etc. against it.
+
+READING THE PERSON ("counterparty") — fill this FIRST, before the reply:
+- intent: what THIS message is — asking a question, giving/refining a client brief, arranging a viewing (scheduling), closing off, pausing, rejecting an option, opting out entirely, venting frustration, chit-chat, or other.
+- engagement: hot / warm / cooling / cold. Short flat replies, "we already have that", one-word answers, going quiet = cooling or cold.
+- waiting_on: whose turn it is — "us" (they asked something and await us), "them" (you asked, or they said they'd send/check/get back), or "nobody" (the exchange has naturally closed).
+- wants_out: true if they want to be left alone / removed / deleted / to stop hearing from us, in ANY wording ("please delete", "this doesn't work for me", "stop", "not interested").
+
+TEMPERATURE — match their energy, never push against it:
+- hot/warm: help fully; one clear next step; a question only if it moves things forward.
+- cooling: ease off. Answer what they asked, at most ONE light question, no stacked buttons, no re-pitching. Give them room.
+- cold / "not now" / "we already have it": do NOT push more options or brochures. Acknowledge warmly, leave the door open in one line ("all good — I'm here whenever you need something"), and stop. A graceful exit keeps the relationship; pressure ends it.
+- wants_out true or intent opting_out: brief, gracious acknowledgement only — do not sell, do not ask questions (the system handles removal).
+- intent frustrated: de-escalate first, apologise plainly, drop the sales motion, keep it short (Ikiel is paged in parallel).
+
+CLIENT BRIEF ("client_brief") — keep a running profile of the CURRENT client across the WHOLE thread, refreshed every turn (null only when there is genuinely no client in play). Fill budget_max_month, beds, baths, area, pets, dates, stay_length and stage from everything the agent has said, not just the latest line. This is your memory of what they want: a stated budget stays in force until they change it.
 
 CONTINUITY — this is ONE running conversation, not a series of first contacts. Read the thread above before writing:
 - If you have already messaged this person in the thread, do not greet or introduce yourself again ("Hi Made --", "Saya Maya, asisten…"). Start with the substance. Introduce yourself only when the thread shows no message from you yet, or the person explicitly asks who they are talking to — and then in one clause, not a paragraph.
@@ -2360,6 +2472,16 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
       return {
         action: parsed.action === 'auto' ? 'auto' : 'escalate',
         reply: parsed.reply || '',
+        // Maya's read of who she's talking to — drives opt-out, frustration
+        // paging, and the SLA hold decision. Normalised with safe defaults.
+        counterparty: (parsed.counterparty && typeof parsed.counterparty === 'object') ? {
+          intent: String(parsed.counterparty.intent || 'other'),
+          engagement: String(parsed.counterparty.engagement || 'warm'),
+          waiting_on: String(parsed.counterparty.waiting_on || 'us'),
+          wants_out: !!parsed.counterparty.wants_out,
+        } : null,
+        // The running client brief (null when no brief in play).
+        client_brief: (parsed.client_brief && typeof parsed.client_brief === 'object') ? parsed.client_brief : null,
         // Maya's per-property fit verdicts (client briefs only). Not acted on
         // by the handler; surfaced by preview_reply so a recommendation can be
         // audited against what she actually considered.
