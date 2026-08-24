@@ -1055,13 +1055,46 @@ export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN
   const list = Array.isArray(owners) ? owners : [];
   const sixDaysAgo = Date.now() - 6 * 86400000;
   let sent = 0, skipped = 0, failed = 0;
+
+  // WHO OWNS EACH VILLA'S REPORT. `listing_slugs` is the set of villas a number
+  // is connected to, which is not the same question: Era is the enquiry contact
+  // on Villa Umah Astanine (Ikiel's villa) AND the owner of Villa Bula, so a
+  // per-owner rule would either send her someone else's report or none at all.
+  // The portal's owner feed tags each (listing, contact) row 'ops' or 'report',
+  // so exactly one number is the report recipient per villa: the dedicated
+  // report contact when a listing has one, otherwise its operational contact.
+  // Ikiel, 24 Aug 2026. If the feed can't be read we fall back to the old
+  // per-owner behaviour rather than skipping the week's reports.
+  let recipientOf = null;
+  try {
+    const fr = await fetch(`${PORTAL_BASE}/api/dashboard?owner_sync=1`, {
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+    });
+    if (fr.ok) {
+      const rows = (await fr.json())?.owners;
+      if (Array.isArray(rows) && rows.length) {
+        const bySlug = new Map();
+        for (const row of rows) {
+          if (!row?.slug || !row?.waNumber) continue;
+          const num = String(row.waNumber).replace(/\D/g, '');
+          const cur = bySlug.get(row.slug);
+          // A 'report' row always wins; otherwise the first 'ops' row stands.
+          if (row.role === 'report' || !cur) bySlug.set(row.slug, { num, role: row.role || 'ops' });
+        }
+        recipientOf = (slug) => bySlug.get(slug)?.num || null;
+      }
+    }
+  } catch (_) { /* fall through to per-owner behaviour */ }
   for (const o of list) {
     // EVERY listing this contact is linked to gets its own report message —
     // a multi-villa owner used to receive only listing_slugs[0], leaving
     // their other villas silently unreported. The template has exactly 4
     // body params and no villa-name slot, so villa identity lives in each
     // message's signed report link.
-    const slugs = Array.isArray(o.listing_slugs) ? o.listing_slugs.filter(Boolean) : [];
+    const linked = Array.isArray(o.listing_slugs) ? o.listing_slugs.filter(Boolean) : [];
+    // Only the villas THIS number is the report recipient for (see above).
+    const num = String(o.wa_num || '').replace(/\D/g, '');
+    const slugs = recipientOf ? linked.filter(s => recipientOf(s) === num) : linked;
     if (!slugs.length) { skipped++; continue; }
     // Per-owner dedupe stays a single scalar: checked once before the loop,
     // stamped once after. A mid-loop failure therefore won't re-send the
