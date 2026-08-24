@@ -28,6 +28,7 @@ import { getSpendAllowance } from '../lib/spend.js';
 import { sendNewArrivals } from '../lib/new-arrivals.js';
 import { noteNewArrivals } from '../lib/listing-live.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
+import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
 
@@ -683,7 +684,7 @@ export default async function handler(req, res) {
         const staleBefore = new Date(now.getTime() - 3 * 24 * 3600 * 1000).toISOString();
         const rows = await fetch(
           `${SUPABASE_URL}/rest/v1/owners?onboarding_status=in.(contacted,in_conversation)` +
-          `&onboarding_nudges=lt.2&select=id,name,wa_num,onboarding_status,last_inbound_at,last_onboarding_nudge_at,onboarding_nudges`,
+          `&onboarding_nudges=lt.2&select=id,name,wa_num,onboarding_status,last_inbound_at,last_onboarding_nudge_at,onboarding_nudges,notes,consent_note`,
           { headers: sbHeaders }
         ).then(r => r.json());
         const stale = (Array.isArray(rows) ? rows : []).filter(o => {
@@ -696,11 +697,21 @@ export default async function handler(req, res) {
           return !o.last_onboarding_nudge_at || o.last_onboarding_nudge_at < staleBefore;
         });
         for (const o of stale) {
+          // A COLD prospect (found advertising their villa, never spoke to us)
+          // who ignored an unsolicited first message is not a lead going cold —
+          // it is a no. Chasing them is how a WhatsApp number gets reported and
+          // blocked, so the advice differs from a warm contact who agreed and
+          // then went quiet. Ikiel, 24 Aug 2026.
+          const cold = isColdProspect(o);
           await sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, {
-            title: `Owner prospect going cold: ${o.name || '+' + o.wa_num}`,
-            body: o.onboarding_status === 'contacted'
-              ? 'No reply to Maya’s intro in 3+ days — worth a personal WhatsApp or call.'
-              : 'Conversation went quiet 3+ days ago — a personal nudge from you would help.',
+            title: cold
+              ? `Cold prospect hasn't replied: ${o.name || '+' + o.wa_num}`
+              : `Owner prospect going cold: ${o.name || '+' + o.wa_num}`,
+            body: cold
+              ? 'No reply to the cold intro in 3+ days. Treat silence as a no — do not chase; only follow up if you have a genuine reason.'
+              : o.onboarding_status === 'contacted'
+                ? 'No reply to Maya’s intro in 3+ days — worth a personal WhatsApp or call.'
+                : 'Conversation went quiet 3+ days ago — a personal nudge from you would help.',
           }).catch(() => {});
           await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
             method: 'PATCH', headers: sbHeaders,
