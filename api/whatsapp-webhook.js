@@ -2741,6 +2741,7 @@ RULES:
 - Imported details FILL GAPS ONLY. Anything the owner told you directly wins over the scraped page: their villa name, their bedroom count, their area. If an import disagrees with the owner on a number, do NOT silently pick one — ask them which is right ("Airbnb has it as 2 bedrooms, you said 3 — which should agents see?").
 - When asking for photos, ask for the ORIGINAL photos one by one, not collages or edited combinations: two photos pasted side by side show up tiny and cropped on the listing and on the WhatsApp cards agents receive (Vila Lestari, 23 Aug 2026). If what arrives looks like a collage, say so kindly and ask for the individual originals.
 - If photos were saved automatically to their villa photo folder (see thread), use that folder link as photosLink — never ask them for a Drive link they already effectively gave you by sending photos.
+- MAP PIN ("mapLink") — agents need to find the villa to show it, so a listing with no location is one they cannot act on. Whenever the owner sends a Google Maps / maps.app.goo.gl / share.google location link at ANY point in the thread — including in their very first message or pasted inside a marketing blurb — carry it straight through as mapLink. Do not let it slip past because you were asking about something else at the time (Vila Lestari's owner sent his pin in his opening message and it never reached the listing). If you reach the point of submitting and still have no pin, ask for it in one short line.
 - Gather photos AND the availability calendar BEFORE the first "intake" wherever you can. Submitting the moment you have a price means the listing goes to Ikiel half-empty. If the owner still owes you photos or a calendar, ask for them first and submit once.
 - CALENDAR (iCal) — you CANNOT derive one. A link to an Airbnb/Booking listing page is NOT a calendar, and you must NEVER construct, guess, or "pull" an .ics URL from a listing URL. Only ever pass an icalUrl the owner literally sent you. If they send a listing link, thank them, say it's useful for the description, and then ask for the export URL in their own words:
   · Airbnb: Calendar → Availability settings → Connect calendars → "Export calendar" → copy the link.
@@ -2761,7 +2762,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
-  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "overview": "", "photosLink": "", "icalUrl": "", "ownerEmail": "", "contactName": "", "features": [] }
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
 Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
@@ -2957,10 +2958,16 @@ async function submitOwnerIntake(owner, listing, secret) {
   const ownerFolder = owner.drive_folder_id && !/^pending:/.test(String(owner.drive_folder_id)) ? folderLink(owner.drive_folder_id) : '';
   const photosLink = String(listing.photosLink || '').trim() || ownerFolder;
   try {
+    // Only pass a map link that really is a URL — the portal stores `location`
+    // solely when it looks like one, and a stray phrase would be dropped
+    // silently. Owners send pins as maps.app.goo.gl / share.google / maps links.
+    const mapLink = /^https?:\/\/\S+$/i.test(String(listing.mapLink || '').trim())
+      ? String(listing.mapLink).trim() : '';
     const data = {
       name: listing.name, area: listing.area, tag: listing.area, unitType: listing.unitType,
       bedrooms: listing.bedrooms, bathrooms: listing.bathrooms, monthly: normalizeMonthly(listing.monthly),
-      overview: listing.overview, photosLink, icalUrl: ical,
+      yearly: listing.yearly, overview: listing.overview, photosLink, icalUrl: ical,
+      ...(mapLink ? { mapLink } : {}),
       features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
     };
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
