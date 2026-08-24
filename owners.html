@@ -130,15 +130,20 @@
 <div class="modal-bg" id="prospect-modal">
   <div class="modal">
     <h2>Add owner prospect</h2>
-    <div class="sub2">Someone who verbally agreed to list their villa. Maya will onboard them on WhatsApp — the intro message only goes out when you press "Send intro" on their thread.</div>
+    <div class="sub2">An owner Maya will onboard on WhatsApp — the intro message only goes out when you press "Send intro" on their thread.</div>
     <label>Name *</label>
     <input id="p-name" placeholder="e.g. Made Wirawan" />
     <label>WhatsApp number *</label>
     <input id="p-wa" placeholder="e.g. 0812… or 62812…" inputmode="tel" />
     <label>Language</label>
     <select id="p-lang"><option value="en">English</option><option value="id">Bahasa Indonesia</option></select>
-    <label>How/when they agreed <span style="text-transform:none;font-weight:400">(consent note)</span></label>
-    <textarea id="p-note" rows="2" placeholder="e.g. Met at the villa 26 Jul — agreed to list both units"></textarea>
+    <label style="display:flex;align-items:center;gap:8px;text-transform:none;font-weight:400;cursor:pointer">
+      <input type="checkbox" id="p-cold" style="width:auto" />
+      Cold outreach — no prior contact (found them advertising their villa)
+    </label>
+    <div class="sub2" id="p-cold-hint" style="display:none">Maya will open honestly ("I saw your villa advertised…"), won't imply a prior agreement, and runs on the stronger model. Needs an approved <code>samba_owner_cold</code> template for the first message.</div>
+    <label>Context <span style="text-transform:none;font-weight:400">(consent / how you found them)</span></label>
+    <textarea id="p-note" rows="2" placeholder="Warm: 'Met at the villa 26 Jul — agreed to list'. Cold: 'Advertising the villa for rent on FB Marketplace'"></textarea>
     <div class="warn" id="p-warn"></div>
     <div class="actions">
       <button class="ghost" onclick="closeProspectModal()">Cancel</button>
@@ -307,18 +312,20 @@ async function send(){
 
 // ── Add owner prospect (verbally agreed, Maya onboards them) ──
 function openProspectModal(){ document.getElementById('prospect-modal').classList.add('open'); document.getElementById('p-warn').style.display='none'; }
+document.addEventListener('change', (e)=>{ if(e.target && e.target.id==='p-cold'){ document.getElementById('p-cold-hint').style.display = e.target.checked ? 'block' : 'none'; } });
 function closeProspectModal(){ document.getElementById('prospect-modal').classList.remove('open'); }
 async function saveProspect(){
   const name=document.getElementById('p-name').value.trim();
   const wa=document.getElementById('p-wa').value.trim();
   const lang=document.getElementById('p-lang').value;
   const note=document.getElementById('p-note').value.trim();
+  const cold=document.getElementById('p-cold').checked;
   const warn=document.getElementById('p-warn');
   if(!name||!wa){ toast('Name and WhatsApp number are required'); return; }
   const btn=document.getElementById('p-save'); btn.disabled=true; btn.textContent='Adding…';
   try{
     const r = await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'add_owner_prospect',payload:{name,waNum:wa,lang,consentNote:note}})});
+      body:JSON.stringify({action:'add_owner_prospect',payload:{name,waNum:wa,lang,consentNote:note,cold}})});
     const d = await r.json().catch(()=>({}));
     if(!r.ok) throw new Error(d.error||('HTTP '+r.status));
     if(d.agentCollision){
@@ -329,7 +336,7 @@ async function saveProspect(){
       toast('Prospect added — open their thread and press "Send intro"');
       closeProspectModal();
     }
-    document.getElementById('p-name').value=''; document.getElementById('p-wa').value=''; document.getElementById('p-note').value='';
+    document.getElementById('p-name').value=''; document.getElementById('p-wa').value=''; document.getElementById('p-note').value=''; document.getElementById('p-cold').checked=false; document.getElementById('p-cold-hint').style.display='none';
     await load(true);
   }catch(e){ warn.style.display='block'; warn.textContent=e.message; }
   btn.disabled=false; btn.textContent='Add prospect';
