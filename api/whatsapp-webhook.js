@@ -1190,7 +1190,7 @@ export async function nodeHandler(req, res) {
     // Natural-language matches only count on short messages, so "not
     // interested in Saturno, but do you have a 2BR?" still reaches Maya.
     const OPT_OUT_RE = /^(stop|unsubscribe|please stop|remove me|don'?t contact|opt out|berhenti)$/i;
-    const OPT_OUT_NL_RE = /\b(not interested|no thanks?|no thank you|don'?t (send|message|text|contact)|stop (sending|messaging|texting)|please stop|remove (me|us|my (number|contact))|unsubscribe|take me off|leave me alone|wrong (person|number)|block (this|your) number|tidak tertarik|ga tertarik|gak tertarik|jangan (kirim|hubungi)|hapus (nomor|kontak)|salah (nomor|orang)|berhenti kirim)\b/i;
+    const OPT_OUT_NL_RE = /\b(not interested|no thanks?|no thank you|don'?t (send|message|text|contact)|stop (sending|messaging|texting)|please stop|remove (me|us|my (number|contact))|unsubscribe|take me off|leave me alone|wrong (person|number)|block (this|your) number|please delete|delete (me|us|my (number|contact|details|account|data|profile|info))|(this|the|your) (ai|bot|chat ?bot|assistant|service) (does ?n'?t|do ?n'?t|does not|do not|is ?n'?t|is not) (work|working|for me|help|useful)|tidak tertarik|ga tertarik|gak tertarik|jangan (kirim|hubungi)|hapus (nomor|kontak)|salah (nomor|orang)|berhenti kirim)\b/i;
     const trimmed = String(text || '').trim();
     // A refusal that continues into a question or a "but" is a conversation,
     // not an opt-out — leave it to Maya.
