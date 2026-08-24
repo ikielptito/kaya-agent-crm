@@ -466,7 +466,9 @@ export default async function handler(req, res) {
       const { slug, waNumber, waContactName, ownerEmail, data } = payload || {};
       const secret = process.env.LISTING_SYNC_SECRET;
       if (!secret) return res.status(500).json({ error: 'LISTING_SYNC_SECRET not configured' });
-      if (!data || !data.name) return res.status(400).json({ error: 'data.name required' });
+      // A name is required to CREATE; an update that names an existing slug may
+      // omit it (the portal keeps the stored name) — same rule as the intake.
+      if (!data || (!data.name && !slug)) return res.status(400).json({ error: 'data.name required to create a listing (or pass an existing slug to update)' });
       if (!waNumber && !ownerEmail) return res.status(400).json({ error: 'waNumber or ownerEmail required' });
       const pr = await fetch('https://sambarentals.com/api/portal?action=intake', {
         method: 'POST',
