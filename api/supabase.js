@@ -384,10 +384,15 @@ export default async function handler(req, res) {
       const approved = (tl.data || []).filter(t => t.status === 'APPROVED');
       const coldTpls = approved.filter(t => /^samba_owner_cold/.test(t.name));
       const warmTpls = approved.filter(t => /^samba_owner_onboard/.test(t.name));
-      const pool = cold ? (coldTpls.length ? coldTpls : warmTpls) : warmTpls;
-      const usedWarmForCold = cold && !coldTpls.length;
+      // A cold prospect must NEVER get the warm template — it claims a prior
+      // agreement that doesn't exist. If no cold template is approved yet, send
+      // NOTHING and say why. A misleading first touch is worse than waiting.
+      if (cold && !coldTpls.length) {
+        return res.status(409).json({ error: 'Cold prospect, but no cold intro template (samba_owner_cold) is approved yet. The warm template would falsely imply this owner already agreed, so nothing was sent. Approve the cold template first — it is pending Meta review.', needs: 'samba_owner_cold' });
+      }
+      const pool = cold ? coldTpls : warmTpls;
       const tpl = pool.find(t => (t.language || '').startsWith(wantLang)) || pool[0];
-      if (!tpl) return res.status(400).json({ error: 'No approved owner intro template yet — check template status' });
+      if (!tpl) return res.status(400).json({ error: 'No approved owner intro template — check template status in WhatsApp Manager' });
       const fName = String(own.name || '').trim().split(/\s+/)[0] || 'there';
       const comps = [];
       const headerComp = (tpl.components || []).find(c => c.type === 'HEADER' && c.format === 'IMAGE');
@@ -421,8 +426,7 @@ export default async function handler(req, res) {
         method: 'PATCH', headers,
         body: JSON.stringify({ onboarding_status: 'contacted', suggested_reply: '' })
       }).catch(() => {});
-      return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language,
-        ...(usedWarmForCold ? { warning: 'Cold prospect but no cold template approved — sent the WARM template, which implies a prior agreement. Create + approve a samba_owner_cold template so cold sends open honestly.' } : {}) });
+      return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language });
 
     } else if (action === 'create_wa_template') {
       // Submit a WhatsApp message template to Meta for approval. Body-only with
