@@ -424,6 +424,35 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, template: tpl.name, language: tpl.language,
         ...(usedWarmForCold ? { warning: 'Cold prospect but no cold template approved — sent the WARM template, which implies a prior agreement. Create + approve a samba_owner_cold template so cold sends open honestly.' } : {}) });
 
+    } else if (action === 'create_wa_template') {
+      // Submit a WhatsApp message template to Meta for approval. Body-only with
+      // one {{1}} name variable; MARKETING category by default. Returns Meta's
+      // template id + review status (usually PENDING). Reversible: a template
+      // can be deleted in WhatsApp Manager.
+      const { name, language, category, bodyText, example } = payload || {};
+      const TOKEN = process.env.META_WA_TOKEN, WABA_ID = process.env.META_WABA_ID;
+      if (!TOKEN || !WABA_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
+      if (!name || !bodyText) return res.status(400).json({ error: 'name and bodyText required' });
+      const comp = { type: 'BODY', text: String(bodyText) };
+      // Meta requires an example value for every {{n}} variable in the body.
+      if (/\{\{\d+\}\}/.test(bodyText)) {
+        const ex = Array.isArray(example) ? example : [example || 'Kate'];
+        comp.example = { body_text: [ex.map(String)] };
+      }
+      const tplBody = {
+        name: String(name).toLowerCase().replace(/[^a-z0-9_]/g, '_'),
+        language: language || 'en',
+        category: (category || 'MARKETING').toUpperCase(),
+        components: [comp],
+      };
+      const cr = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates`, {
+        method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(tplBody),
+      });
+      const cd = await cr.json().catch(() => ({}));
+      if (!cr.ok) return res.status(cr.status).json({ error: cd?.error?.message || 'template create failed', details: cd?.error || null });
+      return res.status(200).json({ ok: true, id: cd.id || null, status: cd.status || null, category: cd.category || null, name: tplBody.name, language: tplBody.language });
+
     } else if (action === 'upsert_campaign') {
       r = await fetch(SUPABASE_URL + '/rest/v1/campaigns', {
         method: 'POST',
