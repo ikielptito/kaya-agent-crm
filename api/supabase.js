@@ -333,7 +333,7 @@ export default async function handler(req, res) {
 
     // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
     } else if (action === 'add_owner_prospect') {
-      const { name, waNum, consentNote, lang, promoCode, cold } = payload || {};
+      const { name, waNum, consentNote, lang, promoCode, cold, intel } = payload || {};
       const num = normIndoMobile(waNum) || String(waNum || '').replace(/\D/g, '');
       if (!num || num.length < 10) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
       if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
@@ -352,7 +352,9 @@ export default async function handler(req, res) {
           consent_note: String(consentNote || '').trim() || null,
           // cold = no prior relationship; the onboarding pitch reads this
           // (via notes) and opens honestly instead of implying a prior "yes".
-          notes: cold ? 'cold_outreach' : null,
+          // intel = the ad's fact sheet (unverified) — the pitch quotes it and
+          // the intake prefills from it once the owner agrees.
+          notes: [cold ? 'cold_outreach' : null, intel ? `AD INTEL (unverified):\n${String(intel).slice(0, 800)}` : null].filter(Boolean).join('\n') || null,
           lang: lang === 'id' ? 'id' : 'en',
           promo_code: String(promoCode || 'FOUNDING25').trim().toUpperCase(),
         })
@@ -534,12 +536,19 @@ export default async function handler(req, res) {
       // and extract the owner's name, WhatsApp number and villa details, so a
       // cold prospect can be created without retyping. Opus 5 — number accuracy
       // matters (a misread digit messages a stranger) and volume is tiny.
-      const { imageBase64, mediaType } = payload || {};
+      // Accepts ONE OR MORE screenshots of the same listing ({ images: [{base64,
+      // mediaType}] }, legacy { imageBase64, mediaType } still works). More
+      // screenshots = richer listing_intel: Maya references specifics in the
+      // cold conversation and prefills the intake from them later.
+      const { imageBase64, mediaType, images } = payload || {};
       const KEY = process.env.ANTHROPIC_API_KEY;
       if (!KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
-      if (!imageBase64) return res.status(400).json({ error: 'imageBase64 required' });
-      const mt = /^image\/(png|jpe?g|webp|gif)$/.test(mediaType || '') ? mediaType : 'image/jpeg';
-      const sys = `You read a screenshot of a Bali villa RENTAL listing (Facebook Marketplace, an ad, or a WhatsApp/Instagram post) and extract the details needed to reach out to the owner. Return ONLY a JSON object, no prose:
+      const imgs = (Array.isArray(images) && images.length ? images : (imageBase64 ? [{ base64: imageBase64, mediaType }] : []))
+        .slice(0, 8)
+        .map(i => ({ base64: i.base64, mt: /^image\/(png|jpe?g|webp|gif)$/.test(i.mediaType || '') ? i.mediaType : 'image/jpeg' }))
+        .filter(i => i.base64);
+      if (!imgs.length) return res.status(400).json({ error: 'images (or imageBase64) required' });
+      const sys = `You read one or more screenshots of the SAME Bali villa RENTAL listing (Facebook Marketplace, an ad, or a WhatsApp/Instagram post) and extract the details needed to reach out to the owner. Return ONLY a JSON object, no prose:
 {"is_listing": true|false (is this actually a villa/property rental listing?),
  "owner_name": string|null (the person or business advertising — often the poster's name),
  "wa_num": string|null (the WhatsApp/phone number as DIGITS ONLY in Indonesian international format: convert a leading 0 to 62, e.g. 081339632893 -> 6281339632893; keep a +62/62 number as-is without the plus. If several numbers appear, pick the one labelled WA/WhatsApp/contact. NEVER invent digits — if unsure or none visible, use null),
@@ -549,13 +558,14 @@ export default async function handler(req, res) {
  "price_year": string|null,
  "lang": "en"|"id" (the language to open the conversation in — "id" if the listing/owner is clearly Indonesian, else "en"),
  "summary": string (one line describing the villa + price, for a consent/context note),
+ "listing_intel": string (a compact fact sheet of EVERYTHING the ad states about the property, one fact per line — villa name, area/street, bedrooms, bathrooms, land/building size, furnishing, pool, amenities, monthly/yearly price, minimum term, availability date, anything distinctive from the photos (e.g. "rooftop terrace", "rice-field view"). Facts only, exactly as advertised, max ~600 chars. This arms the outreach conversation and later prefills the listing draft),
  "confidence": "high"|"medium"|"low" (low if the number is unclear or partly hidden),
  "notes": string (anything ambiguous — multiple numbers, blurry digits, not clearly a rental)}`;
       const visBody = {
-        model: 'claude-opus-5', max_tokens: 1000, system: sys,
+        model: 'claude-opus-5', max_tokens: 1400, system: sys,
         messages: [{ role: 'user', content: [
-          { type: 'image', source: { type: 'base64', media_type: mt, data: imageBase64 } },
-          { type: 'text', text: 'Extract the listing as JSON.' },
+          ...imgs.map(i => ({ type: 'image', source: { type: 'base64', media_type: i.mt, data: i.base64 } })),
+          { type: 'text', text: `Extract the listing as JSON.${imgs.length > 1 ? ` All ${imgs.length} screenshots show the same listing — combine them.` : ''}` },
         ] }],
       };
       const ar = await fetch('https://api.anthropic.com/v1/messages', {
