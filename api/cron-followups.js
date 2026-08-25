@@ -602,6 +602,23 @@ export default async function handler(req, res) {
       } catch (e) { introSweep = { error: e.message }; }
     }
 
+    // ── ACCOUNT-INVITE SWEEP (dormant reactivation) ──────────────────
+    // One-time nudge asking dormant/cold agents to create a portal account
+    // (Google sign-in → personal share link + click/enquiry attribution).
+    // Gated by settings.samba_availability.account_invite_daily_cap (off when
+    // unset/0) and by the samba_account_invite_v1 template being approved.
+    let accountInvites = null;
+    if (!previewMode) {
+      try {
+        accountInvites = await runAccountInviteSweep({
+          now, sbHeaders, supabaseUrl: SUPABASE_URL,
+          agents, templatesMap,
+          waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+          results,
+        });
+      } catch (e) { accountInvites = { error: e.message }; }
+    }
+
     // ── UNANSWERED-INBOUND SWEEP (daily safety net) ──────────────────
     // Agents whose latest message is still unanswered (Maya superseded, spend
     // cap, manual takeover that went quiet, webhook hiccup) get a catch-up
@@ -867,6 +884,7 @@ export default async function handler(req, res) {
         alerts: availabilityResult?.event_alerts_sent || 0,
         digests: availabilityResult?.weekly_digest_sent || 0,
         intros: introSweep?.sent || 0,
+        invites: accountInvites?.sent || 0,
         resumed: autoResumed || 0,
         briefing: !!ownerReport?.sent,
         review: weeklyReview?.grade || (weeklyReview?.staged ? 'staged' : null),
@@ -888,6 +906,7 @@ export default async function handler(req, res) {
       day_spend_after: todaySpend.toFixed(2),
       availability: availabilityResult,
       intro_sweep: introSweep,
+      account_invites: accountInvites,
       unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
       listing_info_chase: listingInfo && { listings_with_gaps: listingInfo.listings_with_gaps, contacts_messaged: listingInfo.contacts_messaged, exhausted: listingInfo.exhausted, error: listingInfo.error },
@@ -1866,6 +1885,144 @@ export async function runIntroSweep(ctx) {
   }
   summary.remaining = Math.max(0, queue.length - summary.sent);
   return summary;
+}
+
+// ── ACCOUNT-INVITE SWEEP ─────────────────────────────────────────────
+// One-time reactivation nudge for dormant/cold agents: create a free portal
+// account (Google sign-in) and get a personal share link with click/enquiry
+// attribution — a reason to come back that isn't "yet another availability
+// blast". Works through the backlog at a capped daily rate, one invite per
+// agent ever (campaign_engagement.account_invite stamp + wa_messages
+// backstop). Off by default: runs only when settings.samba_availability
+// .account_invite_daily_cap is a positive number AND the template is approved.
+const ACCOUNT_INVITE_TEMPLATE = 'samba_account_invite_v1';
+const ACCOUNT_INVITE_CATEGORY = 'account_invite';
+
+export async function runAccountInviteSweep(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
+
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
+  const cap = parseInt(config.account_invite_daily_cap, 10) || 0;
+  if (!config.enabled || cap <= 0) {
+    summary.skipped_reason = !config.enabled
+      ? 'samba_availability.enabled = false'
+      : 'account_invite_daily_cap not set';
+    return summary;
+  }
+  summary.enabled = true;
+
+  // Mondays are digest day — don't stack an invite on top of the digest.
+  if (now.getUTCDay() === 1) { summary.skipped_reason = 'Monday (digest day)'; return summary; }
+
+  // templatesMap only carries APPROVED templates, so presence = approved.
+  if (!templatesMap[ACCOUNT_INVITE_TEMPLATE]) {
+    summary.skipped_reason = `${ACCOUNT_INVITE_TEMPLATE} not approved yet`;
+    return summary;
+  }
+
+  const invitedSet = await loadCategorySet(supabaseUrl, sbHeaders, [ACCOUNT_INVITE_CATEGORY]);
+  const today = now.toISOString().slice(0, 10);
+  const isDormant = (a) => /^(dormant|cold)$/i.test(String(a.engagement_tier || '').trim());
+  // Agents who have ever written to us go first — likelier to answer, and a
+  // nudge to a known contact can't read as spam.
+  const hasTalked = (a) => (a.last_inbound_at ? 0 : 1);
+  const queue = agents
+    .filter(isDormant)
+    .filter(a => !isMarketingCapped(a, config) && passesSambaBaseGate(a, config))
+    .filter(a => !a.campaign_engagement?.account_invite && !invitedSet.has(a.id))
+    // Skip anyone already messaged today (the broadcast runs before us).
+    .filter(a => !String(a.last_availability_alert_at || '').startsWith(today))
+    .sort((a, b) => hasTalked(a) - hasTalked(b)
+      || String(b.last_inbound_at || '').localeCompare(String(a.last_inbound_at || ''))
+      || a.id - b.id);
+  summary.queue = queue.length;
+
+  for (const agent of queue.slice(0, cap)) {
+    const firstName = firstNameOf(agent.name);
+    let metaErr = null;
+    let waMessageId = null;
+    try {
+      const r = await fetch(`${GRAPH}/${waPhoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
+          template: {
+            name: ACCOUNT_INVITE_TEMPLATE, language: { code: 'en' },
+            components: [
+              { type: 'body', parameters: [{ type: 'text', text: firstName }] },
+              // Dynamic URL suffix = CRM agent id, so the portal attributes
+              // the visit (?signin=1&ref=acct_invite&aid=<id>).
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(agent.id) }] },
+            ],
+          },
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        waMessageId = d.messages?.[0]?.id;
+      } else {
+        const d = await r.json().catch(() => ({}));
+        metaErr = d?.error?.message || `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      metaErr = e.message;
+    }
+    if (metaErr) {
+      summary.errors.push(`agent ${agent.id}: ${metaErr}`);
+      continue;
+    }
+
+    // Log a readable copy for the console inbox (the template body with the
+    // name filled in), then stamp the one-time invite on the agent row.
+    const bodyTmpl = templatesMap[ACCOUNT_INVITE_TEMPLATE]?.body || '';
+    const rendered = bodyTmpl.replace(/\{\{1\}\}/g, firstName)
+      || `Account invite sent to ${firstName} (${ACCOUNT_INVITE_TEMPLATE})`;
+    await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({
+        agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+        content: rendered, timestamp: now.toISOString(),
+        source: 'cron', category: ACCOUNT_INVITE_CATEGORY,
+        template_name: ACCOUNT_INVITE_TEMPLATE,
+        wa_message_id: waMessageId, status: 'sent',
+      }),
+    }).catch(() => {});
+    await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify({
+        campaign_engagement: {
+          ...(agent.campaign_engagement || {}),
+          account_invite: { sent_at: now.toISOString(), template: ACCOUNT_INVITE_TEMPLATE },
+        },
+      }),
+    }).catch(() => {});
+
+    summary.sent++;
+    results.push({ availability: true, agent: agent.name || agent.id, kind: 'account_invite', template: ACCOUNT_INVITE_TEMPLATE });
+  }
+  summary.remaining = Math.max(0, queue.length - summary.sent);
+  return summary;
+}
+
+// Distinct agent_ids with any wa_messages row in the given categories — the
+// durable-ish backstop behind per-agent stamps (rows get pruned, stamps don't).
+// Empty set on failure so a degraded Supabase can't suppress the whole run.
+async function loadCategorySet(url, headers, categories) {
+  try {
+    const params = categories.map(c => encodeURIComponent(c)).join(',');
+    const r = await fetch(
+      `${url}/rest/v1/wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&limit=10000`,
+      { headers }
+    );
+    if (!r.ok) return new Set();
+    const rows = await r.json();
+    return new Set((rows || []).map(x => x.agent_id));
+  } catch (e) {
+    return new Set();
+  }
 }
 
 // Extract the agent's first name for personalisation. Skips Balinese caste
