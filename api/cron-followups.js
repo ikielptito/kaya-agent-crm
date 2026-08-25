@@ -1340,7 +1340,17 @@ const ALERT_TEMPLATE_V2  = 'samba_availability_alert_v2';
 const DIGEST_TEMPLATE_V2 = 'samba_availability_digest_v2';
 const ALERT_TEMPLATE_V1  = 'samba_availability_alert';
 const DIGEST_TEMPLATE_V1 = 'samba_availability_digest';
-const CAROUSEL_DIGEST = 'samba_weekly_carousel_v1';   // visual Monday digest
+const CAROUSEL_DIGEST = 'samba_weekly_carousel_v1';   // visual Monday digest (fixed greeting baked into the body)
+// v2 has a neutral body ("{{1}}" + a one-line tail), so the send-time intro
+// renders exactly once — v1 produced "Good morning Hi Wayan, …" double
+// salutations whenever an intro sentence was passed. Senders prefer v2 when
+// approved; on v1 they fall back to a bare first name so the fixed greeting
+// stays grammatical.
+const CAROUSEL_DIGEST_V2 = 'samba_weekly_carousel_v2';
+function pickCarousel(templatesMap, fullIntro, firstName) {
+  if (templatesMap[CAROUSEL_DIGEST_V2]) return { name: CAROUSEL_DIGEST_V2, intro: fullIntro };
+  return { name: CAROUSEL_DIGEST, intro: firstName };
+}
 const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro'];
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
@@ -1487,7 +1497,7 @@ export async function runAvailabilityNotifications(ctx) {
         if (a.last_availability_alert_at && (now.getTime() - new Date(a.last_availability_alert_at).getTime()) < 6 * 3.6e6) return false;
         return true;
       });
-      summary.new_arrivals = await sendNewArrivals({ SUPABASE_URL: supabaseUrl, sbHeaders }, { phoneId: waPhoneId, token: waToken }, { eligible: arrivalsAudience, digestProperties: digest.properties, previewMode });
+      summary.new_arrivals = await sendNewArrivals({ SUPABASE_URL: supabaseUrl, sbHeaders }, { phoneId: waPhoneId, token: waToken }, { eligible: arrivalsAudience, digestProperties: digest.properties, previewMode, templatesMap });
       // Refresh the list so the regular alert respects the 6h touch guard.
       if (summary.new_arrivals?.sent) {
         const stamp = new Date().toISOString();
@@ -1545,7 +1555,7 @@ export async function runAvailabilityNotifications(ctx) {
   // stays text if the template isn't approved/loaded, the portal is unreachable,
   // or carousel_enabled is explicitly set to false.
   let carouselCards = null;
-  if ((isMonday || improvements.items.length > 0) && config.carousel_enabled !== false && templatesMap[CAROUSEL_DIGEST]) {
+  if ((isMonday || improvements.items.length > 0) && config.carousel_enabled !== false && (templatesMap[CAROUSEL_DIGEST] || templatesMap[CAROUSEL_DIGEST_V2])) {
     try {
       carouselCards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT);
     } catch (_) { carouselCards = null; }
@@ -1696,18 +1706,23 @@ export async function runAvailabilityNotifications(ctx) {
     // the carousel showed the same top villas every day, so agents read
     // back-to-back sends as the identical blast re-sent ("stop sending daily").
     const sendCarousel = !!carouselCards && (isMonday || isFirstSend);
-    const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
+    const carousel = pickCarousel(templatesMap,
+      null /* intro chosen below */, firstName);
+    const sendName = sendCarousel ? carousel.name : tmpl.name;
     // Rotating referral ask: even ISO weeks only, digest sends only — one
     // gentle line, not every week, never on a first touch.
     const weekNum = Math.floor((now.getTime() - Date.parse(now.getUTCFullYear() + '-01-01')) / (7 * 86400e3));
     const referralLine = (isMonday && !isFirstSend && weekNum % 2 === 0)
       ? ' — PS: know a villa owner? Send me their contact card; founding villas list free for good'
       : '';
-    const carouselIntro = isFirstSend
+    const fullIntro = isFirstSend
       ? `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`
       : isMonday
         ? `Hi ${firstName}, here's this week's Samba rentals availability${shoutoutLine || referralLine}`
         : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
+    // v2 template: the intro IS the message body. v1: bare name only — its
+    // body already carries the greeting and pitch.
+    const carouselIntro = carousel.name === CAROUSEL_DIGEST_V2 ? fullIntro : firstName;
     const sendComponents = sendCarousel
       ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
       : [{ type: 'body', parameters: params.map(p => ({ type: 'text', text: p })) }];
@@ -1832,7 +1847,7 @@ export async function runIntroSweep(ctx) {
   // changes, so it can go out on quiet days too. If the carousel template
   // isn't approved or the portal can't serve enough covers, skip today rather
   // than sending a text intro with empty bullet slots.
-  if (!templatesMap[CAROUSEL_DIGEST]) { summary.skipped_reason = 'carousel template not approved'; return summary; }
+  if (!templatesMap[CAROUSEL_DIGEST] && !templatesMap[CAROUSEL_DIGEST_V2]) { summary.skipped_reason = 'carousel template not approved'; return summary; }
 
   const digestUrl = process.env.AVAILABILITY_DIGEST_URL;
   const digestSecret = process.env.DIGEST_SHARED_SECRET;
@@ -1877,8 +1892,9 @@ export async function runIntroSweep(ctx) {
 
   for (const agent of queue.slice(0, cap)) {
     const firstName = firstNameOf(agent.name);
-    const introText = `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`;
-    const components = buildCarouselComponents(firstName, cards, introText);
+    const introCarousel = pickCarousel(templatesMap,
+      `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`, firstName);
+    const components = buildCarouselComponents(firstName, cards, introCarousel.intro);
 
     let metaErr = null;
     let waMessageId = null;
@@ -1888,7 +1904,7 @@ export async function runIntroSweep(ctx) {
         headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
-          template: { name: CAROUSEL_DIGEST, language: { code: 'en' }, components },
+          template: { name: introCarousel.name, language: { code: 'en' }, components },
         }),
       });
       if (r.ok) {
@@ -1923,7 +1939,7 @@ export async function runIntroSweep(ctx) {
       body: JSON.stringify({
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
-        source: 'cron', category: 'availability_intro', template_name: CAROUSEL_DIGEST,
+        source: 'cron', category: 'availability_intro', template_name: introCarousel.name,
         wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
@@ -1954,7 +1970,7 @@ export async function runIntroSweep(ctx) {
     }).catch(() => {});
 
     summary.sent++;
-    results.push({ availability: true, agent: agent.name || agent.id, kind: 'intro_sweep', template: CAROUSEL_DIGEST });
+    results.push({ availability: true, agent: agent.name || agent.id, kind: 'intro_sweep', template: introCarousel.name });
   }
   summary.remaining = Math.max(0, queue.length - summary.sent);
   return summary;

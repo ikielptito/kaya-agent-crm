@@ -151,10 +151,10 @@ export default async function handler(req, res) {
     if (req.method === 'POST' && req.body?.action === 'create_carousel') {
       // Submit the weekly carousel digest template (Resumable Upload for the
       // example image handled server-side). sampleImageUrl seeds the example.
-      const { name, sampleImageUrl } = req.body;
+      const { name, sampleImageUrl, bodyText, bodyExample } = req.body;
       if (!name || !sampleImageUrl) return res.status(400).json({ error: 'name and sampleImageUrl required' });
       try {
-        const out = await createCarouselDigest({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, sampleImageUrl });
+        const out = await createCarouselDigest({ TOKEN, PHONE_ID, WABA_ID: wabaId }, { name, sampleImageUrl, bodyText, bodyExample });
         return res.status(200).json({ success: true, ...out });
       } catch (e) {
         return res.status(500).json({ error: e.message });
