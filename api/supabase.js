@@ -333,7 +333,7 @@ export default async function handler(req, res) {
 
     // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
     } else if (action === 'add_owner_prospect') {
-      const { name, waNum, consentNote, lang, promoCode, cold, intel } = payload || {};
+      const { name, waNum, consentNote, lang, promoCode, cold, intel, facts } = payload || {};
       const num = normIndoMobile(waNum) || String(waNum || '').replace(/\D/g, '');
       if (!num || num.length < 10) return res.status(400).json({ error: 'A valid WhatsApp number is required' });
       if (!String(name || '').trim()) return res.status(400).json({ error: 'Name is required' });
@@ -354,7 +354,15 @@ export default async function handler(req, res) {
           // (via notes) and opens honestly instead of implying a prior "yes".
           // intel = the ad's fact sheet (unverified) — the pitch quotes it and
           // the intake prefills from it once the owner agrees.
-          notes: [cold ? 'cold_outreach' : null, intel ? `AD INTEL (unverified):\n${String(intel).slice(0, 800)}` : null].filter(Boolean).join('\n') || null,
+          // AD FACTS = the machine-readable line the personalised cold template
+          // reads (beds/type/area); AD INTEL = the human fact sheet for Maya.
+          notes: [
+            cold ? 'cold_outreach' : null,
+            (facts && (facts.beds || facts.type || facts.area))
+              ? `AD FACTS: beds=${String(facts.beds || '').replace(/\D/g, '')}; type=${String(facts.type || '').toLowerCase().replace(/[^a-z]/g, '')}; area=${String(facts.area || '').slice(0, 40).replace(/[;\n]/g, ',')}`
+              : null,
+            intel ? `AD INTEL (unverified):\n${String(intel).slice(0, 800)}` : null,
+          ].filter(Boolean).join('\n') || null,
           lang: lang === 'id' ? 'id' : 'en',
           promo_code: String(promoCode || 'FOUNDING25').trim().toUpperCase(),
         })
@@ -392,14 +400,39 @@ export default async function handler(req, res) {
       if (cold && !coldTpls.length) {
         return res.status(409).json({ error: 'Cold prospect, but no cold intro template (samba_owner_cold) is approved yet. The warm template would falsely imply this owner already agreed, so nothing was sent. Approve the cold template first — it is pending Meta review.', needs: 'samba_owner_cold' });
       }
-      const pool = cold ? coldTpls : warmTpls;
-      const tpl = pool.find(t => (t.language || '').startsWith(wantLang)) || pool[0];
+      // Personalisation: the AD FACTS line (from listing screenshots) feeds a
+      // multi-variable cold template — "Your 3-bedroom villa in Seseh…". With
+      // no facts, the 1-variable template (name only) is used instead.
+      const factsM = String(own.notes || '').match(/AD FACTS: beds=([^;]*); type=([^;]*); area=([^\n]*)/);
+      const adBeds = factsM ? factsM[1].trim() : '';
+      const adType = (factsM ? factsM[2].trim() : '') || 'villa';
+      const adArea = (factsM ? factsM[3].trim() : '') || 'Bali';
+      const hasFacts = !!factsM;
+      const phCount = (t) => {
+        const body = (t.components || []).find(c => c.type === 'BODY');
+        return ((body?.text || '').match(/\{\{\d+\}\}/g) || []).length;
+      };
+      const langPool = (cold ? coldTpls : warmTpls).filter(t => (t.language || '').startsWith(wantLang));
+      const anyPool = cold ? coldTpls : warmTpls;
+      // Prefer the multi-variable template when we have facts; otherwise the
+      // simplest one. Fall back across languages if the wanted one is missing.
+      const pickFrom = (arr) => hasFacts
+        ? (arr.find(t => phCount(t) >= 3) || arr.sort((a, b) => phCount(a) - phCount(b))[0])
+        : (arr.sort((a, b) => phCount(a) - phCount(b))[0]);
+      const tpl = (langPool.length ? pickFrom(langPool) : pickFrom(anyPool));
       if (!tpl) return res.status(400).json({ error: 'No approved owner intro template — check template status in WhatsApp Manager' });
       const fName = String(own.name || '').trim().split(/\s+/)[0] || 'there';
+      // Descriptor grammar per language: "3-bedroom villa" / "Villa 3 kamar".
+      const isId = (tpl.language || '').startsWith('id');
+      const descriptor = isId
+        ? `${adType.charAt(0).toUpperCase() + adType.slice(1)}${adBeds ? ' ' + adBeds + ' kamar' : ''}`
+        : `${adBeds ? adBeds + '-bedroom ' : ''}${adType}`;
+      const bodyParams = [fName, descriptor, adArea].slice(0, Math.max(1, phCount(tpl)))
+        .map(t => ({ type: 'text', text: String(t) }));
       const comps = [];
       const headerComp = (tpl.components || []).find(c => c.type === 'HEADER' && c.format === 'IMAGE');
       if (headerComp) comps.push({ type: 'header', parameters: [{ type: 'image', image: { link: 'https://sambarentals.com/wa/onboard-hero.jpg' } }] });
-      comps.push({ type: 'body', parameters: [{ type: 'text', text: fName }] });
+      comps.push({ type: 'body', parameters: bodyParams });
       // Dynamic URL button ("See how it works" → sambarentals.com/portal)
       const btnComp = (tpl.components || []).find(c => c.type === 'BUTTONS');
       if ((btnComp?.buttons || []).some(b => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url || ''))) {
@@ -553,6 +586,7 @@ export default async function handler(req, res) {
  "owner_name": string|null (the person or business advertising — often the poster's name),
  "wa_num": string|null (the WhatsApp/phone number as DIGITS ONLY in Indonesian international format: convert a leading 0 to 62, e.g. 081339632893 -> 6281339632893; keep a +62/62 number as-is without the plus. If several numbers appear, pick the one labelled WA/WhatsApp/contact. NEVER invent digits — if unsure or none visible, use null),
  "area": string|null (neighbourhood/area, e.g. Berawa, Canggu),
+ "property_type": "villa"|"apartment"|"townhouse"|"guesthouse"|"house"|null,
  "beds": string|null, "baths": string|null,
  "price_month": string|null (as written, e.g. "IDR 16,000,000/month"),
  "price_year": string|null,

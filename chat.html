@@ -1379,10 +1379,11 @@ function openAddOwner() {
 }
 
 let aoIntel = null;   // the ad's fact sheet from the last extraction — sent with Add prospect
+let aoFacts = null;   // structured beds/type/area for the personalised cold template
 async function extractOwnerImage(files) {
   const list = Array.from(files || []).slice(0, 8);
   if (!list.length) return;
-  aoIntel = null;
+  aoIntel = null; aoFacts = null;
   const st = document.getElementById('aoImgStatus'); st.style.display = 'block'; st.style.color = 'var(--wa-ink-2)';
   st.textContent = 'Maya is reading ' + (list.length > 1 ? list.length + ' screenshots…' : 'the screenshot…');
   try {
@@ -1406,6 +1407,7 @@ async function extractOwnerImage(files) {
     document.getElementById('aoNote').value = 'Cold outreach — ' + (e.summary || 'found the villa advertised for rent') + (e.area ? ' (' + e.area + ')' : '');
     document.getElementById('aoCold').checked = true;
     aoIntel = e.listing_intel || null;
+    aoFacts = (e.beds || e.property_type || e.area) ? { beds: e.beds || null, type: e.property_type || null, area: e.area || null } : null;
     let msg = '✓ Read it. ';
     if (!d.wa_num) msg += 'No clear WhatsApp number — add it manually. ';
     else if (e.confidence !== 'high') msg += 'Double-check the number (confidence: ' + (e.confidence || '?') + '). ';
@@ -1433,7 +1435,7 @@ async function submitAddOwner(e) {
   result.className = 'qa-result'; result.textContent = '';
   try {
     const ar = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'add_owner_prospect', payload: { name, waNum: wa, lang, consentNote: note, cold, intel: (typeof aoIntel === 'string' ? aoIntel : null) } }) });
+      body: JSON.stringify({ action: 'add_owner_prospect', payload: { name, waNum: wa, lang, consentNote: note, cold, intel: (typeof aoIntel === 'string' ? aoIntel : null), facts: aoFacts } }) });
     const ad = await ar.json().catch(() => ({}));
     if (!ar.ok) throw new Error(ad.error || ('HTTP ' + ar.status));
     const ownerId = ad.owner && ad.owner.id;
