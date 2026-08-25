@@ -602,6 +602,31 @@ export default async function handler(req, res) {
       } catch (e) { introSweep = { error: e.message }; }
     }
 
+    // ── VIEWINGS PASS (expiry sync, day-of reminders, outcome asks) ──
+    let viewingsCron = null;
+    if (!previewMode) {
+      try {
+        const { runViewingsCron } = await import('../lib/viewings.js');
+        const send = async (to, body) => {
+          const r = await fetch(`${GRAPH}/${WA_PHONE_ID}/messages`, {
+            method: 'POST',
+            headers: { 'Authorization': 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
+          });
+          if (!r.ok) throw new Error('send failed');
+          const d = await r.json().catch(() => ({}));
+          const mid = d.messages?.[0]?.id || null;
+          // Log so the console thread shows the reminder/outcome ask.
+          const ag = await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${to}&select=id&limit=1`, { headers: sbHeaders }).then(x => x.json()).catch(() => []);
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({ agent_id: ag?.[0]?.id ?? null, wa_num: to, direction: 'outbound', content: body, wa_message_id: mid, timestamp: new Date().toISOString(), source: 'cron', category: 'viewing_reminder', status: 'sent' }),
+          }).catch(() => {});
+        };
+        viewingsCron = await runViewingsCron({ SUPABASE_URL, sbHeaders }, null, { now, sendText: send });
+      } catch (e) { viewingsCron = { error: e.message }; }
+    }
+
     // ── ACCOUNT-INVITE SWEEP (dormant reactivation) ──────────────────
     // One-time nudge asking dormant/cold agents to create a portal account
     // (Google sign-in → personal share link + click/enquiry attribution).
@@ -926,6 +951,7 @@ export default async function handler(req, res) {
       availability: availabilityResult,
       intro_sweep: introSweep,
       account_invites: accountInvites,
+      viewings: viewingsCron,
       unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
       listing_info_chase: listingInfo && { listings_with_gaps: listingInfo.listings_with_gaps, contacts_messaged: listingInfo.contacts_messaged, exhausted: listingInfo.exhausted, error: listingInfo.error },

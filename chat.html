@@ -3113,9 +3113,24 @@ async function loadSchedule() {
   const body = document.getElementById('schBody');
   body.innerHTML = '<div class="an-loading">Loading…</div>';
   try {
-    const d = await api('get_schedule');
+    const [d, viewings] = await Promise.all([api('get_schedule'), api('get_viewings').catch(() => [])]);
     if (!d || d.error) throw new Error(d?.error || 'no data');
     let html = '';
+
+    // ── Viewings — the appointments the schedule actually exists for ──
+    const vRows = Array.isArray(viewings) ? viewings : [];
+    if (vRows.length) {
+      const vChip = (s) => `<span class="an-tierchip tier-${({ confirmed: 'active', requested: 'warm', completed: 'champion', declined: 'dormant', expired: 'dormant', cancelled: 'dormant', no_show: 'hot' })[s] || 'unset'}">${esc(s)}</span>`;
+      const fmtV = (v) => `<div class="sch-task">
+          <div class="sch-task-name">${esc(v.property_name || v.rental_slug || '?')} ${vChip(v.status)}</div>
+          <div class="sch-task-detail">${esc(v.agent_name || 'agent #' + v.agent_id)}${v.contact_name ? ' · contact ' + esc(v.contact_name) : ''}${v.scheduled_at ? ' · ' + esc(fmtWita(v.scheduled_at)) : v.requested_window ? ' · asked: ' + esc(v.requested_window) : ''}${v.outcome_note ? ' · ' + esc(v.outcome_note) : ''}</div>
+        </div>`;
+      const live = vRows.filter(v => ['requested', 'confirmed'].includes(v.status));
+      const past = vRows.filter(v => !['requested', 'confirmed'].includes(v.status)).slice(0, 10);
+      html += '<div class="an-section-title">Viewings</div>';
+      html += `<div class="sch-run">${live.length ? live.map(fmtV).join('') : '<div class="sch-empty" style="padding:10px 0">No live viewing requests.</div>'}</div>`;
+      if (past.length) html += `<div class="sch-past"><div class="sch-past-head"><span class="sch-past-kind">Past viewings</span></div>${past.map(fmtV).join('')}</div>`;
+    }
 
     html += '<div class="an-section-title">Upcoming</div>';
     for (const run of (d.upcoming || [])) {

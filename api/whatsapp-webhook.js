@@ -8,7 +8,8 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
-import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
+import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, VIEWING_PREFIX, isViewing } from '../lib/relay.js';
+import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
@@ -131,6 +132,27 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
   }
 
   await recordAnswer(db, captured.relay.id, { answer: captured.answer, durableFact: captured.durableFact });
+
+  // Viewing relays also drive the viewings state machine — 'confirmed' is set
+  // HERE, from the contact's own words, never by Maya's judgment.
+  if (isViewing(captured.relay.question) && captured.viewing) {
+    try {
+      const v = await viewingByRelay(db, captured.relay.id);
+      if (v && (v.status === 'requested' || v.status === 'confirmed')) {
+        if (captured.viewing.outcome === 'confirmed') {
+          await updateViewing(db, v.id, {
+            status: 'confirmed', confirmed_at: new Date().toISOString(),
+            ...(captured.viewing.scheduledAt ? { scheduled_at: captured.viewing.scheduledAt } : {}),
+          });
+        } else if (captured.viewing.outcome === 'declined') {
+          await updateViewing(db, v.id, { status: 'declined' });
+        }
+        // 'unclear' (counter-proposal) stays 'requested' — the answer still
+        // reaches the agent, who settles the time with the contact directly.
+      }
+    } catch (e) { console.warn('viewing state update failed:', e.message); }
+  }
+
   await sendText(wa.phoneId, wa.token, fromNum,
     `Perfect, thank you — passing that straight back to the agent now.`);
   await deliverAnswers(db, wa, captured.relay.agent_wa);
@@ -640,6 +662,7 @@ const MAYA_REPLY_SCHEMA = strObj({
   reply_buttons: { type: 'array', items: { type: 'string' } },
   notify_team: nullable(strObj({ to: { type: 'string', enum: ['era', 'ikiel'] }, summary: { type: 'string' }, share_agent_contact: { type: 'boolean' } })),
   ask_owner: nullable(strObj({ slug: { type: 'string' }, question: { type: 'string' } })),
+  open_viewing: nullable(strObj({ slug: { type: 'string' }, requested_window: { type: 'string' } })),
   crm_updates: { type: 'array', items: strObj({
     field: { type: 'string' },
     value: { anyOf: [{ type: 'string' }, { type: 'boolean' }, { type: 'number' }] },
@@ -1378,7 +1401,7 @@ export async function nodeHandler(req, res) {
     }
 
     // Generate a reply with Claude — load live project + rental data from DB first
-    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest }
+    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock }
       = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
     // Vision: when the agent sent an image, fetch its bytes so Maya can
     // actually look at it (listing screenshots, property photos, documents
@@ -1391,7 +1414,7 @@ export async function nodeHandler(req, res) {
           + '[The agent sent the attached image — look at it and respond helpfully. If it shows a property, listing screenshot, or document, address its content directly; if it is unrelated small talk (memes, greetings), respond naturally and briefly.]';
       }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalSlugs, availabilityContext, inboundImage, playbookBlock);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalSlugs, availabilityContext, inboundImage, playbookBlock, viewingsBlock);
 
     // Increment today's spend by the ACTUAL token cost of the Claude call(s),
     // computed from the Anthropic usage block (a date-range availability lookup
@@ -1478,6 +1501,7 @@ export async function nodeHandler(req, res) {
     if (aiResult.send_contact) sideFx.send_contact = aiResult.send_contact;
     if (aiResult.notify_team) sideFx.notify_team = aiResult.notify_team;
     if (aiResult.ask_owner) sideFx.ask_owner = aiResult.ask_owner;
+    if (aiResult.open_viewing) sideFx.open_viewing = aiResult.open_viewing;
     if (aiResult.send_doc) sideFx.send_doc = aiResult.send_doc;
     if (Array.isArray(aiResult.reply_buttons) && aiResult.reply_buttons.length) sideFx.reply_buttons = aiResult.reply_buttons;
     const draftCardsSuffix = (cardSlugs.length ? `\n[[send-cards:${cardSlugs.join(',')}]]` : '')
@@ -2142,6 +2166,43 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
       }
     } catch (e) { console.warn('openRelay failed:', e.message); }
   }
+
+  // ── open_viewing: a structured viewing request ─────────────────────
+  // The ask to the villa contact rides a relay (window re-opener, nudge and
+  // answer delivery all come free); the viewings row carries the state the
+  // relay can't: confirmation, schedule, reminders, outcome.
+  if (actions.open_viewing) {
+    const ov = actions.open_viewing;
+    const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
+    const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ov.slug));
+    const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
+    const contactName = prop?.waContactName || 'Era';
+    try {
+      let ownerId = null;
+      try {
+        const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${contactWa}&select=id&limit=1`, { headers: sbHeaders });
+        ownerId = (await oRes.json())?.[0]?.id ?? null;
+      } catch { /* nicety */ }
+      const question = `${VIEWING_PREFIX}An agent would like to VIEW ${prop?.name || ov.slug}. Requested time: ${ov.requested_window}. Does that work — and if not, what time suits?`;
+      const r = await openRelay({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, {
+        agent, question, slug: ov.slug,
+        propertyName: prop?.name || ov.slug, contactName, contactWa, ownerId,
+      });
+      if (r.ok) {
+        await createViewing({ SUPABASE_URL, sbHeaders }, {
+          agent, slug: ov.slug, propertyName: prop?.name || ov.slug,
+          contactWa, contactName, requestedWindow: ov.requested_window, relayId: r.relayId,
+        }).catch(() => {});
+        sendPushNotifications(SUPABASE_URL, sbHeaders, {
+          title: `Viewing requested: ${prop?.name || ov.slug}`,
+          body: `${agent.name || 'Agent'} — ${ov.requested_window} (asking ${contactName})`,
+          agentId: agent.id, badgeCount: (agent.unread_count || 0) + 1,
+        }).catch(() => {});
+      } else {
+        console.log('viewing relay not opened:', r.reason);
+      }
+    } catch (e) { console.warn('open_viewing failed:', e.message); }
+  }
 }
 
 // Everything generateReply needs that comes from the DB / portal, assembled
@@ -2171,10 +2232,17 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
       if (cRow?.context) campaignContext = { name: cRow.name, context: cRow.context, purpose: cRow.purpose };
     } catch (e) { /* non-fatal */ }
   }
+  // Live viewing state for this agent (empty until the viewings migration runs).
+  let viewingsBlock = '';
+  try {
+    const vdb = { SUPABASE_URL, sbHeaders };
+    const [vActive, vPast] = await Promise.all([viewingsForAgent(vdb, agent.id), viewingsAwaitingOutcome(vdb, agent.id)]);
+    viewingsBlock = viewingsPromptBlock(vActive, vPast);
+  } catch { /* table not migrated yet */ }
   // `digest` rides along: the handler's ask_owner branch resolves the listing's
   // "enquire with" contact from it (it went missing from handler scope when
   // this helper was extracted on 22 Aug 2026 — ReferenceError on every relay).
-  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest };
+  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock };
 }
 
 // DRY RUN — run the full agent reply pipeline (live KB, availability, thread,
@@ -2205,14 +2273,14 @@ export async function previewAgentReply({ SUPABASE_URL, sbHeaders, ANTHROPIC_KEY
   }
   if (!text) return { error: 'no inbound message to reply to' };
   const ctx = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
-  const result = await generateReply(ANTHROPIC_KEY, agent, text, mode || 'hybrid', ctx.liveContext, ctx.liveBrochures, ctx.recentThread, ctx.rentalsContext, ctx.campaignContext, ctx.rentalSlugs, ctx.availabilityContext, null, ctx.playbookBlock);
+  const result = await generateReply(ANTHROPIC_KEY, agent, text, mode || 'hybrid', ctx.liveContext, ctx.liveBrochures, ctx.recentThread, ctx.rentalsContext, ctx.campaignContext, ctx.rentalSlugs, ctx.availabilityContext, null, ctx.playbookBlock, ctx.viewingsBlock);
   // debug: also return the data blocks Maya was reasoning over, so a wrong
   // recommendation can be traced to the data vs the prompt.
   const extra = debug ? { context: { thread: ctx.recentThread, availability: ctx.availabilityContext, rentals: ctx.rentalsContext } } : {};
   return { inbound: text, ...result, ...extra };
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '') {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '', viewingsBlock = '') {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -2292,6 +2360,10 @@ DATA PRIORITY RULES (critical — read carefully):
 7. If a field is empty AND there's nothing in extended_info that covers the question, do not guess or fill in from memory. For a Samba rental, ask the listed contact (ask_owner); for a KAYA project, say you'll check with Ikiel and set notify_team.
 8. Better still, GO AND GET THE ANSWER — see ASKING THE VILLA CONTACT below. "I don't have that" is a dead end; "let me find out for you" is the job.
 
+VIEWING REQUESTS ("open_viewing") — the structured path for arranging a visit:
+When an agent wants to VIEW a specific Samba villa and gives (or you have just collected) a day/time window, set "open_viewing": { "slug", "requested_window" } in the SAME reply where you tell them you're arranging it. The system asks that villa's listed contact to confirm the slot, tracks the viewing (requested → confirmed), reminds both sides on the day, and follows up for the outcome — so a viewing never silently evaporates. Still send the contact's card (send_contact) so the agent can coordinate directly, and keep every existing rule: you NEVER say the viewing is confirmed — confirmation comes from the contact and the system will show it in THIS AGENT'S VIEWINGS. One open_viewing per reply; don't re-open one that already exists in the viewings list (check it), and if the agent changes the time, mention the change in a fresh open_viewing only if the old one was declined/expired — otherwise relay the change via ask_owner.
+If an agent reports how a viewing went (or cancels), record it: crm_actions { "type": "update_viewing", "viewing_id": <id from THIS AGENT'S VIEWINGS>, "status": "completed" | "no_show" | "cancelled", "note": "<one line>" }.
+
 ASKING THE VILLA CONTACT ("ask_owner") — how you answer what isn't in your data:
 When an agent asks a CHECKABLE FACT about a specific Samba villa that is not in the data above — a bathtub, an oven, a bathtub vs shower, air-con in every room, a generator, whether the pet policy stretches to a dog, stroller access, a workspace, water pressure, staff, parking for two cars — do not stop at the contact card. Set "ask_owner": { "slug": "<that property's slug>", "question": "<the question in one clear sentence>" }. The system asks that listing's "enquire with" contact on WhatsApp, waits for their answer, and delivers it back to the agent for you — even days later, and even if either side's chat window has closed in the meantime.
 - Tell the agent plainly what you're doing, in the same reply: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
@@ -2329,7 +2401,7 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${portalLine}
-${threadBlock}
+${viewingsBlock}${threadBlock}
 ${briefBlock}
 Today's date is ${new Date().toISOString().slice(0, 10)} (Bali/WITA) — resolve "next week", "end of the month" etc. against it.
 
@@ -2381,6 +2453,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "reply_buttons": [] | up to 3 short tap options (max 20 chars each), e.g. ["More options", "Download photos"],
   "notify_team": null | { "to": "era" | "ikiel", "summary": "1-2 sentences: property name + what's needed + any deadline", "share_agent_contact": true|false },
   "ask_owner": null | { "slug": "<samba rental slug from the list above>", "question": "one clear question about the property, sent verbatim to its enquire-with contact" },
+  "open_viewing": null | { "slug": "<samba rental slug>", "requested_window": "<the agent's asked day/time in plain words, e.g. 'Wednesday 27 Aug, 12-3pm'>" },
   "crm_updates": [
     { "field": "projects.Sabit House.status", "value": "Listed", "reason": "agent confirmed listing" }
   ],
@@ -2544,6 +2617,13 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
           ? {
               slug: String(parsed.ask_owner.slug),
               question: String(parsed.ask_owner.question).trim().slice(0, 500),
+            }
+          : null,
+        open_viewing: (parsed.open_viewing && parsed.open_viewing.slug && parsed.open_viewing.requested_window
+                    && rentalSlugs.includes(String(parsed.open_viewing.slug)))
+          ? {
+              slug: String(parsed.open_viewing.slug),
+              requested_window: String(parsed.open_viewing.requested_window).trim().slice(0, 200),
             }
           : null,
         llm_calls: llmCalls,

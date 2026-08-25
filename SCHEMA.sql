@@ -308,3 +308,31 @@ create table if not exists relays (
 create index if not exists idx_relays_contact on relays (contact_wa, status);
 create index if not exists idx_relays_agent on relays (agent_wa, status);
 create index if not exists idx_relays_kb on relays (kb_status) where kb_status is not null;
+
+-- ── VIEWINGS ─────────────────────────────────────────────────────────
+-- Structured viewing appointments (lib/viewings.js). The ask to the villa
+-- contact rides the relays table (relay_id); this row carries the state
+-- machine: requested → confirmed → completed | no_show, or declined /
+-- expired / cancelled. Never any client PII — the agent's client is theirs.
+create table if not exists viewings (
+  id                bigserial primary key,
+  agent_id          bigint,
+  agent_wa          text,
+  agent_name        text,
+  rental_slug       text,
+  property_name     text,
+  contact_wa        text,
+  contact_name      text,
+  requested_window  text,          -- the agent's asked day/time, free text
+  scheduled_at      timestamptz,   -- set when the contact confirms a slot
+  status            text default 'requested',
+  relay_id          bigint,        -- the relay carrying the ask to the contact
+  outcome_note      text,
+  reminded_at       timestamptz,   -- morning-of reminder sent
+  outcome_asked_at  timestamptz,   -- day-after "how did it go?" sent
+  confirmed_at      timestamptz,
+  created_at        timestamptz default now(),
+  updated_at        timestamptz default now()
+);
+create index if not exists viewings_status_idx on viewings (status);
+create index if not exists viewings_agent_idx  on viewings (agent_id);

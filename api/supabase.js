@@ -1068,6 +1068,24 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(500).json({ error: 'chase failed: ' + e.message });
       }
 
+    } else if (action === 'get_viewings') {
+      // Console: structured viewing appointments (lib/viewings.js), newest
+      // first. Empty array (not an error) until the table is migrated.
+      r = await fetch(`${SUPABASE_URL}/rest/v1/viewings?select=*&order=created_at.desc&limit=100`, { headers });
+      if (!r.ok) return res.status(200).json([]);
+      return res.status(200).json(await r.json());
+
+    } else if (action === 'patch_viewing') {
+      // Console: manual state change (Era/Ikiel confirming a slot, cancelling,
+      // recording an outcome). payload: { id, fields }.
+      const { id, fields } = payload || {};
+      if (id == null || !fields) return res.status(400).json({ error: 'id and fields required' });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/viewings?id=eq.${id}`, {
+        method: 'PATCH', headers,
+        body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
+      });
+      return res.status(r.ok ? 200 : r.status).json(r.ok ? { ok: true } : { error: await r.text() });
+
     } else if (action === 'transcribe_media') {
       // Transcribe an already-received WhatsApp voice note by its media id
       // (backfill for notes that arrived before transcription had a key, or
