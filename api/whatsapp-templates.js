@@ -2,6 +2,7 @@
 // POST with { action: 'create', name, body, example } submits a new
 // template for Meta review (used for the strategic broadcast templates).
 import { createCarouselDigest, listingCarouselCards, buildCarouselComponents, createMediaTemplate, heroImageForSlug, setBusinessProfilePicture } from '../lib/wa-carousel.js';
+import { consoleAuthorized } from '../lib/auth.js';
 import crypto from 'node:crypto';
 
 export default async function handler(req, res) {
@@ -21,9 +22,13 @@ export default async function handler(req, res) {
     // submissions (LISTING_SYNC_SECRET is Vercel-sensitive, so it can't be
     // retrieved for ad-hoc curl use).
     const secrets = [process.env.LISTING_SYNC_SECRET, process.env.TEMPLATE_ADMIN_SECRET].filter(Boolean);
-    if (!secrets.length) return res.status(500).json({ error: 'no template auth secret configured' });
+    if (!secrets.length && !process.env.CONSOLE_SECRET) return res.status(500).json({ error: 'no template auth secret configured' });
     const auth = req.headers.authorization || '';
-    if (!secrets.some(s => auth === `Bearer ${s}`)) {
+    // The console key (x-console-key, same gate as api/supabase.js) counts
+    // too — only when CONSOLE_SECRET is actually set, so this route still
+    // fails closed on a misconfigured deploy.
+    const viaConsole = !!process.env.CONSOLE_SECRET && consoleAuthorized(req);
+    if (!viaConsole && !secrets.some(s => auth === `Bearer ${s}`)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
   }

@@ -18,15 +18,27 @@ const ENDPOINT = 'https://kaya-agent-crm.vercel.app/api/whatsapp-templates';
 const NAME = 'samba_account_invite_v1';
 
 // Meta caps template BODY at 1,024 chars, so the bilingual copy is kept tight.
-const BODY = `Hi {{1}}, Maya from Samba Realty here. We've added free agent accounts on the Samba portal and yours is waiting.
+const BODY = `Hi {{1}}, Maya from Samba Realty here. Agent accounts are now live on the Samba portal — free, one tap with Google.
 
-Sign in once with Google and you get your own share link — every villa you send a client is credited to you, with your clicks and enquiries counted. You can also save favourites and build client shortlists to share as one link. Commission is still 10%, already in the price.
+Your account gets you:
+- Your own share link — every click and enquiry credited to you
+- One-tap Instagram stories with your name, photo and WhatsApp on the card
+- Client shortlists you send as one link
+- Your own live stats: clicks and enquiries
+
+Commission stays 10%, already in the price.
 
 ---
 
-Halo {{1}}, Maya dari Samba Realty. Sekarang ada akun agen gratis di portal Samba — akun Anda sudah menunggu.
+Halo {{1}}, Maya dari Samba Realty. Akun agen kini hadir di portal Samba — gratis, sekali ketuk dengan Google.
 
-Cukup masuk sekali dengan Google dan Anda punya link share pribadi — setiap villa yang Anda kirim ke klien tercatat atas nama Anda, lengkap dengan jumlah klik dan inquiry. Anda juga bisa menyimpan favorit dan membuat shortlist untuk klien dalam satu link. Komisi tetap 10%, sudah termasuk harga.`;
+Dengan akun Anda:
+- Link share pribadi — setiap klik dan inquiry tercatat atas nama Anda
+- Story Instagram sekali ketuk dengan nama, foto, dan WhatsApp Anda
+- Shortlist untuk klien, cukup kirim satu link
+- Statistik Anda real-time: klik dan inquiry
+
+Komisi tetap 10%, sudah termasuk harga.`;
 
 const BUTTON = {
   text: 'Create my account',
