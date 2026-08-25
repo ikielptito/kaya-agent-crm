@@ -374,7 +374,21 @@ async function saveProspect(){
       warn.textContent=`⚠ This number is also agent "${d.agentCollision.name||d.agentCollision.agency||'unknown'}" in the CRM — WhatsApp replies will route to AGENT-mode Maya, not onboarding. Consider removing the agent record first.`;
       toast('Added — but check the agent collision warning');
     } else {
-      toast('Prospect added — open their thread and press "Send intro"');
+      // Fire-now rule (25 Aug 2026): cold intros go out immediately inside
+      // contact hours (9–21 WITA); outside them the 9am drip sends it.
+      const witaHour=(new Date().getUTCHours()+8)%24;
+      if(cold && d.owner && d.owner.id && witaHour>=9 && witaHour<21){
+        try{
+          const sr=await fetch('/api/supabase',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({action:'send_onboard_intro',payload:{id:d.owner.id}})});
+          const sd=await sr.json().catch(()=>({}));
+          toast(sr.ok?`Added — cold intro sent (${sd.template})`:'Added, but intro failed: '+(sd.error||sr.status)+' — the 9am drip will retry');
+        }catch(e){ toast('Added, but intro failed — the 9am drip will retry'); }
+      } else if(cold){
+        toast('Added — outside contact hours; cold intro goes out at 9am WITA');
+      } else {
+        toast('Prospect added — open their thread and press "Send intro"');
+      }
       closeProspectModal();
     }
     document.getElementById('p-name').value=''; document.getElementById('p-wa').value=''; document.getElementById('p-note').value=''; document.getElementById('p-cold').checked=false; document.getElementById('p-cold-hint').style.display='none';

@@ -1372,10 +1372,9 @@ function openAddOwner() {
       <div class="qa-field"><label>Context</label><textarea id="aoNote" rows="2" placeholder="e.g. Advertising the villa for rent on FB Marketplace"></textarea></div>
       <div id="aoResult"></div>
       <div style="display:flex;gap:8px">
-        <button class="qa-submit" id="aoSaveBtn" type="submit" style="flex:1;background:var(--wa-panel-2);color:var(--wa-ink)">Add prospect</button>
-        <button class="qa-submit" id="aoSendBtn" type="button" onclick="submitAddOwner(event, true)" style="flex:1">Add &amp; Send intro</button>
+        <button class="qa-submit" id="aoSaveBtn" type="submit" style="flex:1">Add prospect</button>
       </div>
-      <div style="font-size:11.5px;color:var(--wa-ink-2);margin-top:8px;line-height:1.45">Cold prospects don't need "Send intro" — Maya auto-sends the cold opener to queued prospects every morning at 9am (max 8/day, oldest first). "Add &amp; Send intro" just skips the queue and fires it now.</div>
+      <div style="font-size:11.5px;color:var(--wa-ink-2);margin-top:8px;line-height:1.45">Cold prospects: Maya fires the cold opener immediately during contact hours (9am–9pm WITA); outside them it queues for the next 9am. Warm prospects are never auto-messaged — open with your own text, or use "Send intro" from their thread.</div>
     </form></div></div></div>`;
 }
 
@@ -1408,20 +1407,23 @@ async function extractOwnerImage(file) {
   } catch (err) { st.style.color = '#c5221f'; st.textContent = '⚠ ' + (err.message || 'could not read image'); }
 }
 
-async function submitAddOwner(e, sendIntro) {
+async function submitAddOwner(e) {
   e.preventDefault();
   const result = document.getElementById('aoResult');
-  const saveBtn = document.getElementById('aoSaveBtn'), sendBtn = document.getElementById('aoSendBtn');
+  const saveBtn = document.getElementById('aoSaveBtn');
   const name = document.getElementById('aoName').value.trim();
   const wa = document.getElementById('aoNum').value.trim();
   if (!name || !wa) { result.className = 'qa-result err'; result.textContent = 'Name and WhatsApp number are required'; return; }
   const lang = document.getElementById('aoLang').value;
   const note = document.getElementById('aoNote').value.trim();
   const cold = document.getElementById('aoCold').checked;
-  saveBtn.disabled = true; sendBtn.disabled = true; sendBtn.textContent = sendIntro ? 'Sending…' : 'Adding…';
+  // The rule (Ikiel, 25 Aug 2026): a cold intro always fires NOW unless we're
+  // outside contact hours (9am–9pm WITA) — then the 9am drip sends it.
+  const witaHour = (new Date().getUTCHours() + 8) % 24;
+  const inWindow = witaHour >= 9 && witaHour < 21;
+  saveBtn.disabled = true; saveBtn.textContent = 'Adding…';
   result.className = 'qa-result'; result.textContent = '';
   try {
-    // add_owner_prospect can 409 on a duplicate — read the body ourselves.
     const ar = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'add_owner_prospect', payload: { name, waNum: wa, lang, consentNote: note, cold } }) });
     const ad = await ar.json().catch(() => ({}));
@@ -1429,22 +1431,28 @@ async function submitAddOwner(e, sendIntro) {
     const ownerId = ad.owner && ad.owner.id;
     let msg = 'Added.';
     if (ad.agentCollision) msg = `Added — but note this number is also agent "${ad.agentCollision.name || ad.agentCollision.agency || 'unknown'}".`;
-    if (sendIntro && ownerId) {
-      const sr = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send_onboard_intro', payload: { id: ownerId } }) });
-      const sd = await sr.json().catch(() => ({}));
-      if (!sr.ok) { result.className = 'qa-result err'; result.textContent = 'Added, but intro NOT sent — ' + (sd.error || ('HTTP ' + sr.status)); refreshAll(true); saveBtn.disabled = false; sendBtn.disabled = false; sendBtn.textContent = 'Add & Send intro'; return; }
-      msg = `Intro sent to ${name} (${sd.template}).`;
+    if (cold && ownerId) {
+      if (inWindow) {
+        saveBtn.textContent = 'Sending intro…';
+        const sr = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'send_onboard_intro', payload: { id: ownerId } }) });
+        const sd = await sr.json().catch(() => ({}));
+        if (!sr.ok) { result.className = 'qa-result err'; result.textContent = 'Added, but intro NOT sent — ' + (sd.error || ('HTTP ' + sr.status)) + '. It will retry with the 9am drip.'; refreshAll(true); saveBtn.disabled = false; saveBtn.textContent = 'Add prospect'; return; }
+        msg = `Cold intro sent to ${name} (${sd.template}).`;
+      } else {
+        msg = `Added — outside contact hours, so the cold intro goes out at 9am WITA.`;
+      }
+    } else if (!cold) {
+      msg += ' Warm prospect — open their thread to send the intro, or message them yourself.';
     }
     result.className = 'qa-result ok'; result.textContent = msg;
     await refreshAll(true);
     setTimeout(() => { closeModal(); setSeg('owners'); if (ownerId && state.owners.some(o => o.id === ownerId)) openOwnerConv(ownerId); }, 1600);
   } catch (err) {
     result.className = 'qa-result err'; result.textContent = err.message || 'Failed — try again';
-    saveBtn.disabled = false; sendBtn.disabled = false; sendBtn.textContent = 'Add & Send intro';
+    saveBtn.disabled = false; saveBtn.textContent = 'Add prospect';
   }
 }
-
 async function submitQuickAdd(e) {
   e.preventDefault();
   const btn = document.getElementById('qaSubmit');
