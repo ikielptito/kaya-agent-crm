@@ -3495,7 +3495,7 @@ function renderAnalytics(d) {
         <div class="an-ftrack"><div class="an-ffill" style="width:${v ? Math.max(2, Math.round(v / (c.sent || 1) * 100)) : 0}%"></div></div>
         <div class="an-fval">${v || 0} <small>${Math.round((v || 0) / (c.sent || 1) * 100)}%</small></div></div>`).join('');
     const goal = c.goal === 'signup'
-      ? `<b>${ch.acct_invite || 0}</b> portal visits via invite link · <b>${c.replied}</b> replied`
+      ? `<b>${c.signups || 0}</b> account${c.signups === 1 ? '' : 's'} created · ${ch.acct_invite || 0} invite-link visits · ${c.replied} replied`
       : (c.recipients
         ? `<b>${c.replied}</b> agent${c.replied === 1 ? '' : 's'} replied — ${Math.round(c.replied / c.recipients * 100)}% of the ${c.recipients} reached`
         : `<b>${c.replied}</b> replies`);

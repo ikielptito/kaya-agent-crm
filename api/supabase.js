@@ -1273,11 +1273,15 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
           if (ts && ts.some(s => t > s && t - s < H48)) camp[cat].repliers.add(m.agent_id);
         }
       }
+      // Invite → account conversions: agents carrying BOTH the invite stamp
+      // and a portal account (written back by the portal on signup).
+      const inviteSignups = ags.filter(a => a.campaign_engagement?.account_invite && a.campaign_engagement?.portal_account).length;
       const campaigns = Object.entries(camp).map(([cat, c]) => ({
         category: cat, name: CAMPAIGNS[cat].name, goal: CAMPAIGNS[cat].goal,
         sent: c.sent, delivered: c.delivered, read: c.read, failed: c.failed,
         recipients: c.agents.size, replied: c.repliers.size,
         first_at: c.first_at, last_at: c.last_at,
+        ...(cat === 'account_invite' ? { signups: inviteSignups } : {}),
       })).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
 
       // Per-campaign recipient drill-down: ?payload.campaign=<category>

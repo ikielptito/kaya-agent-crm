@@ -1596,6 +1596,28 @@ export async function runAvailabilityNotifications(ctx) {
     return summary;
   }
 
+  // ── Agent of the month (first Monday's digest only) ─────────────
+  // Winner = the account-holding agent whose SHARED LINKS earned the most
+  // client engagement this month (portal attribution: enquiries ×3 + views).
+  // Public recognition is an organic lever: it rewards the behaviour the
+  // account campaign is trying to create.
+  let shoutoutLine = '';
+  try {
+    const witaDom = new Date(now.getTime() + 8 * 3600e3).getUTCDate();
+    if (now.getUTCDay() === 1 && witaDom <= 7) {
+      const stats = await loadSetting(supabaseUrl, sbHeaders, 'agent_portal_stats') || {};
+      const attr = stats.attribution_month || {};
+      const byHandle = {};
+      agents.forEach(a => { const h = a.campaign_engagement?.portal_account?.handle; if (h) byHandle[h] = a; });
+      let best = null;
+      for (const h of new Set([...Object.keys(attr.views || {}), ...Object.keys(attr.wa || {})])) {
+        const score = (attr.wa?.[h] || 0) * 3 + (attr.views?.[h] || 0);
+        if ((attr.wa?.[h] || 0) >= 1 && byHandle[h] && (!best || score > best.score)) best = { agent: byHandle[h], score, wa: attr.wa[h] };
+      }
+      if (best) shoutoutLine = ` — shoutout to ${best.agent.name || 'our top agent'}, whose shared listings brought the most client enquiries this month 👏`;
+    }
+  } catch { /* recognition is a nicety */ }
+
   // ── Send loop ───────────────────────────────────────────────────
   for (const agent of cohort) {
     if (agent.samba_alerts_opt_out) { summary.skipped_opt_out++; continue; }
@@ -1684,7 +1706,7 @@ export async function runAvailabilityNotifications(ctx) {
     const carouselIntro = isFirstSend
       ? `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`
       : isMonday
-        ? `Hi ${firstName}, here's this week's Samba rentals availability${referralLine}`
+        ? `Hi ${firstName}, here's this week's Samba rentals availability${shoutoutLine || referralLine}`
         : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
     const sendComponents = sendCarousel
       ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
