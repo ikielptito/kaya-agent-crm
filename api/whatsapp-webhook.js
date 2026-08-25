@@ -6,7 +6,7 @@ import { createAgentRow } from '../lib/agents.js';
 import { patchAgent, applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { transcribeWaAudio } from '../lib/transcribe.js';
-import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
+import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers } from '../lib/relay.js';
 import webpush from 'web-push';
@@ -1624,7 +1624,7 @@ function extractInboundContent(msg) {
     const label = cards.map(c => c.nm + (c.phones.length ? ' — +' + c.phones.join(', +') : ' (no number)')).join(' | ');
     out.mediaType = 'contacts';
     out.dbContent = `[Contact card: ${label}]`;
-    out.textForClaude = `[Agent shared a WhatsApp contact card: ${label}. If they want this person added to updates or contacted instead of them, use the create_agent action with the exact number shown.]`;
+    out.textForClaude = `[Agent shared a WhatsApp contact card: ${label}. If they want this person added to updates or contacted instead of them, use the create_agent action with the exact number shown. If the shared contact is a VILLA OWNER being referred for listing on Samba, use refer_owner instead. Ambiguous? Ask one short question first.]`;
     return out;
   }
   if (msg.reaction) {
@@ -2253,6 +2253,12 @@ Agents can create a FREE account on sambarentals.com with one Google sign-in. Wh
 - Favourites, private notes, and client shortlists they can send as a single link.
 When an agent asks how to share listings, how to protect their commission when sharing, or for marketing materials for social media, tell them about the account (sign in with Google at https://sambarentals.com, then set up the profile with their WhatsApp number — the embedded contact and story card come from that profile). Mention it at most once per conversation — it's an answer to their problem, not a pitch to repeat.
 
+REFERRAL ASKS (grow the network — gently, never as a pitch):
+Only after a genuinely positive moment (they thanked you, a viewing was arranged, a deal moved forward, they said the updates help) you may add ONE short referral line. At most one referral ask per conversation, never in consecutive conversations with the same agent, never when the conversation has any friction in it.
+- OWNER referral (the priority — more villas means more for THEM to sell): "By the way — if you know a villa owner looking for long-term tenants, send me their contact card. The first 25 villas list free for good, and you'd get first look when it goes live." When they share one, emit refer_owner (see the contact-card rules).
+- AGENT referral: "Know another agent who'd want these updates? Just send me their contact card and I'll set them up." When they share one, create_agent handles it.
+Never ask for anyone's CLIENT — the client exclusion rule always wins.
+
 NAME-DROPPING IKIEL (important for cold rental agents):
 Many rental agents know Ikiel personally but may not recognize "Samba Realty" or "KAYA Developments" as brand names. To bridge that gap, mention Ikiel by name naturally in your first or second message when context permits:
 - Samba flow (more important): "I'm Maya, working with Ikiel on the Samba Realty side..." or "Ikiel asked me to make sure our agent partners have the latest..." — make it sound like a normal introduction, not a name-drop. The goal is to trigger their "oh, Ikiel's bot" recognition.
@@ -2714,8 +2720,11 @@ async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, 
   const prospect = isProspect(owner);
   let onboardingBlock = '';
   if (prospect && db) {
-    const agentReach = await fetchAgentReach(db.SUPABASE_URL, db.sbHeaders);
-    onboardingBlock = buildOnboardingPitch({ owner, agentReach });
+    const [agentReach, founding] = await Promise.all([
+      fetchAgentReach(db.SUPABASE_URL, db.sbHeaders),
+      fetchFoundingState(),
+    ]);
+    onboardingBlock = buildOnboardingPitch({ owner, agentReach, founding });
   }
   // Cold outreach is the hardest, highest-value, lowest-volume conversation
   // Maya has — a first impression on a skeptical stranger, where tact and

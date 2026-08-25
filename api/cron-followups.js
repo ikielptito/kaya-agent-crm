@@ -736,6 +736,25 @@ export default async function handler(req, res) {
           }).catch(() => {});
         }
         prospectFlags = { flagged: stale.length };
+
+        // Terminal state: a COLD prospect silent 14+ days after the intro is a
+        // no. Move them to 'declined' so the pipeline shows reality instead of
+        // prospects rotting in 'contacted' forever. Warm prospects (personal
+        // agreement with Ikiel) are never auto-declined — that's his call.
+        const deadBefore = new Date(now.getTime() - 14 * 24 * 3600 * 1000).toISOString();
+        const oldRows = await fetch(
+          `${SUPABASE_URL}/rest/v1/owners?onboarding_status=eq.contacted&updated_at=lt.${deadBefore}` +
+          `&select=id,name,last_inbound_at,notes,consent_note`,
+          { headers: sbHeaders }
+        ).then(r => r.json());
+        const dead = (Array.isArray(oldRows) ? oldRows : []).filter(o => !o.last_inbound_at && isColdProspect(o));
+        for (const o of dead) {
+          await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
+            method: 'PATCH', headers: sbHeaders,
+            body: JSON.stringify({ onboarding_status: 'declined', notes: `${o.notes ? o.notes + ' | ' : ''}auto-declined: no reply 14d after cold intro`, updated_at: now.toISOString() }),
+          }).catch(() => {});
+        }
+        if (dead.length) prospectFlags.auto_declined = dead.length;
       } catch (e) { prospectFlags = { error: e.message }; }
     }
 
@@ -1630,10 +1649,16 @@ export async function runAvailabilityNotifications(ctx) {
     // back-to-back sends as the identical blast re-sent ("stop sending daily").
     const sendCarousel = !!carouselCards && (isMonday || isFirstSend);
     const sendName = sendCarousel ? CAROUSEL_DIGEST : tmpl.name;
+    // Rotating referral ask: even ISO weeks only, digest sends only — one
+    // gentle line, not every week, never on a first touch.
+    const weekNum = Math.floor((now.getTime() - Date.parse(now.getUTCFullYear() + '-01-01')) / (7 * 86400e3));
+    const referralLine = (isMonday && !isFirstSend && weekNum % 2 === 0)
+      ? ' — PS: know a villa owner? Send me their contact card; founding villas list free for good'
+      : '';
     const carouselIntro = isFirstSend
       ? `Hi ${firstName}, I'm Maya from Samba Realty — here are current rental openings you can offer clients (10% agent commission)`
       : isMonday
-        ? `Hi ${firstName}, here's this week's Samba rentals availability`
+        ? `Hi ${firstName}, here's this week's Samba rentals availability${referralLine}`
         : `Hi ${firstName}, new openings on the Samba Rentals Agent Portal`;
     const sendComponents = sendCarousel
       ? buildCarouselComponents(firstName, carouselCards, carouselIntro)
