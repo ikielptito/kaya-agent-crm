@@ -1172,14 +1172,20 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       // read rates, tier split, channels, opt-out, and a hot/cold agent list.
       const days = Math.min(Math.max(payload?.days || 30, 1), 90);
       const since = new Date(Date.now() - days * 86400000).toISOString();
-      const [outRows, inRows, agRows, statsRow] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.outbound&select=agent_id,status,category,template_name&limit=20000`, { headers }).then(r => r.json()),
+      // Previous window of the same length — every headline rate gets a delta.
+      const sincePrev = new Date(Date.now() - 2 * days * 86400000).toISOString();
+      const [outRows, inRows, agRows, statsRow, outPrevRows, inPrevRows] = await Promise.all([
+        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.outbound&select=agent_id,status,category,template_name,timestamp&limit=20000`, { headers }).then(r => r.json()),
         fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.inbound&select=agent_id,timestamp&limit=20000`, { headers }).then(r => r.json()),
         fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,engagement_tier,samba_alerts_opt_out,contact_frequency,last_inbound_at,is_test,campaign_engagement`, { headers }).then(r => r.json()),
         fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.agent_portal_stats&select=value`, { headers }).then(r => r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.outbound&select=agent_id,status&limit=20000`, { headers }).then(r => r.json()),
+        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.inbound&select=agent_id&limit=20000`, { headers }).then(r => r.json()),
       ]);
       const out = Array.isArray(outRows) ? outRows : [];
       const inb = Array.isArray(inRows) ? inRows : [];
+      const outPrev = Array.isArray(outPrevRows) ? outPrevRows : [];
+      const inbPrev = Array.isArray(inPrevRows) ? inPrevRows : [];
       const ags = Array.isArray(agRows) ? agRows : [];
       const portal = statsRow?.[0]?.value || { agents: {}, channels: {} };
       const pStats = portal.agents || {};
@@ -1211,9 +1217,102 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return { id: a.id, name: nameOf[a.id], tier: a.engagement_tier || 'unset', last_reply_days: daysSinceReply, clicks: p.clicks || 0, enquiries: p.enquiries || 0, read: readSet.has(a.id) };
       }).sort((x, y) => (y.clicks + y.enquiries * 3) - (x.clicks + x.enquiries * 3) || ((x.last_reply_days ?? 999) - (y.last_reply_days ?? 999)));
 
+      // ── Campaign performance ─────────────────────────────────────────
+      // A campaign = an outbound category the crons send at scale. Free-text /
+      // draft / manual conversation is deliberately NOT a campaign.
+      const CAMPAIGNS = {
+        new_arrivals: { name: 'New arrivals', goal: 'reply' },
+        availability_digest: { name: 'Weekly digest', goal: 'reply' },
+        availability_alert: { name: 'Availability alerts', goal: 'reply' },
+        availability_intro: { name: 'First-touch intro', goal: 'reply' },
+        account_invite: { name: 'Account invites', goal: 'signup' },
+        onboarding: { name: 'Welcome', goal: 'reply' },
+      };
+      const camp = {};
+      const sendTimes = {};                 // category → agent_id → [send ms]
+      for (const m of out) {
+        if (!CAMPAIGNS[m.category]) continue;
+        const c = camp[m.category] || (camp[m.category] = { sent: 0, delivered: 0, read: 0, failed: 0, agents: new Set(), repliers: new Set(), first_at: m.timestamp, last_at: m.timestamp });
+        c.sent++;
+        if (m.status === 'delivered' || m.status === 'read') c.delivered++;
+        if (m.status === 'read') c.read++;
+        if (m.status === 'failed') c.failed++;
+        if (m.timestamp < c.first_at) c.first_at = m.timestamp;
+        if (m.timestamp > c.last_at) c.last_at = m.timestamp;
+        if (m.agent_id != null) {
+          c.agents.add(m.agent_id);
+          ((sendTimes[m.category] ||= {})[m.agent_id] ||= []).push(Date.parse(m.timestamp));
+        }
+      }
+      // A reply "belongs" to a campaign when it lands within 48h of one of that
+      // campaign's sends to the same agent (an agent can credit several).
+      const H48 = 48 * 3600e3;
+      for (const m of inb) {
+        if (m.agent_id == null) continue;
+        const t = Date.parse(m.timestamp);
+        for (const [cat, byAgent] of Object.entries(sendTimes)) {
+          const ts = byAgent[m.agent_id];
+          if (ts && ts.some(s => t > s && t - s < H48)) camp[cat].repliers.add(m.agent_id);
+        }
+      }
+      const campaigns = Object.entries(camp).map(([cat, c]) => ({
+        category: cat, name: CAMPAIGNS[cat].name, goal: CAMPAIGNS[cat].goal,
+        sent: c.sent, delivered: c.delivered, read: c.read, failed: c.failed,
+        recipients: c.agents.size, replied: c.repliers.size,
+        first_at: c.first_at, last_at: c.last_at,
+      })).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
+
+      // Per-campaign recipient drill-down: ?payload.campaign=<category>
+      if (payload?.campaign && CAMPAIGNS[payload.campaign]) {
+        const cat = payload.campaign;
+        const rank = { failed: 0, sent: 1, delivered: 2, read: 3 };
+        const perAgent = {};
+        for (const m of out) {
+          if (m.category !== cat || m.agent_id == null) continue;
+          const cur = perAgent[m.agent_id];
+          const r = rank[m.status] ?? 1;
+          if (!cur || r > cur.rank) perAgent[m.agent_id] = { rank: r, status: m.status || 'sent' };
+        }
+        const repliers = camp[cat]?.repliers || new Set();
+        const tierOf = {}; ags.forEach(a => { tierOf[a.id] = a.engagement_tier || 'unset'; });
+        const recipients = Object.entries(perAgent).map(([id, v]) => ({
+          id: Number(id), name: nameOf[id] || `#${id}`, tier: tierOf[id] || 'unset',
+          status: repliers.has(Number(id)) ? 'replied' : (v.status || 'sent'),
+        })).sort((a, b) => (b.status === 'replied') - (a.status === 'replied') || a.name.localeCompare(b.name));
+        return res.status(200).json({ campaign: cat, name: CAMPAIGNS[cat].name, recipients });
+      }
+
+      // ── Daily series (sends + distinct repliers) for sparklines/trend ──
+      const dayKey = (ts) => String(ts || '').slice(0, 10);
+      const seriesMap = {};
+      for (let i = days - 1; i >= 0; i--) seriesMap[dayKey(new Date(Date.now() - i * 86400000).toISOString())] = { sent: 0, repliers: new Set() };
+      for (const m of out) { const d = seriesMap[dayKey(m.timestamp)]; if (d) d.sent++; }
+      for (const m of inb) { const d = seriesMap[dayKey(m.timestamp)]; if (d && m.agent_id != null) d.repliers.add(m.agent_id); }
+      const series = Object.entries(seriesMap).map(([date, v]) => ({ date, sent: v.sent, replied: v.repliers.size }));
+
+      // Previous-window comparables for deltas.
+      const prevMessaged = new Set(), prevReplied = new Set();
+      let prevTracked = 0, prevRead = 0, prevFailed = 0;
+      for (const m of outPrev) {
+        if (enrolledIds.has(m.agent_id)) prevMessaged.add(m.agent_id);
+        if (m.status) { prevTracked++; if (m.status === 'read') prevRead++; }
+        if (m.status === 'failed') prevFailed++;
+      }
+      for (const m of inbPrev) if (enrolledIds.has(m.agent_id)) prevReplied.add(m.agent_id);
+      let tracked = 0, readMsgs = 0, failedMsgs = 0;
+      for (const m of out) { if (m.status) { tracked++; if (m.status === 'read') readMsgs++; } if (m.status === 'failed') failedMsgs++; }
+
       return res.status(200).json({
         window_days: days,
         funnel: { enrolled: enrolled.length, messaged: messaged.size, read: readSet.size, replied: replied.size, clicked: clicked.length, enquired: enquired.length },
+        prev: {
+          messaged: prevMessaged.size, replied: prevReplied.size,
+          read_rate: prevTracked ? Math.round(prevRead / prevTracked * 100) : null,
+          failed: prevFailed, sent: outPrev.length,
+        },
+        msg_stats: { sent: out.length, tracked, read: readMsgs, failed: failedMsgs, read_rate: tracked ? Math.round(readMsgs / tracked * 100) : null },
+        campaigns,
+        series,
         by_format,
         tiers,
         opt_out: { count: optedOut, rate: enrolled.length ? +(optedOut / enrolled.length * 100).toFixed(1) : 0 },

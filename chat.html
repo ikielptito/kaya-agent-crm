@@ -609,6 +609,57 @@
   .an-tile .v { font-size: 1.5rem; font-weight: 700; color: var(--wa-ink); font-variant-numeric: tabular-nums; line-height: 1; }
   .an-tile .s { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 5px; }
 
+  /* Segmented range control */
+  .an-seg { display: inline-flex; background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 9px; padding: 2px; gap: 2px; }
+  .an-seg button { border: none; background: none; font-family: inherit; font-size: 12.5px; font-weight: 600; color: var(--wa-ink-2); padding: 5px 12px; border-radius: 7px; cursor: pointer; }
+  .an-seg button.on { background: var(--wa-ink); color: #fff; }
+
+  /* Hero KPI tiles */
+  .an-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .an-hero .an-tile { position: relative; overflow: hidden; }
+  .an-hero .v { font-size: 1.7rem; }
+  .an-hero .v small { font-size: 0.95rem; font-weight: 600; color: var(--wa-ink-2); }
+  .an-delta { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 8px; margin-left: 7px; vertical-align: 3px; font-variant-numeric: tabular-nums; }
+  .an-delta.up { background: #DCEFE2; color: #1B7A44; }
+  .an-delta.down { background: #F7DCD6; color: #B23E19; }
+  .an-delta.flat { background: var(--wa-panel-2); color: var(--wa-ink-2); }
+  .an-spark { position: absolute; right: 10px; bottom: 10px; opacity: 0.9; }
+
+  /* Campaign cards */
+  .an-camp { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px; box-shadow: var(--wa-shadow); margin-bottom: 10px; overflow: hidden; }
+  .an-camp-main { padding: 13px 15px; cursor: pointer; }
+  .an-camp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+  .an-camp-name { font-size: 14px; font-weight: 700; color: var(--wa-ink); }
+  .an-camp-when { font-size: 11px; color: var(--wa-ink-2); white-space: nowrap; }
+  .an-camp-goal { font-size: 12.5px; color: var(--wa-ink); margin: 2px 0 10px; }
+  .an-camp-goal b { color: var(--wa-green-dark); font-size: 14px; font-variant-numeric: tabular-nums; }
+  .an-camp .an-frow { grid-template-columns: 74px 1fr 84px; }
+  .an-camp .an-ftrack { height: 16px; border-radius: 5px; }
+  .an-camp .an-ffill { border-radius: 5px; background: var(--wa-green); }
+  .an-camp .an-fname { font-size: 11.5px; }
+  .an-camp .an-fval { font-size: 11.5px; }
+  .an-camp-fail { font-size: 11px; color: #B23E19; margin-top: 7px; }
+  .an-camp-drill { border-top: 1px solid var(--wa-rule); background: var(--wa-panel-2); padding: 11px 15px; }
+  .an-chiprow { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 9px; }
+  .an-chip { font-size: 11px; font-weight: 600; border: 1px solid var(--wa-rule); background: var(--wa-panel); color: var(--wa-ink-2); border-radius: 12px; padding: 3px 10px; cursor: pointer; }
+  .an-chip.on { background: var(--wa-ink); border-color: var(--wa-ink); color: #fff; }
+  .an-drill-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 12.5px; border-bottom: 1px solid var(--wa-rule); }
+  .an-drill-row:last-child { border-bottom: none; }
+  .an-drill-name { color: var(--wa-ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .an-status { font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 1px 7px; border-radius: 5px; white-space: nowrap; }
+  .an-status.replied { background: #DCEFE2; color: #1B7A44; }
+  .an-status.read { background: #E8E3F5; color: #5B4A9E; }
+  .an-status.delivered { background: var(--wa-panel-2); color: var(--wa-ink-2); }
+  .an-status.sent { background: var(--wa-panel-2); color: var(--wa-ink-2); }
+  .an-status.failed { background: #F7DCD6; color: #B23E19; }
+
+  /* Trend chart */
+  .an-trend { background: var(--wa-panel); border: 1px solid var(--wa-rule); border-radius: 12px; box-shadow: var(--wa-shadow); padding: 13px 15px 8px; position: relative; }
+  .an-trend svg { display: block; width: 100%; height: auto; touch-action: none; }
+  .an-tt { position: absolute; pointer-events: none; background: var(--wa-ink); color: #fff; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 6px; transform: translate(-50%, -130%); white-space: nowrap; display: none; }
+
+  .an-showall { display: block; width: 100%; text-align: center; border: none; background: none; color: var(--wa-green-dark); font-family: inherit; font-size: 12.5px; font-weight: 700; padding: 10px 0 2px; cursor: pointer; }
+
   /* Bars (format + tiers) */
   .an-bars { display: flex; flex-direction: column; gap: 8px; }
   .an-bar { display: grid; grid-template-columns: 130px 1fr 54px; align-items: center; gap: 10px; font-size: 12.5px; }
@@ -802,11 +853,11 @@
   <div class="an-head">
     <button class="an-back" onclick="closeAnalytics()" aria-label="Back" data-ic="back"></button>
     <div class="an-title">Analytics</div>
-    <select id="anRange" class="an-range" onchange="loadAnalytics()">
-      <option value="7">7 days</option>
-      <option value="30" selected>30 days</option>
-      <option value="90">90 days</option>
-    </select>
+    <div class="an-seg" id="anRange" role="tablist" aria-label="Time range">
+      <button data-days="7" onclick="setAnRange(7)">7d</button>
+      <button data-days="30" class="on" onclick="setAnRange(30)">30d</button>
+      <button data-days="90" onclick="setAnRange(90)">90d</button>
+    </div>
   </div>
   <div class="an-body" id="anBody"><div class="an-loading">Loading…</div></div>
 </div>
@@ -3270,50 +3321,190 @@ async function applyReview() {
   }
 }
 
+let anDays = 30;
+let anData = null;
+const anDrillCache = {};
+function setAnRange(days) {
+  anDays = days;
+  document.querySelectorAll('#anRange button').forEach(b => b.classList.toggle('on', Number(b.dataset.days) === days));
+  loadAnalytics();
+}
 async function loadAnalytics() {
   const body = document.getElementById('anBody');
-  const days = Number(document.getElementById('anRange').value) || 30;
   body.innerHTML = '<div class="an-loading">Loading…</div>';
+  for (const k in anDrillCache) delete anDrillCache[k];
   try {
-    const d = await api('analytics', { days });
+    const d = await api('analytics', { days: anDays });
     if (!d || d.error) throw new Error(d?.error || 'no data');
+    anData = d;
     renderAnalytics(d);
   } catch (e) {
     body.innerHTML = `<div class="an-loading">Couldn't load analytics: ${esc(e.message)}</div>`;
   }
 }
 
+// Delta chip vs the previous window: green up, red down, neutral flat.
+// `goodDown` flips the colors for metrics where less is better (failed sends).
+function anDelta(cur, prev, { suffix = '', goodDown = false } = {}) {
+  if (prev == null || cur == null) return '';
+  const diff = cur - prev;
+  if (!diff) return '<span class="an-delta flat">·</span>';
+  const up = diff > 0;
+  const good = goodDown ? !up : up;
+  return `<span class="an-delta ${good ? 'up' : 'down'}">${up ? '↑' : '↓'} ${Math.abs(diff)}${suffix}</span>`;
+}
+
+// Tiny single-series sparkline (terracotta line, no axes).
+function anSpark(values, w = 72, h = 26) {
+  if (!values || values.length < 2 || !values.some(v => v > 0)) return '';
+  const max = Math.max(...values, 1);
+  const pts = values.map((v, i) => `${(i / (values.length - 1) * w).toFixed(1)},${(h - 2 - v / max * (h - 4)).toFixed(1)}`).join(' ');
+  return `<svg class="an-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--wa-green)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+
+// Replies-per-bucket area chart with a touch/hover tooltip. Daily buckets up
+// to 30 days, weekly beyond (mobile: fewer, fatter buckets read better).
+function anTrend(series) {
+  if (!series || !series.length) return '';
+  let buckets = series.map(s => ({ label: s.date.slice(5), v: s.replied }));
+  if (series.length > 31) {
+    buckets = [];
+    for (let i = 0; i < series.length; i += 7) {
+      const wk = series.slice(i, i + 7);
+      buckets.push({ label: wk[0].date.slice(5), v: wk.reduce((a, s) => a + s.replied, 0) });
+    }
+  }
+  const W = 660, H = 150, P = { t: 12, r: 14, b: 22, l: 30 };
+  const iw = W - P.l - P.r, ih = H - P.t - P.b;
+  const max = Math.max(...buckets.map(b => b.v), 3);
+  const x = i => P.l + (buckets.length > 1 ? i / (buckets.length - 1) * iw : iw / 2);
+  const y = v => P.t + ih - (v / max) * ih;
+  const line = buckets.map((b, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(b.v).toFixed(1)}`).join('');
+  const area = `${line}L${x(buckets.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z`;
+  const gridVals = [Math.round(max / 2), max];
+  const grid = gridVals.map(v => `<line x1="${P.l}" x2="${W - P.r}" y1="${y(v)}" y2="${y(v)}" stroke="var(--wa-rule)" stroke-width="1"/><text x="${P.l - 6}" y="${y(v) + 3.5}" text-anchor="end" font-size="10" fill="var(--wa-ink-2)">${v}</text>`).join('');
+  const xl = [0, Math.floor((buckets.length - 1) / 2), buckets.length - 1].filter((v, i, a) => a.indexOf(v) === i)
+    .map(i => `<text x="${x(i)}" y="${H - 6}" text-anchor="middle" font-size="10" fill="var(--wa-ink-2)">${buckets[i].label}</text>`).join('');
+  const last = buckets[buckets.length - 1];
+  const pts = JSON.stringify(buckets.map((b, i) => ({ cx: +x(i).toFixed(1), cy: +y(b.v).toFixed(1), label: b.label, v: b.v })));
+  return `
+    <div class="an-trend" data-pts='${pts.replace(/'/g, '&#39;')}'>
+      <svg viewBox="0 0 ${W} ${H}" onpointermove="anTrendHover(event)" onpointerleave="anTrendLeave(event)">
+        ${grid}
+        <path d="${area}" fill="var(--wa-green)" opacity="0.12"/>
+        <path d="${line}" fill="none" stroke="var(--wa-green)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+        <circle cx="${x(buckets.length - 1)}" cy="${y(last.v)}" r="3.5" fill="var(--wa-green)"/>
+        <text x="${Math.min(x(buckets.length - 1), W - P.r - 4)}" y="${Math.max(y(last.v) - 8, 11)}" text-anchor="end" font-size="11" font-weight="700" fill="var(--wa-ink)">${last.v}</text>
+        <circle class="an-tt-dot" r="3.5" fill="var(--wa-ink)" style="display:none"/>
+      </svg>
+      <div class="an-tt"></div>
+    </div>`;
+}
+function anTrendHover(ev) {
+  const wrap = ev.currentTarget.closest('.an-trend');
+  const pts = JSON.parse(wrap.dataset.pts || '[]');
+  if (!pts.length) return;
+  const svg = wrap.querySelector('svg'), r = svg.getBoundingClientRect();
+  const vx = (ev.clientX - r.left) / r.width * 660;
+  let best = pts[0];
+  for (const p of pts) if (Math.abs(p.cx - vx) < Math.abs(best.cx - vx)) best = p;
+  const dot = svg.querySelector('.an-tt-dot');
+  dot.setAttribute('cx', best.cx); dot.setAttribute('cy', best.cy); dot.style.display = '';
+  const tt = wrap.querySelector('.an-tt');
+  tt.textContent = `${best.label} · ${best.v} replied`;
+  tt.style.left = (best.cx / 660 * r.width) + 'px';
+  tt.style.top = (best.cy / 150 * r.height + svg.offsetTop) + 'px';
+  tt.style.display = 'block';
+}
+function anTrendLeave(ev) {
+  const wrap = ev.currentTarget.closest('.an-trend');
+  wrap.querySelector('.an-tt').style.display = 'none';
+  const dot = wrap.querySelector('.an-tt-dot'); if (dot) dot.style.display = 'none';
+}
+
+// Campaign drill-down: stage-filtered recipient list, fetched on first open.
+async function anToggleDrill(cat) {
+  const el = document.getElementById('anDrill-' + cat);
+  if (!el) return;
+  if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  if (!anDrillCache[cat]) {
+    el.innerHTML = '<div class="an-loading" style="padding:16px 0">Loading…</div>';
+    try {
+      const d = await api('analytics', { days: anDays, campaign: cat });
+      anDrillCache[cat] = d.recipients || [];
+    } catch (e) { el.innerHTML = `<div class="an-na">Couldn't load: ${esc(e.message)}</div>`; return; }
+  }
+  renderDrill(cat, 'all');
+}
+function renderDrill(cat, filter) {
+  const el = document.getElementById('anDrill-' + cat);
+  const rows = anDrillCache[cat] || [];
+  const counts = { all: rows.length };
+  rows.forEach(r => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  const chips = ['all', 'replied', 'read', 'delivered', 'sent', 'failed']
+    .filter(s => s === 'all' || counts[s])
+    .map(s => `<button class="an-chip ${filter === s ? 'on' : ''}" onclick="renderDrill('${cat}','${s}')">${s === 'all' ? 'All' : s[0].toUpperCase() + s.slice(1)} · ${counts[s] || 0}</button>`).join('');
+  const list = rows.filter(r => filter === 'all' || r.status === filter).slice(0, 60)
+    .map(r => `<div class="an-drill-row"><span class="an-drill-name">${esc(r.name)}</span><span class="an-status ${r.status}">${r.status}</span></div>`).join('');
+  el.innerHTML = `<div class="an-chiprow">${chips}</div>${list || '<div class="an-na">Nobody at this stage.</div>'}`;
+}
+
+let anShowAllAgents = false;
+function anToggleAgents() { anShowAllAgents = !anShowAllAgents; if (anData) renderAnalytics(anData); }
+
 function renderAnalytics(d) {
-  const f = d.funnel || {};
-  const base = f.enrolled || 1;
-  const pct = n => Math.round((n / base) * 100);
-  // Funnel stages (each as a share of enrolled)
-  const stages = [
-    ['Enrolled', f.enrolled, '#857b6f'],
-    ['Messaged', f.messaged, '#3d8a52'],
-    ['Read', f.read, '#2a6a3a'],
-    ['Replied', f.replied, '#1e6b46'],
-    ['Clicked', f.clicked, '#E2572B'],
-    ['Enquired', f.enquired, '#a3502c'],
-  ];
-  const funnelHtml = stages.map(([name, n, col]) => `
-    <div class="an-frow">
-      <div class="an-fname">${name}</div>
-      <div class="an-ftrack"><div class="an-ffill" style="width:${Math.max(2, pct(n || 0))}%;background:${col}"></div></div>
-      <div class="an-fval">${n || 0} <small>${pct(n || 0)}%</small></div>
-    </div>`).join('');
+  const f = d.funnel || {}, prev = d.prev || {}, ms = d.msg_stats || {}, ch = d.channels || {};
+  const series = d.series || [];
+  const messagedBase = f.messaged || 1;
+  const replyRate = Math.round((f.replied || 0) / messagedBase * 100);
+  const prevReplyRate = prev.messaged ? Math.round((prev.replied || 0) / prev.messaged * 100) : null;
 
-  // Per-format read rates
-  const maxSent = Math.max(...(d.by_format || []).map(x => x.sent), 1);
-  const fmtHtml = (d.by_format || []).map(x => `
-    <div class="an-bar">
-      <div class="lbl" title="${esc(x.format)}">${esc(x.format.replace(/^samba_/, '').replace(/_/g, ' '))}</div>
-      <div class="track"><div class="fill" style="width:${Math.round(x.sent / maxSent * 100)}%;background:#3d8a52"></div></div>
-      <div class="num">${x.read_rate != null ? x.read_rate + '%' : '<span class="an-na">—</span>'}</div>
-    </div>`).join('');
+  // ── Hero: the 5-second answer. Every number is windowed and carries a
+  // delta vs the previous window; sparklines show the shape of the window.
+  const hero = `
+    <div class="an-hero">
+      <div class="an-tile"><div class="k">Agents replied</div>
+        <div class="v">${f.replied || 0}<small> / ${f.messaged || 0}</small>${anDelta(f.replied, prev.replied)}</div>
+        <div class="s">of agents messaged</div>${anSpark(series.map(s => s.replied))}</div>
+      <div class="an-tile"><div class="k">Reply rate</div>
+        <div class="v">${replyRate}%${anDelta(replyRate, prevReplyRate, { suffix: 'pp' })}</div>
+        <div class="s">was ${prevReplyRate != null ? prevReplyRate + '%' : '—'} the ${d.window_days}d before</div></div>
+      <div class="an-tile"><div class="k">Read rate</div>
+        <div class="v">${ms.read_rate != null ? ms.read_rate + '%' : '—'}${anDelta(ms.read_rate, prev.read_rate, { suffix: 'pp' })}</div>
+        <div class="s">${ms.read || 0} of ${ms.tracked || 0} tracked sends</div></div>
+      <div class="an-tile"><div class="k">Failed sends</div>
+        <div class="v">${ms.failed || 0}${anDelta(ms.failed, prev.failed, { goodDown: true })}</div>
+        <div class="s">${(d.opt_out || {}).count || 0} agents opted out</div></div>
+    </div>`;
 
-  // Tiers
-  const tierColors = { champion: '#E2572B', active: '#3f8f63', warm: '#c9a227', dormant: '#9a9a9a', new: '#4d7fd6', unset: '#bbb' };
+  // ── Campaigns: one card per broadcast stream, funnel bars scaled to sent,
+  // the goal number called out, tap for the stage-filtered recipient list.
+  const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
+  const campHtml = (d.campaigns || []).map(c => {
+    const stages = [['Sent', c.sent], ['Delivered', c.delivered], ['Read', c.read], ['Replied', c.replied]];
+    const rows = stages.map(([n, v]) => `
+      <div class="an-frow"><div class="an-fname">${n}</div>
+        <div class="an-ftrack"><div class="an-ffill" style="width:${Math.max(2, Math.round((v || 0) / (c.sent || 1) * 100))}%"></div></div>
+        <div class="an-fval">${v || 0} <small>${Math.round((v || 0) / (c.sent || 1) * 100)}%</small></div></div>`).join('');
+    const goal = c.goal === 'signup'
+      ? `<b>${ch.acct_invite || 0}</b> portal visits via invite link · <b>${c.replied}</b> replied`
+      : `<b>${c.replied}</b> agent${c.replied === 1 ? '' : 's'} replied — ${c.delivered ? Math.round(c.replied / c.recipients * 100) : 0}% of the ${c.recipients} reached`;
+    const when = c.first_at && c.first_at.slice(0, 10) === c.last_at.slice(0, 10) ? fmtDay(c.last_at) : `${fmtDay(c.first_at)} – ${fmtDay(c.last_at)}`;
+    return `
+      <div class="an-camp">
+        <div class="an-camp-main" onclick="anToggleDrill('${c.category}')">
+          <div class="an-camp-head"><span class="an-camp-name">${esc(c.name)}</span><span class="an-camp-when">${when}</span></div>
+          <div class="an-camp-goal">${goal}</div>
+          <div class="an-funnel">${rows}</div>
+          ${c.failed ? `<div class="an-camp-fail">⚠ ${c.failed} send${c.failed === 1 ? '' : 's'} failed</div>` : ''}
+        </div>
+        <div class="an-camp-drill" id="anDrill-${c.category}" style="display:none"></div>
+      </div>`;
+  }).join('');
+
+  // ── Tiers (labels carry identity; colors follow the app's tier chips).
+  const tierColors = { champion: '#E2572B', hot: '#c25b2e', active: '#3f8f63', warm: '#c9a227', new: '#4d7fd6', cold: '#8a99a8', dormant: '#9a9a9a', unset: '#bbb' };
   const tierMax = Math.max(...Object.values(d.tiers || {}), 1);
   const tierHtml = Object.entries(d.tiers || {}).sort((a, b) => b[1] - a[1]).map(([t, n]) => `
     <div class="an-bar">
@@ -3322,42 +3513,37 @@ function renderAnalytics(d) {
       <div class="num">${n}</div>
     </div>`).join('');
 
-  const ch = d.channels || {};
+  // ── Top agents: 5 rows, expandable. Clicks/enquiries are all-time portal
+  // attribution (not windowed) — labeled as such once, in the header.
   const agents = d.top_agents || [];
-  const agentRows = agents.slice(0, 20).map(a => `
+  const agentRows = agents.slice(0, anShowAllAgents ? 25 : 5).map(a => `
     <tr>
       <td>${esc(a.name)}</td>
       <td><span class="an-tierchip tier-${a.tier}">${a.tier}</span></td>
-      <td>${a.last_reply_days != null ? a.last_reply_days + 'd' : '—'}</td>
-      <td>${a.clicks || 0}</td>
-      <td>${a.enquiries || 0}</td>
+      <td style="text-align:right">${a.last_reply_days != null ? a.last_reply_days + 'd' : '—'}</td>
+      <td style="text-align:right">${a.clicks || 0}</td>
+      <td style="text-align:right">${a.enquiries || 0}</td>
     </tr>`).join('');
 
   document.getElementById('anBody').innerHTML = `
-    <div class="an-sec-label">Engagement funnel · last ${d.window_days} days</div>
-    <div class="an-funnel">${funnelHtml}</div>
-    <div class="an-note">Read & click figures are still filling in — delivery tracking was wired on 10 Jul and portal click-tracking on 12 Jul, so these climb as new sends land.</div>
+    ${hero}
 
-    <div class="an-sec-label">Read rate by format</div>
-    <div class="an-bars">${fmtHtml || '<div class="an-na">No sends in range.</div>'}</div>
+    <div class="an-sec-label">Campaigns · last ${d.window_days} days</div>
+    ${campHtml || '<div class="an-na">No campaign sends in this range.</div>'}
 
-    <div class="an-sec-label">Headline</div>
-    <div class="an-tiles">
-      <div class="an-tile"><div class="k">Reply rate</div><div class="v">${base ? Math.round((f.replied || 0) / base * 100) : 0}%</div><div class="s">${f.replied || 0} of ${f.enrolled || 0} enrolled</div></div>
-      <div class="an-tile"><div class="k">Opt-out</div><div class="v">${(d.opt_out || {}).rate ?? 0}%</div><div class="s">${(d.opt_out || {}).count || 0} agents</div></div>
-      <div class="an-tile"><div class="k">Outbound</div><div class="v">${d.outbound_total || 0}</div><div class="s">messages sent</div></div>
-      <div class="an-tile"><div class="k">Portal visits</div><div class="v">${(ch.wa_alert_all || 0) + (ch.wa_digest_all || 0)}</div><div class="s">from broadcasts</div></div>
-    </div>
+    <div class="an-sec-label">Agents replying per ${series.length > 31 ? 'week' : 'day'}</div>
+    ${anTrend(series)}
 
     <div class="an-sec-label">Engagement tiers</div>
     <div class="an-bars">${tierHtml}</div>
 
-    <div class="an-sec-label">Most engaged agents</div>
+    <div class="an-sec-label">Most engaged agents · clicks &amp; enquiries all-time</div>
     <table class="an-table">
-      <thead><tr><th>Agent</th><th>Tier</th><th>Last reply</th><th>Clicks</th><th>Enq.</th></tr></thead>
+      <thead><tr><th>Agent</th><th>Tier</th><th style="text-align:right">Last reply</th><th style="text-align:right">Clicks</th><th style="text-align:right">Enq.</th></tr></thead>
       <tbody>${agentRows || '<tr><td colspan="5" class="an-na">No engagement data yet.</td></tr>'}</tbody>
     </table>
-    <div class="an-note">Portal data last synced ${d.portal_updated_at ? new Date(d.portal_updated_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'not yet'} (refreshes daily with the 9am run).</div>
+    ${agents.length > 5 ? `<button class="an-showall" onclick="anToggleAgents()">${anShowAllAgents ? 'Show top 5' : `Show all ${Math.min(agents.length, 25)}`}</button>` : ''}
+    <div class="an-note">Delivery/read tracking since 10 Jul, portal clicks since 12 Jul. Portal data last synced ${d.portal_updated_at ? new Date(d.portal_updated_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'not yet'}.</div>
   `;
 }
 
