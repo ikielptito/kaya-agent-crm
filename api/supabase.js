@@ -1068,6 +1068,20 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(500).json({ error: 'chase failed: ' + e.message });
       }
 
+    } else if (action === 'transcribe_media') {
+      // Transcribe an already-received WhatsApp voice note by its media id
+      // (backfill for notes that arrived before transcription had a key, or
+      // whose transcription failed). Media must still be within Meta's ~30-day
+      // window. payload: { mediaId } → { transcript } or 404.
+      const { transcribeWaAudio } = await import('../lib/transcribe.js');
+      const mediaId = String(payload?.mediaId || '').trim();
+      const WA_TOKEN = process.env.META_WA_TOKEN;
+      if (!mediaId) return res.status(400).json({ error: 'mediaId required' });
+      if (!WA_TOKEN) return res.status(500).json({ error: 'WhatsApp env not configured' });
+      const transcript = await transcribeWaAudio(mediaId, WA_TOKEN).catch((e) => { throw new Error('transcribe failed: ' + e.message); });
+      if (!transcript) return res.status(404).json({ error: 'no transcript (media expired, or no ASR key configured)' });
+      return res.status(200).json({ transcript });
+
     } else if (action === 'translate') {
       // Translate one or more messages with Claude Haiku (cheap + fast). Used by
       // the chat inbox to show inbound Bahasa Indonesia in English, and to
