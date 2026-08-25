@@ -3541,6 +3541,30 @@ function renderAnalytics(d) {
   `;
 }
 
+// ── Auto-update ───────────────────────────────────────────────────────
+// iOS keeps the installed PWA's page alive in memory for days, so a deploy
+// never reaches the phone until the app is force-quit. When the app returns
+// to the foreground, compare the served ETag against the one we booted with
+// and reload if it changed — unless the operator is mid-draft.
+let bootEtag = null;
+async function chatEtag() {
+  try { return (await fetch('/chat.html', { method: 'HEAD', cache: 'no-store' })).headers.get('etag'); }
+  catch (_) { return null; }
+}
+chatEtag().then(t => { bootEtag = t; });
+let lastUpdateCheck = 0;
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible') return;
+  const now = Date.now();
+  if (now - lastUpdateCheck < 5 * 60e3) return;   // at most one check per 5 min
+  lastUpdateCheck = now;
+  const t = await chatEtag();
+  if (!t || !bootEtag || t === bootEtag) return;
+  const composer = document.getElementById('replyBox');
+  if (composer && composer.value.trim()) return;  // never eat a half-typed reply
+  location.reload();
+});
+
 // ── Boot ──────────────────────────────────────────────────────────────
 unlock();
 </script>
