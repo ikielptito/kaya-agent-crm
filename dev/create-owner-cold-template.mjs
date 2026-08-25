@@ -18,10 +18,10 @@ const ENDPOINT = 'https://kaya-agent-crm.vercel.app/api/whatsapp-templates';
 const NAME = 'samba_owner_cold_v1';
 
 const BODIES = {
-  en: `Hi {{1}}, I'm Maya from Samba Rentals (sambarentals.com). We introduce Bali villas to 300+ rental agents who bring long-term tenants — and the owner keeps every rupiah: no commission to us, no booking fees. The first 25 founding villas list free, for good.
+  en: `Hi {{1}}, I'm Maya from Samba Rentals (sambarentals.com). One listing puts your villa in front of 300+ Bali rental agents who bring long-term tenants — and you keep every rupiah: no commission to us, no booking fees. The first 25 founding villas list free, for good.
 
 Would you be open to a quick look at how it works?`,
-  id: `Halo {{1}}, saya Maya dari Samba Rentals (sambarentals.com). Kami memperkenalkan villa di Bali ke 300+ agen sewa yang membawa penyewa jangka panjang — dan pemilik menerima penuh: tanpa komisi ke kami, tanpa biaya booking. 25 villa founding pertama tercantum gratis, selamanya.
+  id: `Halo {{1}}, saya Maya dari Samba Rentals (sambarentals.com). Satu listing menampilkan villa Anda ke 300+ agen sewa di Bali yang membawa penyewa jangka panjang — dan Anda menerima penuh: tanpa komisi ke kami, tanpa biaya booking. 25 villa founding pertama tercantum gratis, selamanya.
 
 Boleh saya jelaskan singkat cara kerjanya?`,
 };
