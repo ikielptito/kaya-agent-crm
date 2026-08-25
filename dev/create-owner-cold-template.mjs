@@ -15,7 +15,7 @@
 //   node dev/create-owner-cold-template.mjs status
 
 const ENDPOINT = 'https://kaya-agent-crm.vercel.app/api/whatsapp-templates';
-const NAME = 'samba_owner_cold_v1';
+const NAME = 'samba_owner_cold_v3';   // v1/v2 names burned at Meta (v2 = old off-brand copy, delete once v3 approves)
 
 const BODIES = {
   en: `Hi {{1}}, I'm Maya from Samba Rentals (sambarentals.com). One listing puts your villa in front of 300+ Bali rental agents who bring long-term tenants — and you keep every rupiah: no commission to us, no booking fees. The first 25 founding villas list free, for good.
