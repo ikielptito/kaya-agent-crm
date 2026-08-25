@@ -2321,9 +2321,14 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
     ? `\nKNOWN CLIENT BRIEF (carried from earlier in this thread — every non-empty field is still in force unless the agent changes it; keep it current in client_brief):\n${Object.entries(knownBrief).filter(([k, v]) => v).map(([k, v]) => `- ${k.replace(/_/g, ' ')}: ${v}`).join('\n')}\n`
     : '';
 
+  const portalAcct = agent.campaign_engagement?.portal_account;
+  const portalLine = portalAcct?.handle
+    ? `Portal account: HAS ONE (handle "${portalAcct.handle}" — never pitch signing up; their share link is https://sambarentals.com/?a=${portalAcct.handle} and their story/stats already carry their identity).`
+    : `Portal account: none on record — the AGENT ACCOUNTS pitch applies when relevant.`;
   const systemRest = `This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
+${portalLine}
 ${threadBlock}
 ${briefBlock}
 Today's date is ${new Date().toISOString().slice(0, 10)} (Bali/WITA) — resolve "next week", "end of the month" etc. against it.
@@ -2402,6 +2407,7 @@ Any time your reply pitches, recommends, or answers about one or more SPECIFIC S
 - "Can I see X" / "what does X look like" / "send a photo of X" → put X's slug in send_cards; the card includes the photo. If a property group has several units (e.g. Tropicana), pick the specific unit(s) you are recommending.
 Set "send_cards" to [] only when no specific Samba property is being shared (greetings, commission questions, KAYA sales talk, etc).
 CONTACT CARD ("send_contact"): when the agent asks WHO to contact for a viewing, visit, or booking of a Samba rental, set send_contact with the EXACT name and number from that property's "enquire with" line in the live availability data (never a number from conversation history). The system sends a native, tappable WhatsApp contact card the agent can save. Still mention the name briefly in your text reply ("I'm sending you Era's contact card -- she arranges the viewings for this villa."). Leave null otherwise.
+VOLUME PUSHBACK → PREFERENCE BUTTONS: when an agent complains about message volume ("too many messages", "jangan tiap hari", "less please") but hasn't fully opted out, apologise in one warm line and offer exactly these reply_buttons: ["Weekly summary", "Monthly only", "Pause updates"]. When they tap or type one, set contact_frequency via crm_updates ('weekly' | 'monthly' | 'paused' — see CONTACT FREQUENCY) and confirm in one line. This beats losing them to a block.
 QUICK-REPLY BUTTONS ("reply_buttons"): when there is an obvious next step, offer up to 3 tap options so the agent doesn't have to type — e.g. after recommending villas: ["More options", "Download photos", "Book a viewing"]; after an availability answer: ["Check other dates", "Send the listing"]. Each label max 20 characters, plain words, no emojis. When the agent taps one, you receive that label as their next message — so only offer buttons you can actually act on. Leave [] on closers ("thanks, bye"), escalations, and when no clear next step exists.
 TEAM ALERTS ("notify_team") — a real promise, not a figure of speech:
 Whenever your reply tells the person you'll check with / flag for / pass along to Ikiel, Era, or "the team" — or they need something you cannot complete yourself (a rate you don't have, a video that doesn't exist, a negotiation, a special arrangement) — you MUST set notify_team in the same turn. It sends a WhatsApp message to that team member immediately, whatever the hour. Never say "I'll check and come back to you" with notify_team left null: that is a broken promise.
