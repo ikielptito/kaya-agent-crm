@@ -758,6 +758,7 @@
         <button class="refresh-btn" id="addOwnerBtn" onclick="openAddOwner()" title="Add a villa owner — screenshot a listing and Maya reads the number" aria-label="Add villa owner from screenshot" data-ic="camera"></button>
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)" aria-label="Answer waiting agents" data-ic="resume"></button>
         <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats" aria-label="Backfill contacts" data-ic="magnet"></button>
+        <button class="refresh-btn" id="groupPostBtn" onclick="copyGroupPost()" title="Copy the WhatsApp-group owner post (live founding count)" aria-label="Copy group post" data-ic="megaphone"></button>
         <button class="refresh-btn" id="analyticsBtn" onclick="openAnalytics()" title="Analytics" aria-label="Analytics" data-ic="chart"></button>
         <button class="refresh-btn" id="scheduleBtn" onclick="openSchedule()" title="Maya's scheduled tasks" aria-label="Scheduled tasks" data-ic="calendar"></button>
         <button class="refresh-btn review-btn" id="reviewBtn" onclick="openReview()" title="Maya's weekly self-review" aria-label="Weekly self-review" data-ic="cap"><span class="review-dot" id="reviewDot" style="display:none"></span></button>
@@ -3083,6 +3084,36 @@ function cancelBroadcast(i) {
 // Analytics view — the comms funnel + per-format read rates + tiers +
 // channels + hot/cold agents. Reads the /api/supabase `analytics` action.
 // ════════════════════════════════════════════════════════════════════
+// ── WhatsApp-group owner post ─────────────────────────────────────────
+// Ikiel's proven villa channel is asking in WhatsApp groups. One tap builds
+// the post with the LIVE founding count and a tracked link (ref=wa_group →
+// the owner funnel attributes every visit/submission to group posts), and
+// puts it on the clipboard ready to paste into any group.
+async function copyGroupPost() {
+  let n = null;
+  try {
+    const r = await fetch('https://sambarentals.com/api/home-stats');
+    const d = await r.json();
+    if (d?.founding && d.founding.remaining > 0) n = d.founding.remaining;
+  } catch (_) {}
+  const slots = n != null
+    ? `Only ${n} of the 25 free founding spots left (free for good): `
+    : `Founding villas list free, for good: `;
+  const post = `Any villa owners here looking for more long-term bookings? 🏡
+
+One listing on Samba Rentals puts your villa in front of 300+ Bali rental agents — they bring you monthly tenants, you pay zero commission and zero booking fees.
+
+${slots}sambarentals.com/home?ref=wa_group
+
+Ada pemilik villa di sini yang cari penyewa bulanan? ${n != null ? n + ' slot founding gratis tersisa — ' : 'Listing gratis untuk villa founding — '}DM saya 🙏`;
+  try {
+    await navigator.clipboard.writeText(post);
+    toast('Group post copied — paste it into any owner group.');
+  } catch (_) {
+    window.prompt('Copy the group post:', post);
+  }
+}
+
 function openAnalytics() {
   document.getElementById('analyticsOverlay').style.display = 'flex';
   loadAnalytics();
