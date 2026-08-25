@@ -713,6 +713,44 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── COLD-INTRO DRIP ──────────────────────────────────────────────
+    // The screenshot pipeline, fully automatic: Ikiel imports a listing
+    // screenshot → prospect row ('agreed', cold). Each 9am pass sends the
+    // approved cold template to up to owner_cold.intro_daily_cap of them
+    // (default 8 — WhatsApp-quality pacing), oldest first. send_onboard_intro
+    // flips them to 'contacted', which removes them from the queue. Warm
+    // prospects are never auto-sent — a personal agreement deserves Ikiel's
+    // own opener or a deliberate console send.
+    let coldDrip = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      try {
+        const coldCfg = await loadSetting(SUPABASE_URL, sbHeaders, 'owner_cold') || {};
+        const dripCap = coldCfg.intro_daily_cap === undefined ? 8 : (parseInt(coldCfg.intro_daily_cap, 10) || 0);
+        if (dripCap > 0) {
+          const rows = await fetch(
+            `${SUPABASE_URL}/rest/v1/owners?onboarding_status=eq.agreed&select=id,name,wa_num,consent_note,notes&order=created_at.asc&limit=50`,
+            { headers: sbHeaders }
+          ).then(r => r.json());
+          const dripQueue = (Array.isArray(rows) ? rows : []).filter(o => o.wa_num && isColdProspect(o));
+          coldDrip = { queue: dripQueue.length, sent: 0, errors: [] };
+          for (const o of dripQueue.slice(0, dripCap)) {
+            const r = await fetch('https://kaya-agent-crm.vercel.app/api/supabase', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
+              body: JSON.stringify({ action: 'send_onboard_intro', payload: { id: o.id } }),
+            });
+            if (r.ok) coldDrip.sent++;
+            else {
+              const d = await r.json().catch(() => ({}));
+              if (coldDrip.errors.length < 3) coldDrip.errors.push(`${o.name || o.id}: ${d.error || r.status}`);
+            }
+          }
+        } else {
+          coldDrip = { skipped: 'owner_cold.intro_daily_cap = 0' };
+        }
+      } catch (e) { coldDrip = { error: e.message }; }
+    }
+
     // ── ONBOARDING PROSPECTS GOING COLD (daily flag, no auto-send) ───
     // Owner prospects Maya contacted who haven't replied in 3+ days get
     // flagged to Ikiel via push (max 2 flags per prospect). We deliberately
@@ -951,6 +989,7 @@ export default async function handler(req, res) {
       availability: availabilityResult,
       intro_sweep: introSweep,
       account_invites: accountInvites,
+      cold_intro_drip: coldDrip,
       viewings: viewingsCron,
       unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
