@@ -3354,14 +3354,6 @@ function anDelta(cur, prev, { suffix = '', goodDown = false } = {}) {
   return `<span class="an-delta ${good ? 'up' : 'down'}">${up ? '↑' : '↓'} ${Math.abs(diff)}${suffix}</span>`;
 }
 
-// Tiny single-series sparkline (terracotta line, no axes).
-function anSpark(values, w = 72, h = 26) {
-  if (!values || values.length < 2 || !values.some(v => v > 0)) return '';
-  const max = Math.max(...values, 1);
-  const pts = values.map((v, i) => `${(i / (values.length - 1) * w).toFixed(1)},${(h - 2 - v / max * (h - 4)).toFixed(1)}`).join(' ');
-  return `<svg class="an-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--wa-green)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
-}
-
 // Replies-per-bucket area chart with a touch/hover tooltip. Daily buckets up
 // to 30 days, weekly beyond (mobile: fewer, fatter buckets read better).
 function anTrend(series) {
@@ -3466,7 +3458,7 @@ function renderAnalytics(d) {
     <div class="an-hero">
       <div class="an-tile"><div class="k">Agents replied</div>
         <div class="v">${f.replied || 0}<small> / ${f.messaged || 0}</small>${anDelta(f.replied, prev.replied)}</div>
-        <div class="s">of agents messaged</div>${anSpark(series.map(s => s.replied))}</div>
+        <div class="s">of agents messaged</div></div>
       <div class="an-tile"><div class="k">Reply rate</div>
         <div class="v">${replyRate}%${anDelta(replyRate, prevReplyRate, { suffix: 'pp' })}</div>
         <div class="s">was ${prevReplyRate != null ? prevReplyRate + '%' : '—'} the ${d.window_days}d before</div></div>
@@ -3485,11 +3477,13 @@ function renderAnalytics(d) {
     const stages = [['Sent', c.sent], ['Delivered', c.delivered], ['Read', c.read], ['Replied', c.replied]];
     const rows = stages.map(([n, v]) => `
       <div class="an-frow"><div class="an-fname">${n}</div>
-        <div class="an-ftrack"><div class="an-ffill" style="width:${Math.max(2, Math.round((v || 0) / (c.sent || 1) * 100))}%"></div></div>
+        <div class="an-ftrack"><div class="an-ffill" style="width:${v ? Math.max(2, Math.round(v / (c.sent || 1) * 100)) : 0}%"></div></div>
         <div class="an-fval">${v || 0} <small>${Math.round((v || 0) / (c.sent || 1) * 100)}%</small></div></div>`).join('');
     const goal = c.goal === 'signup'
       ? `<b>${ch.acct_invite || 0}</b> portal visits via invite link · <b>${c.replied}</b> replied`
-      : `<b>${c.replied}</b> agent${c.replied === 1 ? '' : 's'} replied — ${c.delivered ? Math.round(c.replied / c.recipients * 100) : 0}% of the ${c.recipients} reached`;
+      : (c.recipients
+        ? `<b>${c.replied}</b> agent${c.replied === 1 ? '' : 's'} replied — ${Math.round(c.replied / c.recipients * 100)}% of the ${c.recipients} reached`
+        : `<b>${c.replied}</b> replies`);
     const when = c.first_at && c.first_at.slice(0, 10) === c.last_at.slice(0, 10) ? fmtDay(c.last_at) : `${fmtDay(c.first_at)} – ${fmtDay(c.last_at)}`;
     return `
       <div class="an-camp">
