@@ -755,7 +755,7 @@
       <div class="list-head-top">
         <div class="list-title">Maya</div>
         <button class="refresh-btn" id="quickAddBtn" onclick="openQuickAdd()" title="Add new agent" aria-label="Add new agent" data-ic="contacts"></button>
-        <button class="refresh-btn" id="addOwnerBtn" onclick="openAddOwner()" title="Add a villa owner — screenshot a listing and Maya reads the number" aria-label="Add villa owner from screenshot" data-ic="camera"></button>
+        <button class="refresh-btn" id="addOwnerBtn" onclick="openAddOwner()" title="Add from screenshot — Maya reads the contact and sorts owner vs agent" aria-label="Add contact from screenshot" data-ic="camera"></button>
         <button class="refresh-btn" id="resumeBtn" onclick="resumeUnanswered()" title="Answer agents still waiting (replies that arrived while Maya was paused)" aria-label="Answer waiting agents" data-ic="resume"></button>
         <button class="refresh-btn" id="backfillBtn" onclick="backfillContacts()" title="Add contacts from numbers agents shared in past chats" aria-label="Backfill contacts" data-ic="magnet"></button>
         <button class="refresh-btn" id="groupPostBtn" onclick="copyGroupPost()" title="Copy the WhatsApp-group owner post (live founding count)" aria-label="Copy group post" data-ic="megaphone"></button>
@@ -1360,25 +1360,43 @@ function openQuickAdd() {
 // ── Add villa owner (screenshot a listing → Maya reads the number) ────────
 function openAddOwner() {
   document.getElementById('modalHost').innerHTML =
-    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add villa owner</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitAddOwner(event, false)">
-      <div class="qa-field"><label>📷 Screenshots of the listing</label>
+    `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal"><div class="modal-head"><h3>Add from screenshot</h3><button onclick="closeModal()" aria-label="Close">${ic('x',18)}</button></div><div class="modal-body"><form class="qa-form" onsubmit="submitAddOwner(event)">
+      <div class="qa-field"><label>📷 Screenshots</label>
         <input id="aoImage" type="file" accept="image/*" multiple onchange="extractOwnerImage(this.files)">
-        <div style="font-size:12px;color:var(--wa-ink-2)">Add every screenshot of the ad (photos, description, price — up to 8). Maya reads the owner's contact AND builds a fact sheet she'll reference in the conversation and use to prefill their listing. Always eyeball the number before adding.</div>
+        <div style="font-size:12px;color:var(--wa-ink-2)">A villa ad, an agent's post, a profile — up to 8 screenshots. Maya reads the contact, decides owner vs agent (you can flip it), and for owners builds a fact sheet for the conversation and listing prefill. Always eyeball the number.</div>
         <div id="aoImgStatus" style="font-size:12px;margin-top:4px;display:none"></div></div>
+      <div class="qa-field"><label>Who is this?</label><div style="display:flex;gap:8px">
+        <button type="button" id="aoRoleOwner" class="qa-submit" style="flex:1" onclick="setAoRole('owner')">🏡 Villa owner</button>
+        <button type="button" id="aoRoleAgent" class="qa-submit" style="flex:1;background:var(--wa-panel-2);color:var(--wa-ink)" onclick="setAoRole('agent')">🧑‍💼 Rental agent</button>
+      </div></div>
       <div class="qa-field"><label>Name *</label><input id="aoName" required autocomplete="off"></div>
       <div class="qa-field"><label>WhatsApp number *</label><input id="aoNum" required placeholder="+62 812 3456 7890" inputmode="tel" autocomplete="off"></div>
-      <div class="qa-field"><label>Language</label><select id="aoLang"><option value="en" selected>English</option><option value="id">Bahasa Indonesia</option></select></div>
-      <div class="qa-field"><label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0"><input id="aoCold" type="checkbox" checked style="width:auto"> Cold outreach (no prior contact — found them advertising)</label></div>
+      <div class="qa-field" id="aoAgencyWrap" style="display:none"><label>Agency</label><input id="aoAgency" autocomplete="off" placeholder="e.g. Bali Home Realty"></div>
+      <div class="qa-field" id="aoLangWrap"><label>Language</label><select id="aoLang"><option value="en" selected>English</option><option value="id">Bahasa Indonesia</option></select></div>
+      <div class="qa-field" id="aoColdWrap"><label style="display:flex;gap:8px;align-items:center;text-transform:none;letter-spacing:0"><input id="aoCold" type="checkbox" checked style="width:auto"> Cold outreach (no prior contact — found them advertising)</label></div>
       <div class="qa-field"><label>Context</label><textarea id="aoNote" rows="2" placeholder="e.g. Advertising the villa for rent on FB Marketplace"></textarea></div>
       <div id="aoResult"></div>
       <div style="display:flex;gap:8px">
         <button class="qa-submit" id="aoSaveBtn" type="submit" style="flex:1">Add prospect</button>
       </div>
-      <div style="font-size:11.5px;color:var(--wa-ink-2);margin-top:8px;line-height:1.45">Cold prospects: Maya fires the cold opener immediately during contact hours (9am–9pm WITA); outside them it queues for the next 9am. Warm prospects are never auto-messaged — open with your own text, or use "Send intro" from their thread.</div>
+      <div id="aoHint" style="font-size:11.5px;color:var(--wa-ink-2);margin-top:8px;line-height:1.45">Cold owner prospects: Maya fires the cold opener immediately during contact hours (9am–9pm WITA); outside them it queues for the next 9am. Agents get the standard welcome (also quiet-hours aware).</div>
     </form></div></div></div>`;
+  setAoRole('owner');
 }
 
 let aoIntel = null;   // the ad's fact sheet from the last extraction — sent with Add prospect
+let aoRole = 'owner'; // 'owner' | 'agent' — set by extraction, flippable by hand
+function setAoRole(role){
+  aoRole = role === 'agent' ? 'agent' : 'owner';
+  const owner = aoRole === 'owner';
+  const on = (el, active) => { el.style.background = active ? '' : 'var(--wa-panel-2)'; el.style.color = active ? '' : 'var(--wa-ink)'; };
+  on(document.getElementById('aoRoleOwner'), owner);
+  on(document.getElementById('aoRoleAgent'), !owner);
+  document.getElementById('aoAgencyWrap').style.display = owner ? 'none' : '';
+  document.getElementById('aoLangWrap').style.display = owner ? '' : 'none';
+  document.getElementById('aoColdWrap').style.display = owner ? '' : 'none';
+  document.getElementById('aoSaveBtn').textContent = owner ? 'Add prospect' : 'Add agent';
+}
 let aoFacts = null;   // structured beds/type/area for the personalised cold template
 async function extractOwnerImage(files) {
   const list = Array.from(files || []).slice(0, 8);
@@ -1408,6 +1426,8 @@ async function extractOwnerImage(files) {
     document.getElementById('aoCold').checked = true;
     aoIntel = e.listing_intel || null;
     aoFacts = (e.beds || e.property_type || e.area) ? { beds: e.beds || null, type: e.property_type || null, area: e.area || null } : null;
+    setAoRole(e.contact_role === 'agent' ? 'agent' : 'owner');
+    if (e.agency) document.getElementById('aoAgency').value = e.agency;
     let msg = '✓ Read it. ';
     if (!d.wa_num) msg += 'No clear WhatsApp number — add it manually. ';
     else if (e.confidence !== 'high') msg += 'Double-check the number (confidence: ' + (e.confidence || '?') + '). ';
@@ -1427,6 +1447,29 @@ async function submitAddOwner(e) {
   const lang = document.getElementById('aoLang').value;
   const note = document.getElementById('aoNote').value.trim();
   const cold = document.getElementById('aoCold').checked;
+
+  // AGENT branch: quick_add (dedupes, enrolls, welcome now or quiet-hours
+  // deferred — all existing machinery). Owner branch continues below.
+  if (aoRole === 'agent') {
+    saveBtn.disabled = true; saveBtn.textContent = 'Adding…';
+    try {
+      const qr = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'quick_add_agent', payload: { name, wa_num: wa, agency: document.getElementById('aoAgency').value.trim() || null, notes: note ? ('from screenshot — ' + note) : 'from screenshot' } }) });
+      const qd = await qr.json().catch(() => ({}));
+      if (qr.status === 409) throw new Error(qd.error || 'Already in the CRM');
+      if (!qr.ok) throw new Error(qd.error || ('HTTP ' + qr.status));
+      result.className = 'qa-result ok';
+      result.textContent = qd.welcome_sent ? `Agent added — welcome sent to ${name}.`
+        : qd.welcome_deferred ? `Agent added — welcome goes out at 9am WITA (quiet hours).`
+        : 'Agent added.';
+      await refreshAll(true);
+      setTimeout(() => { closeModal(); }, 1600);
+    } catch (err) {
+      result.className = 'qa-result err'; result.textContent = err.message || 'Failed — try again';
+      saveBtn.disabled = false; saveBtn.textContent = 'Add agent';
+    }
+    return;
+  }
   // The rule (Ikiel, 25 Aug 2026): a cold intro always fires NOW unless we're
   // outside contact hours (9am–9pm WITA) — then the 9am drip sends it.
   const witaHour = (new Date().getUTCHours() + 8) % 24;

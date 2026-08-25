@@ -581,9 +581,11 @@ export default async function handler(req, res) {
         .map(i => ({ base64: i.base64, mt: /^image\/(png|jpe?g|webp|gif)$/.test(i.mediaType || '') ? i.mediaType : 'image/jpeg' }))
         .filter(i => i.base64);
       if (!imgs.length) return res.status(400).json({ error: 'images (or imageBase64) required' });
-      const sys = `You read one or more screenshots of the SAME Bali villa RENTAL listing (Facebook Marketplace, an ad, or a WhatsApp/Instagram post) and extract the details needed to reach out to the owner. Return ONLY a JSON object, no prose:
-{"is_listing": true|false (is this actually a villa/property rental listing?),
- "owner_name": string|null (the person or business advertising — often the poster's name),
+      const sys = `You read one or more screenshots of the SAME Bali villa RENTAL listing or property-contact post (Facebook Marketplace/groups, an ad, a WhatsApp/Instagram post or profile) and extract the details needed to reach out. Return ONLY a JSON object, no prose:
+{"is_listing": true|false (is this actually a villa/property rental listing or property contact?),
+ "contact_role": "owner"|"agent"|"unclear" (WHO is the contact: "owner" when the post says direct owner / contact owner / clearly a private person renting their own villa; "agent" when it's an agency or realtor — agency branding, a portfolio of listings, "WA admin/agent", professional realtor profile, "we have many villas". When a post is BY an agent but gives the OWNER's number, classify by whoever the extracted number belongs to),
+ "owner_name": string|null (the person or business the NUMBER belongs to — e.g. "Contact owner 08… (Bima Windu)" means Bima Windu, not the poster),
+ "agency": string|null (agency/company name when the contact is an agent),
  "wa_num": string|null (the WhatsApp/phone number as DIGITS ONLY in Indonesian international format: convert a leading 0 to 62, e.g. 081339632893 -> 6281339632893; keep a +62/62 number as-is without the plus. If several numbers appear, pick the one labelled WA/WhatsApp/contact. NEVER invent digits — if unsure or none visible, use null),
  "area": string|null (neighbourhood/area, e.g. Berawa, Canggu),
  "property_type": "villa"|"apartment"|"townhouse"|"guesthouse"|"house"|null,
