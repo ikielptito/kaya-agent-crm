@@ -10,7 +10,7 @@ import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentR
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, isViewing, isListingInfo } from '../lib/relay.js';
 import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
-import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites } from '../lib/viewings.js';
+import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites, resolveWindowToIso } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
@@ -116,7 +116,80 @@ const isBareAck = (s) =>
   /^(ok(ay|e)?|ya|yes|yep|yup|sure|siap|noted|thanks?|thank you|terima kasih|👍|🙏)[\s.!]*$/i
     .test(String(s || '').trim());
 
-async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
+// One-tap viewing decision from the contact (buttons on the relay ask).
+// Structured payload — no AI matching, no prose to misread. Returns true when
+// the tap was consumed.
+async function handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey }) {
+  const m = /^vwr:(\d+):(yes|other|no)$/.exec(String(buttonPayload || ''));
+  if (!m) return false;
+  const relayId = Number(m[1]), choice = m[2];
+  const num = String(fromNum || '').replace(/\D/g, '');
+  const rel = await fetch(`${db.SUPABASE_URL}/rest/v1/relays?id=eq.${relayId}&select=*`, { headers: db.sbHeaders })
+    .then(r => r.json()).catch(() => [])
+    .then(rows => rows?.[0] || null);
+  // Only the contact the ask was sent to may decide; anyone else falls through.
+  if (!rel || String(rel.contact_wa || '') !== num) return false;
+  const v = await viewingByRelay(db, relayId);
+  const prop = rel.property_name || rel.rental_slug || 'the villa';
+  const ownerId = rel.owner_id ?? null;
+  const ack = async (body) => {
+    const mid = await sendText(wa.phoneId, wa.token, fromNum, body);
+    if (mid) await logRelayAck(db, { ownerId, waNum: fromNum, content: body, waMessageId: mid });
+  };
+  const tellAgent = async (body) => {
+    if (!v?.agent_wa) return;
+    const mid = await sendText(wa.phoneId, wa.token, v.agent_wa, body);
+    if (mid) {
+      await fetch(`${db.SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: db.sbHeaders,
+        body: JSON.stringify({
+          agent_id: v.agent_id ?? null, wa_num: v.agent_wa, direction: 'outbound',
+          content: body, wa_message_id: mid, timestamp: new Date().toISOString(), source: 'viewing',
+        }),
+      }).catch(() => {});
+    }
+  };
+  const relayDone = (answer) => fetch(`${db.SUPABASE_URL}/rest/v1/relays?id=eq.${relayId}`, {
+    method: 'PATCH', headers: db.sbHeaders,
+    body: JSON.stringify({ status: 'delivered', answer, answered_at: new Date().toISOString(), delivered_at: new Date().toISOString() }),
+  }).catch(() => {});
+
+  if (choice === 'yes') {
+    const win = v?.requested_window || '';
+    const schedAt = v?.scheduled_at || await resolveWindowToIso(apiKey, win);
+    if (v && (v.status === 'requested' || v.status === 'confirmed')) {
+      await updateViewing(db, v.id, {
+        status: 'confirmed', confirmed_at: new Date().toISOString(),
+        ...(schedAt ? { scheduled_at: schedAt } : {}),
+      });
+    }
+    await relayDone(`Viewing confirmed${win ? ` for ${win}` : ''}.`);
+    await ack(`Confirmed ✓ — I've told the agent. Thank you!`);
+    await tellAgent(`Good news — ${rel.contact_name || 'the villa'} confirmed your viewing at ${prop}${win ? ` for ${win}` : ''}. 🎉`);
+    if (schedAt && v) {
+      sendViewingInvites(db, wa, { ...v, status: 'confirmed', scheduled_at: schedAt, updated_at: new Date().toISOString() })
+        .catch(e => console.warn('viewing invites failed:', e.message));
+    }
+    return true;
+  }
+  if (choice === 'no') {
+    if (v && v.status !== 'completed') await updateViewing(db, v.id, { status: 'declined' });
+    await relayDone('Viewing declined — the time does not work.');
+    await ack(`No problem — I've let the agent know. If another time would suit better, just tell me here.`);
+    await tellAgent(`On ${prop} — the villa can't do ${v?.requested_window || 'that time'}. Want me to ask about a different time, or line up another villa?`);
+    return true;
+  }
+  // 'other': keep the request open; their next free-text reply is a
+  // counter-proposal and flows through the normal answer capture.
+  await ack(`Sure — what day and time would work for ${prop}? Reply here and I'll pass it straight to the agent.`);
+  return true;
+}
+
+async function handleRelayReply({ db, wa, fromNum, text, apiKey, buttonPayload = null }) {
+  if (buttonPayload) {
+    const tapped = await handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey });
+    if (tapped) return true;
+  }
   const open = await openRelaysForContact(db, fromNum);
   if (!open.length) return false;
   // The contact holds two conversations at once — the relay questions AND
@@ -1018,6 +1091,7 @@ export async function nodeHandler(req, res) {
       const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
       const answered = await handleRelayReply({
         db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+        buttonPayload: extracted.buttonPayload || null,
       });
       if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
       // Anything else from a team number is logged and left for a human. Era
@@ -1121,6 +1195,7 @@ export async function nodeHandler(req, res) {
       const asked = await flushRelayQuestions(relayDb, relayWa, fromNum);
       const answered = await handleRelayReply({
         db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY,
+        buttonPayload: extracted.buttonPayload || null,
       });
       if (answered) {
         if (owner) {
