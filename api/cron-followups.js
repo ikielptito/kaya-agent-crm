@@ -2225,8 +2225,12 @@ export async function runAccountInviteSweep(ctx) {
     // Log a readable copy for the console inbox (the template body with the
     // name filled in), then stamp the one-time invite on the agent row.
     const bodyTmpl = templatesMap[ACCOUNT_INVITE_TEMPLATE]?.body || '';
-    const rendered = bodyTmpl.replace(/\{\{1\}\}/g, firstName)
-      || `Account invite sent to ${firstName} (${ACCOUNT_INVITE_TEMPLATE})`;
+    // The template carries a URL button the console can't render — append it
+    // to the logged copy so the thread shows what the agent actually received
+    // (it looked like a link-less pitch, 26 Aug 2026).
+    const rendered = (bodyTmpl.replace(/\{\{1\}\}/g, firstName)
+      || `Account invite sent to ${firstName} (${ACCOUNT_INVITE_TEMPLATE})`)
+      + `\n\n[Button: Create my account → sambarentals.com/?signin=1&ref=acct_invite&aid=${agent.id}]`;
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
