@@ -644,6 +644,19 @@ export default async function handler(req, res) {
       } catch (e) { accountInvites = { error: e.message }; }
     }
 
+    // ── VIEWINGS-FEATURE ANNOUNCEMENT SWEEP (engaged agents, one-time) ──
+    let viewingsAnnounce = null;
+    if (!previewMode) {
+      try {
+        viewingsAnnounce = await runViewingsAnnounceSweep({
+          now, sbHeaders, supabaseUrl: SUPABASE_URL,
+          agents, templatesMap,
+          waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+          results,
+        });
+      } catch (e) { viewingsAnnounce = { error: e.message }; }
+    }
+
     // ── UNANSWERED-INBOUND SWEEP (daily safety net) ──────────────────
     // Agents whose latest message is still unanswered (Maya superseded, spend
     // cap, manual takeover that went quiet, webhook hiccup) get a catch-up
@@ -989,6 +1002,7 @@ export default async function handler(req, res) {
       availability: availabilityResult,
       intro_sweep: introSweep,
       account_invites: accountInvites,
+      viewings_announce: viewingsAnnounce,
       cold_intro_drip: coldDrip,
       viewings: viewingsCron,
       unanswered_sweep: unansweredSweep,
@@ -2025,6 +2039,111 @@ export async function runIntroSweep(ctx) {
 // .account_invite_daily_cap is a positive number AND the template is approved.
 const ACCOUNT_INVITE_TEMPLATE = 'samba_account_invite_v1';
 const ACCOUNT_INVITE_CATEGORY = 'account_invite';
+
+// ── VIEWINGS-FEATURE ANNOUNCEMENT (one-time, capped sweep) ──────────────
+// Tell agents Maya can now book viewings (confirm the slot with the villa,
+// calendar invites both ways, day-of reminders). Unlike the invite sweep this
+// targets ENGAGED agents — they're the ones with clients to bring — ordered
+// most-recently-active first. One per agent ever; capped per day; drains its
+// queue and stops by itself. Ikiel, 26 Aug 2026.
+const VIEWINGS_ANNOUNCE_TEMPLATE = 'samba_viewings_v1';
+const VIEWINGS_ANNOUNCE_CATEGORY = 'viewings_announce';
+const VIEWINGS_ANNOUNCE_RECENT_DAYS = 90;   // "engaged" = wrote to us in this window
+
+export async function runViewingsAnnounceSweep(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
+
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
+  const cap = parseInt(config.viewings_announce_daily_cap, 10) || 0;
+  if (!config.enabled || cap <= 0) {
+    summary.skipped_reason = !config.enabled
+      ? 'samba_availability.enabled = false'
+      : 'viewings_announce_daily_cap not set';
+    return summary;
+  }
+  summary.enabled = true;
+
+  if (now.getUTCDay() === 1) { summary.skipped_reason = 'Monday (digest day)'; return summary; }
+  if (!templatesMap[VIEWINGS_ANNOUNCE_TEMPLATE]) {
+    summary.skipped_reason = `${VIEWINGS_ANNOUNCE_TEMPLATE} not approved yet`;
+    return summary;
+  }
+
+  const announcedSet = await loadCategorySet(supabaseUrl, sbHeaders, [VIEWINGS_ANNOUNCE_CATEGORY]);
+  const today = now.toISOString().slice(0, 10);
+  const recentCutoff = now.getTime() - VIEWINGS_ANNOUNCE_RECENT_DAYS * 86400e3;
+  const queue = agents
+    .filter(a => a.last_inbound_at && Date.parse(a.last_inbound_at) > recentCutoff)
+    .filter(a => !isMarketingCapped(a, config) && passesSambaBaseGate(a, config))
+    .filter(a => !a.campaign_engagement?.viewings_announce && !announcedSet.has(a.id))
+    .filter(a => !String(a.last_availability_alert_at || '').startsWith(today))
+    .sort((a, b) => String(b.last_inbound_at || '').localeCompare(String(a.last_inbound_at || '')) || a.id - b.id);
+  summary.queue = queue.length;
+
+  for (const agent of queue.slice(0, cap)) {
+    const firstName = firstNameOf(agent.name);
+    let metaErr = null;
+    let waMessageId = null;
+    try {
+      const r = await fetch(`${GRAPH}/${waPhoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
+          template: {
+            name: VIEWINGS_ANNOUNCE_TEMPLATE, language: { code: 'en' },
+            components: [
+              { type: 'body', parameters: [{ type: 'text', text: firstName }] },
+            ],
+          },
+        }),
+      });
+      if (r.ok) {
+        const d = await r.json();
+        waMessageId = d.messages?.[0]?.id;
+      } else {
+        const d = await r.json().catch(() => ({}));
+        metaErr = d?.error?.message || `HTTP ${r.status}`;
+      }
+    } catch (e) {
+      metaErr = e.message;
+    }
+    if (metaErr) {
+      summary.errors.push(`agent ${agent.id}: ${metaErr}`);
+      continue;
+    }
+
+    const bodyTmpl = templatesMap[VIEWINGS_ANNOUNCE_TEMPLATE]?.body || '';
+    const rendered = bodyTmpl.replace(/\{\{1\}\}/g, firstName)
+      || `Viewings announcement sent to ${firstName} (${VIEWINGS_ANNOUNCE_TEMPLATE})`;
+    await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({
+        agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+        content: rendered, timestamp: now.toISOString(),
+        source: 'cron', category: VIEWINGS_ANNOUNCE_CATEGORY,
+        template_name: VIEWINGS_ANNOUNCE_TEMPLATE,
+        wa_message_id: waMessageId, status: 'sent',
+      }),
+    }).catch(() => {});
+    await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify({
+        campaign_engagement: {
+          ...(agent.campaign_engagement || {}),
+          viewings_announce: { sent_at: now.toISOString(), template: VIEWINGS_ANNOUNCE_TEMPLATE },
+        },
+      }),
+    }).catch(() => {});
+
+    summary.sent++;
+    results.push({ availability: true, agent: agent.name || agent.id, kind: 'viewings_announce', template: VIEWINGS_ANNOUNCE_TEMPLATE });
+  }
+  summary.remaining = Math.max(0, queue.length - summary.sent);
+  return summary;
+}
 
 export async function runAccountInviteSweep(ctx) {
   const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
