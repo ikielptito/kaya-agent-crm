@@ -8,7 +8,7 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
-import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, VIEWING_PREFIX, isViewing } from '../lib/relay.js';
+import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, isViewing, isListingInfo } from '../lib/relay.js';
 import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
@@ -122,12 +122,22 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
   if (!captured) return false;
 
   const prop = captured.relay.property_name || captured.relay.rental_slug || 'the villa';
+  // Chase relays have no agent leg; also mirror every ack into wa_messages so
+  // the contact's console thread shows Maya's side (it was invisible before —
+  // Nindi's thread looked like she was talking to nobody, 26 Aug 2026).
+  const chase = isListingInfo(captured.relay.question);
+  const ownerId = captured.relay.owner_id ?? null;
+  const ack = async (body) => {
+    const mid = await sendText(wa.phoneId, wa.token, fromNum, body);
+    if (mid) await logRelayAck(db, { ownerId, waNum: fromNum, content: body, waMessageId: mid });
+  };
 
   // A hedge ("maybe", "I think so") is not an answer an agent can quote to
   // their client. Ask once for a straight yes/no rather than passing a guess.
   if (!captured.confident) {
-    await sendText(wa.phoneId, wa.token, fromNum,
-      `Thanks! Just so I give the agent something solid on ${prop} — can you confirm either way?`);
+    await ack(chase
+      ? `Thanks! Just so the listing shows it right — can you confirm ${prop} either way?`
+      : `Thanks! Just so I give the agent something solid on ${prop} — can you confirm either way?`);
     return true;
   }
 
@@ -153,9 +163,10 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
     } catch (e) { console.warn('viewing state update failed:', e.message); }
   }
 
-  await sendText(wa.phoneId, wa.token, fromNum,
-    `Perfect, thank you — passing that straight back to the agent now.`);
-  await deliverAnswers(db, wa, captured.relay.agent_wa);
+  await ack(chase
+    ? `Perfect, thank you — I've noted it all down and the listing will be updated. 🙏`
+    : `Perfect, thank you — passing that straight back to the agent now.`);
+  if (captured.relay.agent_wa) await deliverAnswers(db, wa, captured.relay.agent_wa);
   return true;
 }
 
@@ -2878,6 +2889,7 @@ PARTNERSHIP FUNDAMENTALS (true for EVERY owner, prospect or listed — answer th
 - NO exclusivity: owners keep Airbnb, Booking.com and direct bookings. Availability auto-syncs from their existing channel calendar (iCal) so double-bookings are avoided.
 - Bookings & money: an agent brings the tenant, and the owner deals with the tenant DIRECTLY — viewing, contract, deposit and rent are agreed between owner and tenant on the owner's own terms. Samba never holds or forwards money, so there is no "payout from Samba": the owner is paid directly by their tenant.
 - Deposit, cancellation and refund policies are the owner's own — we don't impose any.
+- The full owner pitch — how it works, pricing, FAQ — lives at https://sambarentals.com/home. Include that link once whenever you explain how the partnership works or an owner wants the bigger picture; don't repeat it in every message.
 RULES (continued):
 - For money matters BEYOND those fundamentals — money owed, billing disputes, complaints, bespoke contract terms, legal questions: set action "escalate" (Ikiel handles those personally). Even when you escalate, FIRST answer whatever parts the fundamentals cover in your reply, then say Ikiel will confirm the rest — never leave "reply" empty on an escalation; silence reads as being ignored.
 - Keep replies to 1–4 short sentences (a multi-part fundamentals question may take a few more). This is WhatsApp.

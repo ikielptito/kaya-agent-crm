@@ -290,7 +290,29 @@ export default async function handler(req, res) {
     } else if (action === 'get_owner_messages') {
       const { ownerId } = payload || {};
       if (ownerId == null) return res.status(400).json({ error: 'ownerId required' });
-      r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${ownerId}&order=timestamp.desc&limit=100`, { headers });
+      // The thread is the NUMBER's history, not just rows stamped with the
+      // owner id: relay sends used to log with owner_id null, which made the
+      // owner look like they were replying to nobody (Nindi, 26 Aug 2026).
+      // Rows tied to an agent stay out — a dual-role number's agent thread is
+      // its own conversation.
+      const own = (await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}&select=wa_num`, { headers }).then(x => x.json()).catch(() => []))?.[0];
+      const num = String(own?.wa_num || '').replace(/\D/g, '');
+      const filter = num
+        ? `or=(owner_id.eq.${ownerId},and(wa_num.eq.${num},owner_id.is.null,agent_id.is.null))`
+        : `owner_id=eq.${ownerId}`;
+      r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?${filter}&order=timestamp.desc&limit=100`, { headers });
+      return res.status(r.status).json(await r.json());
+
+    } else if (action === 'get_relays') {
+      // Read-only view of the relay pipeline (agent questions, listing-info
+      // chases, viewing requests) — filter by contactWa or status if given.
+      const { contactWa, status, limit } = payload || {};
+      const num = String(contactWa || '').replace(/\D/g, '');
+      const parts = [];
+      if (num) parts.push(`contact_wa=eq.${num}`);
+      if (status) parts.push(`status=eq.${encodeURIComponent(String(status))}`);
+      parts.push(`order=asked_at.desc.nullslast`, `limit=${Math.min(Number(limit) || 100, 500)}`);
+      r = await fetch(`${SUPABASE_URL}/rest/v1/relays?${parts.join('&')}`, { headers });
       return res.status(r.status).json(await r.json());
 
     } else if (action === 'patch_owner') {
