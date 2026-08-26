@@ -150,7 +150,10 @@ export default async function handler(req, res) {
       );
       // Same hourly beat: holding lines + a page for agents waiting >30 min.
       const sla = await sweepUnanswered({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }).catch(e => ({ error: e.message }));
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla });
+      // And the closing-window nudge: one last in-window message to agents
+      // with a concrete open loop before free text becomes impossible.
+      const closing = await sweepClosingWindows({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }).catch(e => ({ error: e.message }));
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
@@ -2039,6 +2042,68 @@ export async function runIntroSweep(ctx) {
 // .account_invite_daily_cap is a positive number AND the template is approved.
 const ACCOUNT_INVITE_TEMPLATE = 'samba_account_invite_v1';
 const ACCOUNT_INVITE_CATEGORY = 'account_invite';
+
+// ── CLOSING-WINDOW NUDGE (hourly, rides the relay sweep) ────────────────
+// The 24h free-text window is a wasting asset: once it shuts, reaching the
+// agent costs a template re-opener. In the final 1–2 hours of a window,
+// agents with a concrete OPEN LOOP get one last free-text nudge. Scope is
+// deliberately tight (Dony's lesson, 26 Aug 2026): the only loop today is
+// "engaged with the account invite but never created an account". One nudge
+// per agent EVER, contact hours only, never when paused. The 1h-wide bucket
+// means each closing window is seen exactly once by the hourly cron; the
+// stamp is belt-and-braces on top.
+export async function sweepClosingWindows(db, wa) {
+  const summary = { checked: 0, nudged: 0 };
+  const witaHour = (new Date().getUTCHours() + 8) % 24;
+  if (witaHour < 9 || witaHour >= 21) { summary.skipped = 'outside contact hours'; return summary; }
+  const hi = new Date(Date.now() - 22 * 3600e3).toISOString();   // window closes within 2h…
+  const lo = new Date(Date.now() - 23 * 3600e3).toISOString();   // …but not within 1h
+  const rows = await fetch(
+    `${db.SUPABASE_URL}/rest/v1/agents?last_inbound_at=gte.${lo}&last_inbound_at=lte.${hi}&select=id,name,wa_num,last_inbound_at,campaign_engagement,automation_override`,
+    { headers: db.sbHeaders }).then(r => r.json()).catch(() => []);
+  for (const a of (Array.isArray(rows) ? rows : [])) {
+    summary.checked++;
+    if (a.automation_override === 'paused' || a.automation_override === 'off') continue;
+    const ce = a.campaign_engagement || {};
+    const inv = ce.account_invite;
+    if (!inv?.sent_at) continue;                        // no invite → no open loop
+    if (ce.portal_account) continue;                    // already has an account
+    if (inv.window_nudge_at) continue;                  // one nudge ever
+    if (!(a.last_inbound_at > inv.sent_at)) continue;   // never engaged with the invite
+    const num = String(a.wa_num || '').replace(/\D/g, '');
+    if (!num) continue;
+    const first = firstNameOf(a.name);
+    const link = `https://sambarentals.com/?signin=1&ref=acct_invite&aid=${a.id}`;
+    const body = `${first && first !== 'there' ? first + ' — one' : 'One'} small thing before I let you go 😊 Your agent account is a single tap with Google: ${link}\n\nTakes 20 seconds, and every listing you share starts counting for you. If now isn't the time, no worries at all!`;
+    let mid = null;
+    try {
+      const r = await fetch(`${GRAPH}/${wa.phoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + wa.token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: num, type: 'text', text: { body } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      mid = d?.messages?.[0]?.id || null;
+    } catch { /* skip on failure */ }
+    if (!mid) continue;
+    await fetch(`${db.SUPABASE_URL}/rest/v1/wa_messages`, {
+      method: 'POST', headers: db.sbHeaders,
+      body: JSON.stringify({
+        agent_id: a.id, wa_num: num, direction: 'outbound', content: body,
+        wa_message_id: mid, timestamp: new Date().toISOString(),
+        source: 'cron', category: 'account_invite_nudge', status: 'sent',
+      }),
+    }).catch(() => {});
+    await fetch(`${db.SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, {
+      method: 'PATCH', headers: db.sbHeaders,
+      body: JSON.stringify({
+        campaign_engagement: { ...ce, account_invite: { ...inv, window_nudge_at: new Date().toISOString() } },
+      }),
+    }).catch(() => {});
+    summary.nudged++;
+  }
+  return summary;
+}
 
 // ── VIEWINGS-FEATURE ANNOUNCEMENT (one-time, capped sweep) ──────────────
 // Tell agents Maya can now book viewings (confirm the slot with the villa,
