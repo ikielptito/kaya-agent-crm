@@ -2828,7 +2828,9 @@ async function suggest() {
   box.value = '';
   box.placeholder = 'Maya is thinking…';
   try {
-    const data = await api('suggest_reply', { agentId: id });
+    // Owner threads carry an 'o' prefix on activeId — route to owner-mode Maya.
+    const isOwner = typeof id === 'string' && id.charAt(0) === 'o';
+    const data = await api('suggest_reply', isOwner ? { ownerId: Number(id.slice(1)) } : { agentId: id });
     if (data.error) throw new Error(data.error);
     box.value = (data.reply || '').trim();
   } catch (e) {

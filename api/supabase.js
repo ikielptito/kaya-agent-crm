@@ -13,7 +13,7 @@ import { parseImageMarker, isColdProspect } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
-import { previewAgentReply, attachOwnerPhotos } from './whatsapp-webhook.js';
+import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
@@ -854,10 +854,27 @@ export default async function handler(req, res) {
       // projects + rentals DB, MAYA_PERSONA, anti-hallucination rules, recent
       // wa_messages thread. Replaces the old client-side suggestReply which
       // hallucinated badly (pretended to be Ikiel, used hardcoded fallback data).
-      const { agentId } = payload || {};
-      if (!agentId) return res.status(400).json({ error: 'agentId required' });
+      const { agentId, ownerId } = payload || {};
+      if (!agentId && !ownerId) return res.status(400).json({ error: 'agentId or ownerId required' });
       const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
       if (!ANTHROPIC_KEY) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
+
+      // Owner thread: run the same owner-mode Maya the webhook runs (pitch,
+      // listing intel, intake ability — an intake she performs here is exactly
+      // the one she'd have performed live, still gated by the review queue).
+      if (ownerId) {
+        const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${ownerId}&select=*`, { headers });
+        const own = (await oRes.json())?.[0];
+        if (!own) return res.status(404).json({ error: 'Owner not found' });
+        const lastIn = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${ownerId}&direction=eq.inbound&order=timestamp.desc&limit=1&select=content`, { headers })
+          .then(r => r.json()).catch(() => []);
+        const inboundText = lastIn?.[0]?.content || '(no inbound yet — draft a warm opener appropriate to their status)';
+        const thread = await fetchOwnerThread(SUPABASE_URL, headers, ownerId);
+        const slugs = Array.isArray(own.listing_slugs) ? own.listing_slugs : [];
+        const ai = await generateOwnerReply(ANTHROPIC_KEY, own, inboundText, thread, slugs, { SUPABASE_URL, sbHeaders: headers, owner: own });
+        if (ai.error) return res.status(502).json({ error: ai.error });
+        return res.status(200).json({ reply: ai.reply || '', action: ai.action || 'auto' });
+      }
 
       // Load agent
       const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=*`, { headers });

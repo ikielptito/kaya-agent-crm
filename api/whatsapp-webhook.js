@@ -2763,15 +2763,29 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   // An image suggestion is staged as "[image:key]\ncaption" — owner_send in
   // api/supabase.js parses the marker back into a real WhatsApp image message.
   if (mode === 'draft' || (mode === 'hybrid' && ai.action === 'escalate')) {
-    patch.suggested_reply = (ai.media_key && ONBOARD_MEDIA[ai.media_key])
+    const staged = (ai.media_key && ONBOARD_MEDIA[ai.media_key])
       ? `[image:${ai.media_key}]\n${ai.reply || ONBOARD_MEDIA[ai.media_key].caption}`
       : (ai.reply || '');
+    // An escalation with no draft used to stage an empty string — the owner
+    // got silence and the console showed nothing (Caroline, 26 Aug 2026). An
+    // escalation must always leave a visible marker and ping Ikiel.
+    patch.suggested_reply = staged || '[Maya (owner) escalated — needs your reply.]';
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    if (ai.action === 'escalate') {
+      sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, {
+        title: `Owner needs you: ${owner.name || '+' + owner.wa_num}`,
+        body: String(inbound || '').replace(/\s+/g, ' ').slice(0, 160) || 'Maya escalated an owner conversation.',
+      }).catch(() => {});
+    }
     return;
   }
   if (ai.action === 'escalate' && !ai.reply) {
-    patch.suggested_reply = '[Maya (owner) escalated silently.]';
+    patch.suggested_reply = '[Maya (owner) escalated — needs your reply.]';
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+    sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, {
+      title: `Owner needs you: ${owner.name || '+' + owner.wa_num}`,
+      body: String(inbound || '').replace(/\s+/g, ' ').slice(0, 160) || 'Maya escalated an owner conversation.',
+    }).catch(() => {});
     return;
   }
   // Autopilot / hybrid(auto): send it.
@@ -2795,7 +2809,7 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
 }
 
-async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
+export async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
   const secret = process.env.LISTING_SYNC_SECRET;
   const ownerName = owner.name || 'there';
   const listingsLine = listingSlugs.length ? listingSlugs.join(', ') : '(none yet — this owner has not listed a villa)';
@@ -3186,7 +3200,7 @@ async function claimOwnerDriveFolder({ url, headers, owner, label }) {
   throw new Error('timed out waiting for the villa photo folder');
 }
 
-async function fetchOwnerThread(url, headers, ownerId) {
+export async function fetchOwnerThread(url, headers, ownerId) {
   try {
     // Pull a WIDE window, then collapse runs of photos into a single line.
     // With a flat 30-message limit a 27-photo burst filled the entire window
