@@ -9,6 +9,7 @@ import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, isViewing, isListingInfo } from '../lib/relay.js';
+import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
 import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
@@ -163,8 +164,27 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
     } catch (e) { console.warn('viewing state update failed:', e.message); }
   }
 
+  // Close the loop: a confident chase answer goes straight onto the listing
+  // (merge-only portal endpoint). Only when the chase covered a single
+  // property family — a multi-listing answer (Era's round) can't be mapped to
+  // one slug safely, so it stays recorded for manual entry.
+  let applied = false;
+  if (chase && captured.relay.rental_slug
+      && (String(captured.relay.question).match(/•/g) || []).length <= 1) {
+    try {
+      const facts = await extractListingFacts(apiKey, captured.answer);
+      if (facts) {
+        const r = await applyFactsToListing(captured.relay.rental_slug, facts);
+        applied = !!r.ok;
+        if (!r.ok) console.warn('applyFactsToListing failed:', r.reason);
+      }
+    } catch (e) { console.warn('fact apply failed:', e.message); }
+  }
+
   await ack(chase
-    ? `Perfect, thank you — I've noted it all down and the listing will be updated. 🙏`
+    ? (applied
+      ? `Perfect, thank you — I've updated the listing with all of that. 🙏`
+      : `Perfect, thank you — I've noted it all down and the listing will be updated. 🙏`)
     : `Perfect, thank you — passing that straight back to the agent now.`);
   if (captured.relay.agent_wa) await deliverAnswers(db, wa, captured.relay.agent_wa);
   return true;

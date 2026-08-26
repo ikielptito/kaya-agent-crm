@@ -303,6 +303,27 @@ export default async function handler(req, res) {
       r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?${filter}&order=timestamp.desc&limit=100`, { headers });
       return res.status(r.status).json(await r.json());
 
+    } else if (action === 'stamp_owner_messages') {
+      // Repair: relay sends used to log with owner_id null (fixed 26 Aug 2026),
+      // leaving Maya's side of owner conversations invisible in their threads.
+      // Stamp every unclaimed row that belongs to an owner's number. Rows tied
+      // to an agent are left alone (dual-role numbers keep separate threads).
+      // Idempotent: re-running finds nothing to do.
+      const owners = await (await fetch(`${SUPABASE_URL}/rest/v1/owners?select=id,wa_num`, { headers })).json();
+      const stamped = [];
+      for (const o of owners || []) {
+        const num = String(o.wa_num || '').replace(/\D/g, '');
+        if (!num) continue;
+        const q = `wa_messages?wa_num=eq.${num}&owner_id=is.null&agent_id=is.null`;
+        const rows = await (await fetch(`${SUPABASE_URL}/rest/v1/${q}&select=id`, { headers })).json().catch(() => []);
+        if (!Array.isArray(rows) || !rows.length) continue;
+        const p = await fetch(`${SUPABASE_URL}/rest/v1/${q}`, {
+          method: 'PATCH', headers, body: JSON.stringify({ owner_id: o.id }),
+        });
+        stamped.push({ owner_id: o.id, wa_num: num, rows: rows.length, ok: p.ok });
+      }
+      return res.status(200).json({ owners_checked: (owners || []).length, stamped });
+
     } else if (action === 'get_relays') {
       // Read-only view of the relay pipeline (agent questions, listing-info
       // chases, viewing requests) — filter by contactWa or status if given.
