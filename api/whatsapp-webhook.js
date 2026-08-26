@@ -119,7 +119,18 @@ const isBareAck = (s) =>
 async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
   const open = await openRelaysForContact(db, fromNum);
   if (!open.length) return false;
-  const captured = await captureRelayAnswer(apiKey, open, text);
+  // The contact holds two conversations at once — the relay questions AND
+  // their normal owner thread with Maya. Hand the matcher Maya's last message
+  // to them so "tidak ada" after a calendar ask isn't force-matched to an
+  // unrelated open question (Dony → fabricated living-room answer, 26 Aug).
+  let lastOutbound = null;
+  try {
+    const num = String(fromNum || '').replace(/\D/g, '');
+    const rows = await fetch(`${db.SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&direction=eq.outbound&order=timestamp.desc&limit=1&select=content`,
+      { headers: db.sbHeaders }).then(r => r.json());
+    lastOutbound = rows?.[0]?.content || null;
+  } catch { /* matcher just runs without context */ }
+  const captured = await captureRelayAnswer(apiKey, open, text, { lastOutbound });
   if (!captured) return false;
 
   const prop = captured.relay.property_name || captured.relay.rental_slug || 'the villa';
@@ -2878,6 +2889,10 @@ Owner: ${ownerName}
 Their current listing slugs: ${listingsLine}
 
 Their portal account email: ${owner.email || '(not collected yet — see ACCOUNT LINKING)'}
+${String(owner.notes || '').trim() ? `
+OWNER NOTES (durable facts recorded about this owner — they OVERRIDE any instinct to ask again; if a note says never ask about something, do not mention that thing at all):
+${String(owner.notes).trim()}
+` : ''}
 
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
@@ -2909,6 +2924,7 @@ RULES:
   · Hostex: Listings → your property → Calendar → iCal export.
   (These are the exact steps the owner portal gives — keep them identical so an owner is never told two different routes.)
   A valid link ends in .ics. If they have no channel calendar, that is fine: tell them to leave it and Ikiel can mark booked dates manually. Never invent a link to fill the field.
+- NEVER RE-ASK (hard rule): before asking for ANYTHING — the iCal especially — check OWNER NOTES and this conversation. If the owner already gave it, or already said they don't have it / don't use OTAs, that question is ANSWERED FOREVER unless they bring it up themselves. Asking again reads as not listening — one owner was asked about his calendar four times and got angry (Dony, 26 Aug 2026). "I don't have one" is a complete answer; acknowledge it once and move on for good.
 - Once a villa has a slug (see "their current listing slugs"), ALWAYS pass that slug when submitting a change to it. Submitting without the slug creates a duplicate listing.
 - ENQUIRY CONTACT: agents tap "Visit" on a villa to reach whoever runs it and arrange a viewing, and by default that is the owner on the number they are messaging you from. Ask who the enquiry should go to and what to call them — "Who should agents speak to about viewings, and what name should I put on the listing?" — and pass it as "contactName". A listing that shows a bare number with no name looks unmanaged next to the others. If they want viewings handled by a manager on a different number, say Ikiel will set that up.
 - PRICE format: "monthly" is the number in millions of rupiah with a "jt" suffix and nothing else — "40jt", "35.5jt". No "IDR", no "Rp", no "/month": the portal adds the period itself, so anything extra renders as "40jt/month /mo" on the live listing.
