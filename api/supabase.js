@@ -122,7 +122,8 @@ function extractPhoneCandidates(text) {
 export default async function handler(req, res) {
   setConsoleCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  // GET is calendar-only (see the ICS branch below); everything else is POST.
+  if (req.method !== 'POST' && req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   const SUPABASE_URL = process.env.SUPABASE_URL;
   const SUPABASE_KEY = process.env.SUPABASE_KEY;
