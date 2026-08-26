@@ -12,6 +12,7 @@ import { fetchPortalCards, resolveListingCards, sendListingCardMessage, cardMark
 import { parseImageMarker, isColdProspect } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderImages, uploadWaImageToDrive, trashDriveFile } from '../lib/drive-upload.js';
 import webpush from 'web-push';
+import { handleIcsGet, sendViewingInvites } from '../lib/viewings.js';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
 import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread } from './whatsapp-webhook.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
@@ -136,6 +137,13 @@ export default async function handler(req, res) {
     'Content-Type': 'application/json',
     'Prefer': 'return=minimal'
   };
+
+  // ── "Samba Visits" calendar (GET; its own token/HMAC auth) ───────────
+  // ?ics=<token> → subscribable feed; ?event=<id>&sig=<hmac> → one event.
+  // Folded in here to stay under the Hobby 12-function cap.
+  if (req.method === 'GET') {
+    return handleIcsGet(req, res, { SUPABASE_URL, sbHeaders: headers });
+  }
 
   const { action, payload } = req.body || {};
 
@@ -1190,7 +1198,21 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         method: 'PATCH', headers,
         body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }),
       });
-      return res.status(r.ok ? 200 : r.status).json(r.ok ? { ok: true } : { error: await r.text() });
+      if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+      // Calendar side-effects: confirming (or moving) a slot sends both
+      // parties their invite; cancelling a confirmed slot sends the recall.
+      let invites = null;
+      const confirmish = fields.status === 'confirmed' || (fields.scheduled_at && !fields.status);
+      const cancelish = ['cancelled', 'declined'].includes(fields.status);
+      if ((confirmish || cancelish) && process.env.META_WA_TOKEN && process.env.META_WA_PHONE_ID) {
+        const v = (await (await fetch(`${SUPABASE_URL}/rest/v1/viewings?id=eq.${id}&select=*`, { headers })).json().catch(() => []))?.[0];
+        if (v?.scheduled_at && (cancelish || v.status === 'confirmed')) {
+          invites = await sendViewingInvites({ SUPABASE_URL, sbHeaders: headers },
+            { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN },
+            v, { cancelled: cancelish }).catch(() => null);
+        }
+      }
+      return res.status(200).json({ ok: true, invites });
 
     } else if (action === 'transcribe_media') {
       // Transcribe an already-received WhatsApp voice note by its media id

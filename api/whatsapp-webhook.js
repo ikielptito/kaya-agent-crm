@@ -10,7 +10,7 @@ import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentR
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, isViewing, isListingInfo } from '../lib/relay.js';
 import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
-import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock } from '../lib/viewings.js';
+import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
@@ -155,6 +155,13 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey }) {
             status: 'confirmed', confirmed_at: new Date().toISOString(),
             ...(captured.viewing.scheduledAt ? { scheduled_at: captured.viewing.scheduledAt } : {}),
           });
+          // Both parties get a calendar invite the moment the slot is real —
+          // only with a concrete time (a vague "yes, this week" gets none).
+          const schedAt = captured.viewing.scheduledAt || v.scheduled_at;
+          if (schedAt) {
+            sendViewingInvites(db, wa, { ...v, status: 'confirmed', scheduled_at: schedAt, updated_at: new Date().toISOString() })
+              .catch(e => console.warn('viewing invites failed:', e.message));
+          }
         } else if (captured.viewing.outcome === 'declined') {
           await updateViewing(db, v.id, { status: 'declined' });
         }
