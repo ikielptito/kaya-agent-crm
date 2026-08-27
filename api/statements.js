@@ -84,13 +84,16 @@ export default async function handler(req, res) {
       if (payload.status) q += `&status=eq.${encodeURIComponent(payload.status)}`;
       if (payload.group_key) q += `&group_key=eq.${encodeURIComponent(payload.group_key)}`;
       const rows = (await sb(q)) || [];
-      // Outstanding = published/partial statements' remaining balance.
-      const outstanding = rows.filter(s => s.status === 'published' || s.status === 'partial');
+      // Outstanding = published/partial statements still owing a POSITIVE
+      // balance. Deficit months (negative payout) are not owed to anyone —
+      // they carry forward into the next month on publish.
+      const outstanding = rows.filter(s => (s.status === 'published' || s.status === 'partial')
+        && ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)) > 0);
       return res.status(200).json({
         statements: rows,
         outstanding: {
           count: outstanding.length,
-          total: outstanding.reduce((a, s) => a + Math.max(0, (Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)), 0),
+          total: outstanding.reduce((a, s) => a + ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)), 0),
         },
       });
     }

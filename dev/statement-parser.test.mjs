@@ -287,5 +287,38 @@ test('negative TOTAL PAYOUT (deficit month) parses and reconciles', () => {
   assert.equal(p.needs_review, false);
 });
 
+// ── Carry-forward of negative balances (lib/statements.js) ──────────
+const { computeCarryAdjustment, prevPeriodOf } = await import('../lib/statements.js');
+console.log('\ncarry-forward:');
+
+test('prevPeriodOf handles year boundary', () => {
+  assert.equal(prevPeriodOf('2026-05'), '2026-04');
+  assert.equal(prevPeriodOf('2026-01'), '2025-12');
+});
+
+test('prior deficit rolls in as a negative adjustment', () => {
+  const c = computeCarryAdjustment({ period: '2026-04', payout_total: -8957285, paid_total: 0 }, []);
+  assert.ok(c);
+  assert.equal(c.amount, -8957285);
+  assert.ok(/April 2026/.test(c.description));
+});
+
+test('no carry when the prior month was positive or absent', () => {
+  assert.equal(computeCarryAdjustment({ period: '2026-04', payout_total: 5000000, paid_total: 0 }, []), null);
+  assert.equal(computeCarryAdjustment(null, []), null);
+});
+
+test("Era's own \"Minus from …\" line suppresses the auto carry (never double-count)", () => {
+  const lines = [{ kind: 'adjustment', description: 'Minus from February ', flags: ['carry_forward'] }];
+  assert.equal(computeCarryAdjustment({ period: '2026-02', payout_total: -2053995, paid_total: 0 }, lines), null);
+});
+
+test('partial payment against a deficit reduces what carries', () => {
+  const c = computeCarryAdjustment({ period: '2026-04', payout_total: -1000000, paid_total: 0 }, []);
+  assert.equal(c.amount, -1000000);
+  const c2 = computeCarryAdjustment({ period: '2026-04', payout_total: 3000000, paid_total: 3000000 }, []);
+  assert.equal(c2, null);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
