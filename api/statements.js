@@ -34,7 +34,7 @@ import {
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, statementUnitNights, runOwnerStatementSweep, periodLabel,
 } from '../lib/statements.js';
-import { statementToken, inviteToken } from '../lib/tokens.js';
+import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
 
 // Line fields the editor may write, per kind. Everything else is derived.
 const EDITABLE = new Set(['unit_name', 'guest_name', 'stay_dates', 'platform', 'nights', 'amount', 'commission', 'nett', 'expense_date', 'description', 'position']);
@@ -218,6 +218,9 @@ export default async function handler(req, res) {
       return res.status(200).json(out);
     }
 
+    if (action === 'statement_preview_link') {
+      return res.status(200).json({ url: `https://sambarentals.com/portal?preview=${previewToken(String(payload.group_key || ''))}` });
+    }
     if (action === 'statement_invite_link') {
       return res.status(200).json({ url: `https://sambarentals.com/portal?invite=${inviteToken(String(payload.group_key || ''))}` });
     }
