@@ -231,15 +231,29 @@ export default async function handler(req, res) {
       if (typeof f.charges_commission === 'boolean') allowed.charges_commission = f.charges_commission;
       if (f.sheet_file_id) allowed.sheet_file_id = String(f.sheet_file_id);
       if (f.payout_account !== undefined) {
-        const a = f.payout_account || {};
-        allowed.payout_account = a && (a.bank || a.account_name || a.account_number || a.note) ? {
-          bank: String(a.bank || '').slice(0, 80) || null,
-          account_name: String(a.account_name || '').slice(0, 120) || null,
-          account_number: String(a.account_number || '').slice(0, 60) || null,
-          note: String(a.note || '').slice(0, 300) || null,
-          updated_by: payload.actor === 'owner' ? 'owner' : 'admin',
-          updated_at: new Date().toISOString(),
-        } : null;
+        // International accounts carry country-specific fields (US routing,
+        // UK sort code, IBAN, AU BSB, SWIFT…). Provided fields MERGE onto the
+        // stored account so a quick 3-field edit never wipes the rest; an
+        // explicit null/empty object clears the account entirely.
+        const ACCT_FIELDS = { country: 8, bank: 80, account_name: 120, account_number: 60, routing_number: 20, sort_code: 12, bsb: 12, iban: 42, swift: 16, account_type: 12, note: 300 };
+        if (!f.payout_account || Object.keys(f.payout_account).length === 0) {
+          allowed.payout_account = null;
+        } else {
+          const existing = (await sb(`statement_groups?key=eq.${encodeURIComponent(payload.key)}&select=payout_account&limit=1`))?.[0]?.payout_account || {};
+          const merged = { ...existing };
+          for (const [k, cap] of Object.entries(ACCT_FIELDS)) {
+            if (f.payout_account[k] === undefined) continue;
+            let v = String(f.payout_account[k] || '').trim().slice(0, cap);
+            if (k === 'iban' || k === 'swift') v = v.toUpperCase().replace(/\s+/g, '');
+            merged[k] = v || null;
+          }
+          const meaningful = Object.entries(merged).some(([k, v]) => v && !['updated_by', 'updated_at', 'country'].includes(k));
+          allowed.payout_account = meaningful ? {
+            ...merged,
+            updated_by: payload.actor === 'owner' ? 'owner' : 'admin',
+            updated_at: new Date().toISOString(),
+          } : null;
+        }
       }
       if (!Object.keys(allowed).length) return res.status(400).json({ error: 'No editable fields' });
       await patch(`statement_groups?key=eq.${encodeURIComponent(payload.key)}`, { ...allowed, updated_at: new Date().toISOString() });
