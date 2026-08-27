@@ -30,7 +30,7 @@
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import {
   listGroups, syncGroup, syncAllGroups, reparseStatement, recomputeTotals,
-  publishStatement, unpublishStatement, markPaid, saveProofUpload, signProofUrl,
+  publishStatement, unpublishStatement, refreshSnapshot, markPaid, saveProofUpload, signProofUrl,
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, runOwnerStatementSweep, periodLabel,
 } from '../lib/statements.js';
@@ -153,6 +153,7 @@ export default async function handler(req, res) {
       }));
     }
     if (action === 'statement_unpublish') return res.status(200).json(await unpublishStatement(db, id));
+    if (action === 'statement_refresh_snapshot') return res.status(200).json(await refreshSnapshot(db, id));
     if (action === 'statement_mark_paid') return res.status(200).json(await markPaid(db, id));
 
     if (action === 'statement_record_payment') {
