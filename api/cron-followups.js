@@ -31,6 +31,7 @@ import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
+import { resolveCampaign, isCampaignPaused, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -306,13 +307,17 @@ export default async function handler(req, res) {
     // This is the 9am WITA send: Maya-initiated outreach that respects quiet hours.
     try {
       const welcomeTpl = pickWelcomeTemplate(Object.values(templatesMap), { requireApproved: false });
-      if (welcomeTpl) {
+      const onboardingCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders }, 'onboarding');
+      if (isCampaignPaused(onboardingCamp)) {
+        results.push({ action: 'deferred_welcome_skipped', reason: 'campaign paused (command center)' });
+      } else if (welcomeTpl) {
+        let welcomesFailed = 0;
         for (const agent of agents) {
           const samba = agent.campaign_engagement?.samba;
           if (!samba?.welcome_pending || !agent.wa_num) continue;
           const fName = String(agent.name || '').trim().split(/\s+/)[0] || 'there';
-          const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, welcomeTpl, [fName]);
-          if (!ok) { results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_failed' }); continue; }
+          const mid = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, welcomeTpl, [fName]);
+          if (!mid) { welcomesFailed++; results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_failed' }); continue; }
           // Clear the flag so it sends exactly once (preserve the rest of the bucket).
           await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent, 'samba', { ...samba, welcome_pending: false });
           const rendered = (welcomeTpl.body || '').replace(/\{\{1\}\}/g, fName);
@@ -321,11 +326,16 @@ export default async function handler(req, res) {
             body: JSON.stringify({
               agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
               content: rendered, timestamp: now.toISOString(), source: 'cron',
-              category: 'onboarding', template_name: welcomeTpl.name
+              category: 'onboarding', template_name: welcomeTpl.name,
+              campaign_id: onboardingCamp?.id || null, status: 'sent',
+              wa_message_id: typeof mid === 'string' ? mid : null,
             })
           }).catch(() => {});
           welcomesSent++;
           results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_sent' });
+        }
+        if (welcomesSent || welcomesFailed) {
+          await noteRun({ SUPABASE_URL, sbHeaders }, onboardingCamp, { sent: welcomesSent, failed: welcomesFailed });
         }
       }
     } catch (e) { results.push({ action: 'deferred_welcome_error', error: e.message }); }
@@ -452,19 +462,26 @@ export default async function handler(req, res) {
         }
         const firstName = firstNameOf(agent.name);
         const renderedBody = (tmpl.body || '').replace(/\{\{1\}\}/g, firstName);
-        const ok = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
-        if (!ok) {
+        const seqMid = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, tmpl, [firstName]);
+        if (!seqMid) {
+          await bumpCampaign({ SUPABASE_URL, sbHeaders }, eng.campaign_id, { failed: 1 });
           results.push({ agent: agent.name || agent.id, pipeline: engPl, type: 'sequence_send_failed', template: nextStep.template_name });
           continue;
         }
+        // category/status/wa_message_id were missing here until 27 Aug 2026 —
+        // sequence sends were invisible to campaign reporting, dedupe, AND the
+        // webhook's delivered/read tracking (nothing to match the status to).
         await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
           method: 'POST', headers: sbHeaders,
           body: JSON.stringify({
             agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
             content: renderedBody, timestamp: now.toISOString(),
-            source: 'cron', campaign_id: eng.campaign_id
+            source: 'cron', campaign_id: eng.campaign_id,
+            category: 'sequence', status: 'sent', template_name: nextStep.template_name,
+            wa_message_id: typeof seqMid === 'string' ? seqMid : null,
           })
         }).catch(() => {});
+        await bumpCampaign({ SUPABASE_URL, sbHeaders }, eng.campaign_id, { sent: 1 });
         const waitDays = (sequence[nextIdx + 1]?.wait_days) || 1;
         const nextTemplateAt = sequence[nextIdx + 1]
           ? new Date(now.getTime() + waitDays * 86400000).toISOString()
@@ -742,7 +759,10 @@ export default async function handler(req, res) {
       try {
         const coldCfg = await loadSetting(SUPABASE_URL, sbHeaders, 'owner_cold') || {};
         const dripCap = coldCfg.intro_daily_cap === undefined ? 8 : (parseInt(coldCfg.intro_daily_cap, 10) || 0);
-        if (dripCap > 0) {
+        const coldCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders }, 'owner_cold');
+        if (isCampaignPaused(coldCamp)) {
+          coldDrip = { skipped: 'campaign paused (command center)' };
+        } else if (dripCap > 0) {
           const rows = await fetch(
             `${SUPABASE_URL}/rest/v1/owners?onboarding_status=eq.agreed&select=id,name,wa_num,consent_note,notes&order=created_at.asc&limit=50`,
             { headers: sbHeaders }
@@ -761,6 +781,12 @@ export default async function handler(req, res) {
               if (coldDrip.errors.length < 3) coldDrip.errors.push(`${o.name || o.id}: ${d.error || r.status}`);
             }
           }
+          // sent is bumped inside send_onboard_intro (one bump per send at the
+          // source) — this only stamps the run + counts failures.
+          await noteRun({ SUPABASE_URL, sbHeaders }, coldCamp, {
+            failed: coldDrip.errors.length,
+            summary: { sent: coldDrip.sent, queue: coldDrip.queue, errors: coldDrip.errors.length },
+          });
         } else {
           coldDrip = { skipped: 'owner_cold.intro_daily_cap = 0' };
         }
@@ -970,6 +996,36 @@ export default async function handler(req, res) {
       } catch (e) { backfill = { error: e.message }; }
     }
 
+    // ── CAMPAIGN LIFECYCLE (command center) ──────────────────────────
+    // 1) Repair one-off/console campaigns stranded at 'sending' >2h (closed
+    //    browser tab, killed function) — the permanent fix for the class of
+    //    bug the migration's backfill repaired historically.
+    // 2) Launch any 'scheduled' campaign whose time has come, server-side.
+    let campaignLifecycle = null;
+    if (!previewMode) {
+      try {
+        const campDb2 = { SUPABASE_URL, sbHeaders };
+        campaignLifecycle = { repaired: 0, launched: 0 };
+        const cutoff2h = new Date(now.getTime() - 2 * 3600e3).toISOString();
+        const stranded = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?status=eq.sending&updated_at=lt.${cutoff2h}&select=id,name,sent_count`, { headers: sbHeaders }).then(r => r.json()).catch(() => []);
+        for (const c of (Array.isArray(stranded) ? stranded : [])) {
+          const final = (c.sent_count || 0) > 0 ? 'complete' : 'failed';
+          await patchCampaign(campDb2, c.id, { status: final });
+          await logCampaignEvent(campDb2, c.id, 'auto_repaired', { reason: 'stranded_sending', sent_count: c.sent_count || 0 }, 'cron');
+          campaignLifecycle.repaired++;
+        }
+        const due = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?status=eq.scheduled&scheduled_at=lte.${now.toISOString()}&select=*`, { headers: sbHeaders }).then(r => r.json()).catch(() => []);
+        for (const c of (Array.isArray(due) ? due : [])) {
+          await patchCampaign(campDb2, c.id, { status: 'sending' });
+          await logCampaignEvent(campDb2, c.id, 'launched', { scheduled_at: c.scheduled_at }, 'cron');
+          const saCfg = await loadSetting(SUPABASE_URL, sbHeaders, 'samba_availability') || {};
+          const runOut = await executeBroadcast(campDb2, c, { testOnly: !!saCfg.test_agents_only });
+          campaignLifecycle.launched++;
+          results.push({ campaign: c.name, action: 'scheduled_launch', ...runOut });
+        }
+      } catch (e) { campaignLifecycle = { error: e.message }; }
+    }
+
     // Compact run-log entry for the Schedule view (skip pure previews).
     if (!previewMode) {
       await logCronRun({
@@ -984,6 +1040,8 @@ export default async function handler(req, res) {
         intros: introSweep?.sent || 0,
         invites: accountInvites?.sent || 0,
         resumed: autoResumed || 0,
+        campaigns_repaired: campaignLifecycle?.repaired || 0,
+        campaigns_launched: campaignLifecycle?.launched || 0,
         briefing: !!ownerReport?.sent,
         review: weeklyReview?.grade || (weeklyReview?.staged ? 'staged' : null),
         backfilled: backfill?.created || 0,
@@ -1008,6 +1066,7 @@ export default async function handler(req, res) {
       viewings_announce: viewingsAnnounce,
       cold_intro_drip: coldDrip,
       viewings: viewingsCron,
+      campaign_lifecycle: campaignLifecycle,
       unanswered_sweep: unansweredSweep,
       rentals_reconcile: rentalsReconcile,
       listing_info_chase: listingInfo && { listings_with_gaps: listingInfo.listings_with_gaps, contacts_messaged: listingInfo.contacts_messaged, exhausted: listingInfo.exhausted, error: listingInfo.error },
@@ -1113,6 +1172,9 @@ async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
   } catch (e) { return {}; }
 }
 
+// Returns Meta's message id on success (or true if the id is missing from
+// the response), false on failure — truthiness is unchanged for the older
+// call sites; newer ones store the id so the status webhook can find the row.
 async function sendTemplate(phoneId, token, to, tmpl, params) {
   try {
     const components = (params && params.length > 0)
@@ -1126,7 +1188,9 @@ async function sendTemplate(phoneId, token, to, tmpl, params) {
         template: { name: tmpl.name, language: { code: tmpl.language || 'en' }, components }
       })
     });
-    return r.ok;
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => ({}));
+    return d.messages?.[0]?.id || true;
   } catch (e) { return false; }
 }
 
@@ -1472,6 +1536,22 @@ export async function runAvailabilityNotifications(ctx) {
   }
   summary.enabled = true;
 
+  // Campaign rows (command center): the day's pass is governed by its own
+  // campaign's status — digest on Mondays, event alerts otherwise. The intro
+  // variant inside the alert pass stamps the availability_intro row so its
+  // funnel is tracked separately, but only the day's campaign can pause the
+  // pass. Best-effort: a missing row never blocks the broadcast.
+  const campDb = { SUPABASE_URL: supabaseUrl, sbHeaders };
+  const isMondayForCamp = now.getUTCDay() === 1;
+  const alertCamp  = await resolveCampaign(campDb, 'availability_alert');
+  const digestCamp = await resolveCampaign(campDb, 'availability_digest');
+  const introCamp  = await resolveCampaign(campDb, 'availability_intro');
+  const dayCamp = isMondayForCamp ? digestCamp : alertCamp;
+  if (isCampaignPaused(dayCamp)) {
+    summary.skipped_reason = `campaign paused (command center): ${dayCamp.key}`;
+    return summary;
+  }
+
   // ── Digest fetch ────────────────────────────────────────────────
   const digestUrl = process.env.AVAILABILITY_DIGEST_URL;
   const digestSecret = process.env.DIGEST_SHARED_SECRET;
@@ -1553,7 +1633,12 @@ export async function runAvailabilityNotifications(ctx) {
         if (a.last_availability_alert_at && (now.getTime() - new Date(a.last_availability_alert_at).getTime()) < 6 * 3.6e6) return false;
         return true;
       });
-      summary.new_arrivals = await sendNewArrivals({ SUPABASE_URL: supabaseUrl, sbHeaders }, { phoneId: waPhoneId, token: waToken }, { eligible: arrivalsAudience, digestProperties: digest.properties, previewMode, templatesMap });
+      const arrivalsCamp = await resolveCampaign(campDb, 'new_arrivals');
+      if (isCampaignPaused(arrivalsCamp)) {
+        summary.new_arrivals = { ran: false, reason: 'campaign paused (command center)' };
+      } else {
+        summary.new_arrivals = await sendNewArrivals({ SUPABASE_URL: supabaseUrl, sbHeaders }, { phoneId: waPhoneId, token: waToken }, { eligible: arrivalsAudience, digestProperties: digest.properties, previewMode, templatesMap, campaign: arrivalsCamp });
+      }
       // Refresh the list so the regular alert respects the 6h touch guard.
       if (summary.new_arrivals?.sent) {
         const stamp = new Date().toISOString();
@@ -1834,12 +1919,14 @@ export async function runAvailabilityNotifications(ctx) {
         renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
       });
     }
+    const rowCamp = category === 'availability_intro' ? introCamp : (isMonday ? digestCamp : alertCamp);
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
         source: 'cron', category, template_name: sendName,
+        campaign_id: rowCamp?.id || null,
         // Store Meta's message id + a 'sent' baseline so the webhook status
         // handler can match delivered/read events to these rows. Without
         // wa_message_id, every cron send was invisible to delivery tracking.
@@ -1866,6 +1953,17 @@ export async function runAvailabilityNotifications(ctx) {
     await saveSetting(supabaseUrl, sbHeaders, 'samba_availability_snapshot', newSnapshot);
   }
   summary.ran = true;
+
+  // Command-center bookkeeping: the day's campaign row gets the run stamped
+  // and its lifetime counters advanced (waves accumulate — bump is atomic).
+  const introSent = summary.intro_sent || 0;
+  const skips = (summary.skipped_freq_cap || 0) + (summary.skipped_opt_out || 0) + (summary.skipped_tier_cap || 0);
+  if (isMonday) {
+    await noteRun(campDb, digestCamp, { sent: summary.weekly_digest_sent, skipped: skips, failed: summary.errors.length, summary: { wave: summary.wave || 'all', sent: summary.weekly_digest_sent, skipped: skips, errors: summary.errors.length } });
+  } else {
+    await noteRun(campDb, alertCamp, { sent: Math.max(0, summary.event_alerts_sent - introSent), skipped: skips, failed: summary.errors.length, summary: { wave: summary.wave || 'all', sent: summary.event_alerts_sent - introSent, skipped: skips, errors: summary.errors.length } });
+    if (introSent) await noteRun(campDb, introCamp, { sent: introSent });
+  }
   return summary;
 }
 
@@ -1892,6 +1990,11 @@ export async function runIntroSweep(ctx) {
     summary.skipped_reason = !config.enabled
       ? 'samba_availability.enabled = false'
       : 'intro_sweep_daily_cap not set';
+    return summary;
+  }
+  const introSweepCamp = await resolveCampaign({ SUPABASE_URL: supabaseUrl, sbHeaders }, 'availability_intro');
+  if (isCampaignPaused(introSweepCamp)) {
+    summary.skipped_reason = 'campaign paused (command center)';
     return summary;
   }
   summary.enabled = true;
@@ -1996,6 +2099,7 @@ export async function runIntroSweep(ctx) {
         agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
         content: renderedPreview, timestamp: now.toISOString(),
         source: 'cron', category: 'availability_intro', template_name: introCarousel.name,
+        campaign_id: introSweepCamp?.id || null,
         wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
@@ -2029,6 +2133,10 @@ export async function runIntroSweep(ctx) {
     results.push({ availability: true, agent: agent.name || agent.id, kind: 'intro_sweep', template: introCarousel.name });
   }
   summary.remaining = Math.max(0, queue.length - summary.sent);
+  await noteRun({ SUPABASE_URL: supabaseUrl, sbHeaders }, introSweepCamp, {
+    sent: summary.sent, failed: summary.errors.length,
+    summary: { sent: summary.sent, queue: summary.queue, remaining: summary.remaining, errors: summary.errors.length },
+  });
   return summary;
 }
 
@@ -2130,14 +2238,20 @@ export async function sweepClosingWindows(db, wa) {
       mid = d?.messages?.[0]?.id || null;
     } catch { /* skip on failure */ }
     if (!mid) continue;
+    // Nudges roll up under the account-invite campaign (its categories claim
+    // both). Deliberately not gated on that campaign's paused status — the
+    // nudge closes a loop already opened with this agent.
+    const nudgeCamp = await resolveCampaign(db, 'account_invite');
     await fetch(`${db.SUPABASE_URL}/rest/v1/wa_messages`, {
       method: 'POST', headers: db.sbHeaders,
       body: JSON.stringify({
         agent_id: a.id, wa_num: num, direction: 'outbound', content: body,
         wa_message_id: mid, timestamp: new Date().toISOString(),
         source: 'cron', category: 'account_invite_nudge', status: 'sent',
+        campaign_id: nudgeCamp?.id || null,
       }),
     }).catch(() => {});
+    await bumpCampaign(db, nudgeCamp?.id, { sent: 1 });
     await fetch(`${db.SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, {
       method: 'PATCH', headers: db.sbHeaders,
       body: JSON.stringify({
@@ -2170,6 +2284,11 @@ export async function runViewingsAnnounceSweep(ctx) {
     summary.skipped_reason = !config.enabled
       ? 'samba_availability.enabled = false'
       : 'viewings_announce_daily_cap not set';
+    return summary;
+  }
+  const vaCamp = await resolveCampaign({ SUPABASE_URL: supabaseUrl, sbHeaders }, 'viewings_announce');
+  if (isCampaignPaused(vaCamp)) {
+    summary.skipped_reason = 'campaign paused (command center)';
     return summary;
   }
   summary.enabled = true;
@@ -2244,6 +2363,7 @@ export async function runViewingsAnnounceSweep(ctx) {
         content: rendered, timestamp: now.toISOString(),
         source: 'cron', category: VIEWINGS_ANNOUNCE_CATEGORY,
         template_name: VIEWINGS_ANNOUNCE_TEMPLATE,
+        campaign_id: vaCamp?.id || null,
         wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
@@ -2261,6 +2381,10 @@ export async function runViewingsAnnounceSweep(ctx) {
     results.push({ availability: true, agent: agent.name || agent.id, kind: 'viewings_announce', template: VIEWINGS_ANNOUNCE_TEMPLATE });
   }
   summary.remaining = Math.max(0, queue.length - summary.sent);
+  await noteRun({ SUPABASE_URL: supabaseUrl, sbHeaders }, vaCamp, {
+    sent: summary.sent, failed: summary.errors.length,
+    summary: { sent: summary.sent, queue: summary.queue, remaining: summary.remaining, auto_responders: summary.auto_responders, errors: summary.errors.length },
+  });
   return summary;
 }
 
@@ -2275,6 +2399,11 @@ export async function runAccountInviteSweep(ctx) {
     summary.skipped_reason = !config.enabled
       ? 'samba_availability.enabled = false'
       : 'account_invite_daily_cap not set';
+    return summary;
+  }
+  const inviteCamp = await resolveCampaign({ SUPABASE_URL: supabaseUrl, sbHeaders }, 'account_invite');
+  if (isCampaignPaused(inviteCamp)) {
+    summary.skipped_reason = 'campaign paused (command center)';
     return summary;
   }
   summary.enabled = true;
@@ -2363,6 +2492,7 @@ export async function runAccountInviteSweep(ctx) {
         content: rendered, timestamp: now.toISOString(),
         source: 'cron', category: ACCOUNT_INVITE_CATEGORY,
         template_name: ACCOUNT_INVITE_TEMPLATE,
+        campaign_id: inviteCamp?.id || null,
         wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
@@ -2380,6 +2510,10 @@ export async function runAccountInviteSweep(ctx) {
     results.push({ availability: true, agent: agent.name || agent.id, kind: 'account_invite', template: ACCOUNT_INVITE_TEMPLATE });
   }
   summary.remaining = Math.max(0, queue.length - summary.sent);
+  await noteRun({ SUPABASE_URL: supabaseUrl, sbHeaders }, inviteCamp, {
+    sent: summary.sent, failed: summary.errors.length,
+    summary: { sent: summary.sent, queue: summary.queue, remaining: summary.remaining, errors: summary.errors.length },
+  });
   return summary;
 }
 

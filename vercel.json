@@ -2,7 +2,8 @@
   "functions": {
     "api/supabase.js": { "maxDuration": 300 },
     "api/whatsapp-webhook.js": { "maxDuration": 300 },
-    "api/cron-followups.js": { "maxDuration": 300 }
+    "api/cron-followups.js": { "maxDuration": 300 },
+    "api/campaigns.js": { "maxDuration": 300 }
   },
   "routes": [
     { "src": "^/(lib|dev)(/.*)?$", "status": 404 },

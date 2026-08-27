@@ -21,6 +21,7 @@ import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
 import { announceListingLive, noteNewArrivals } from '../lib/listing-live.js';
 import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
+import { resolveCampaign, bump as bumpCampaign, logEvent as logCampaignEvent } from '../lib/campaigns.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -215,6 +216,19 @@ export default async function handler(req, res) {
           delete fields.wa_url;
         }
       }
+      // Conversion detection (command center): the portal writes
+      // campaign_engagement.portal_account back through this action on signup.
+      // A portal_account appearing on an agent that carries the account-invite
+      // stamp = one signup conversion for the Account invites campaign.
+      let creditInviteConversion = false;
+      if (id != null && fields?.campaign_engagement?.portal_account) {
+        try {
+          const cur = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${id}&select=campaign_engagement`, { headers })
+            .then((rr) => rr.json()).catch(() => []);
+          const ce = cur?.[0]?.campaign_engagement || {};
+          creditInviteConversion = !ce.portal_account && !!ce.account_invite;
+        } catch { /* best-effort */ }
+      }
       r = await fetch(SUPABASE_URL + '/rest/v1/agents?id=eq.' + id, {
         method: 'PATCH',
         headers,
@@ -224,7 +238,15 @@ export default async function handler(req, res) {
         const err = await r.text();
         return res.status(r.status).json({ error: err });
       }
-      return res.status(r.status).end();
+      if (creditInviteConversion) {
+        const campDb = { SUPABASE_URL, sbHeaders: headers };
+        const inviteCamp = await resolveCampaign(campDb, 'account_invite').catch(() => null);
+        if (inviteCamp) {
+          await bumpCampaign(campDb, inviteCamp.id, { converted: 1 });
+          await logCampaignEvent(campDb, inviteCamp.id, 'conversion', { agent_id: id }, 'system');
+        }
+      }
+      return res.status(200).end();
 
     } else if (action === 'delete_agent') {
       const { id } = payload || {};
@@ -500,15 +522,22 @@ export default async function handler(req, res) {
       const sd = await send.json().catch(() => ({}));
       if (!send.ok) return res.status(send.status).json({ error: sd?.error?.message || 'template send failed' });
       const bodyText = ((tpl.components || []).find(c => c.type === 'BODY')?.text || '').replace(/\{\{1\}\}/g, fName);
+      // Cold prospects are the owner-cold DRIP campaign (command center);
+      // warm intros stay under the generic onboarding category.
+      const coldCampRow = cold ? await resolveCampaign({ SUPABASE_URL, sbHeaders: headers }, 'owner_cold').catch(() => null) : null;
       await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
         method: 'POST', headers,
         body: JSON.stringify({
           owner_id: own.id, wa_num: own.wa_num, direction: 'outbound',
           content: bodyText || '[onboarding intro template]', wa_message_id: sd.messages?.[0]?.id || null,
           timestamp: new Date().toISOString(), source: 'api', status: 'sent',
-          category: 'onboarding', template_name: tpl.name,
+          category: cold ? 'owner_cold' : 'onboarding', template_name: tpl.name,
+          campaign_id: coldCampRow?.id || null,
         })
       }).catch(() => {});
+      // One bump per send, here at the source — the cron drip that calls this
+      // action deliberately does NOT bump sent, so nothing double-counts.
+      if (coldCampRow) await bumpCampaign({ SUPABASE_URL, sbHeaders: headers }, coldCampRow.id, { sent: 1 });
       await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${id}`, {
         method: 'PATCH', headers,
         body: JSON.stringify({ onboarding_status: 'contacted', suggested_reply: '' })
@@ -1365,21 +1394,41 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       }).sort((x, y) => (y.clicks + y.enquiries * 3) - (x.clicks + x.enquiries * 3) || ((x.last_reply_days ?? 999) - (y.last_reply_days ?? 999)));
 
       // ── Campaign performance ─────────────────────────────────────────
-      // A campaign = an outbound category the crons send at scale. Free-text /
-      // draft / manual conversation is deliberately NOT a campaign.
-      const CAMPAIGNS = {
-        new_arrivals: { name: 'New arrivals', goal: 'reply' },
-        availability_digest: { name: 'Weekly digest', goal: 'reply' },
-        availability_alert: { name: 'Availability alerts', goal: 'reply' },
-        availability_intro: { name: 'First-touch intro', goal: 'reply' },
-        account_invite: { name: 'Account invites', goal: 'signup' },
-        onboarding: { name: 'Welcome', goal: 'reply' },
-      };
+      // Campaign identity comes from the campaigns TABLE (command center):
+      // always-on rows claim their wa_messages categories; one-off broadcasts
+      // and sequence follow-ups report under synthetic groups. Falls back to
+      // the legacy hardcoded map if the migration hasn't been run yet.
+      const campRows = await fetch(`${SUPABASE_URL}/rest/v1/campaigns?select=key,kind,name,goal,categories&archived_at=is.null&kind=eq.always_on`, { headers })
+        .then(r => r.json()).catch(() => []);
+      const CAMPAIGNS = {};                    // category → { key, name, goal }
+      for (const c of (Array.isArray(campRows) ? campRows : [])) {
+        for (const cat of (c.categories || [])) CAMPAIGNS[cat] = { key: c.key, name: c.name, goal: c.goal || 'reply' };
+      }
+      if (!Object.keys(CAMPAIGNS).length) {
+        Object.assign(CAMPAIGNS, {
+          new_arrivals: { key: 'new_arrivals', name: 'New arrivals', goal: 'reply' },
+          availability_digest: { key: 'availability_digest', name: 'Weekly digest', goal: 'reply' },
+          availability_alert: { key: 'availability_alert', name: 'Availability alerts', goal: 'reply' },
+          availability_intro: { key: 'availability_intro', name: 'First-touch intro', goal: 'reply' },
+          account_invite: { key: 'account_invite', name: 'Account invites', goal: 'signup' },
+          onboarding: { key: 'onboarding', name: 'Welcome', goal: 'reply' },
+        });
+      }
+      // Previously invisible senders, now first-class report groups:
+      if (!CAMPAIGNS.broadcast) CAMPAIGNS.broadcast = { key: 'broadcast', name: 'One-off broadcasts', goal: 'reply' };
+      if (!CAMPAIGNS.sequence) CAMPAIGNS.sequence = { key: 'sequence', name: 'Sequence follow-ups', goal: 'reply' };
+      const keyMeta = {};                      // key → { name, goal, categories[] }
+      for (const [cat, m] of Object.entries(CAMPAIGNS)) {
+        const km = keyMeta[m.key] || (keyMeta[m.key] = { name: m.name, goal: m.goal, categories: [] });
+        km.categories.push(cat);
+      }
       const camp = {};
-      const sendTimes = {};                 // category → agent_id → [send ms]
+      const sendTimes = {};                 // key → agent_id → [send ms]
       for (const m of out) {
-        if (!CAMPAIGNS[m.category]) continue;
-        const c = camp[m.category] || (camp[m.category] = { sent: 0, delivered: 0, read: 0, failed: 0, agents: new Set(), repliers: new Set(), first_at: m.timestamp, last_at: m.timestamp });
+        const meta = CAMPAIGNS[m.category];
+        if (!meta) continue;
+        const gk = meta.key;
+        const c = camp[gk] || (camp[gk] = { sent: 0, delivered: 0, read: 0, failed: 0, agents: new Set(), repliers: new Set(), first_at: m.timestamp, last_at: m.timestamp });
         c.sent++;
         if (m.status === 'delivered' || m.status === 'read') c.delivered++;
         if (m.status === 'read') c.read++;
@@ -1388,7 +1437,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         if (m.timestamp > c.last_at) c.last_at = m.timestamp;
         if (m.agent_id != null) {
           c.agents.add(m.agent_id);
-          ((sendTimes[m.category] ||= {})[m.agent_id] ||= []).push(Date.parse(m.timestamp));
+          ((sendTimes[gk] ||= {})[m.agent_id] ||= []).push(Date.parse(m.timestamp));
         }
       }
       // A reply "belongs" to a campaign when it lands within 48h of one of that
@@ -1397,40 +1446,42 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       for (const m of inb) {
         if (m.agent_id == null) continue;
         const t = Date.parse(m.timestamp);
-        for (const [cat, byAgent] of Object.entries(sendTimes)) {
+        for (const [gk, byAgent] of Object.entries(sendTimes)) {
           const ts = byAgent[m.agent_id];
-          if (ts && ts.some(s => t > s && t - s < H48)) camp[cat].repliers.add(m.agent_id);
+          if (ts && ts.some(s => t > s && t - s < H48)) camp[gk].repliers.add(m.agent_id);
         }
       }
       // Invite → account conversions: agents carrying BOTH the invite stamp
       // and a portal account (written back by the portal on signup).
       const inviteSignups = ags.filter(a => a.campaign_engagement?.account_invite && a.campaign_engagement?.portal_account).length;
-      const campaigns = Object.entries(camp).map(([cat, c]) => ({
-        category: cat, name: CAMPAIGNS[cat].name, goal: CAMPAIGNS[cat].goal,
+      const campaigns = Object.entries(camp).map(([gk, c]) => ({
+        category: keyMeta[gk]?.categories?.[0] || gk, key: gk,
+        name: keyMeta[gk]?.name || gk, goal: keyMeta[gk]?.goal || 'reply',
         sent: c.sent, delivered: c.delivered, read: c.read, failed: c.failed,
         recipients: c.agents.size, replied: c.repliers.size,
         first_at: c.first_at, last_at: c.last_at,
-        ...(cat === 'account_invite' ? { signups: inviteSignups } : {}),
+        ...(gk === 'account_invite' ? { signups: inviteSignups } : {}),
       })).sort((a, b) => (b.last_at || '').localeCompare(a.last_at || ''));
 
-      // Per-campaign recipient drill-down: ?payload.campaign=<category>
-      if (payload?.campaign && CAMPAIGNS[payload.campaign]) {
-        const cat = payload.campaign;
+      // Per-campaign recipient drill-down: ?payload.campaign=<category or key>
+      if (payload?.campaign && (CAMPAIGNS[payload.campaign] || keyMeta[payload.campaign])) {
+        const gk = CAMPAIGNS[payload.campaign]?.key || payload.campaign;
+        const cats = new Set(keyMeta[gk]?.categories || [payload.campaign]);
         const rank = { failed: 0, sent: 1, delivered: 2, read: 3 };
         const perAgent = {};
         for (const m of out) {
-          if (m.category !== cat || m.agent_id == null) continue;
+          if (!cats.has(m.category) || m.agent_id == null) continue;
           const cur = perAgent[m.agent_id];
           const r = rank[m.status] ?? 1;
           if (!cur || r > cur.rank) perAgent[m.agent_id] = { rank: r, status: m.status || 'sent' };
         }
-        const repliers = camp[cat]?.repliers || new Set();
+        const repliers = camp[gk]?.repliers || new Set();
         const tierOf = {}; ags.forEach(a => { tierOf[a.id] = a.engagement_tier || 'unset'; });
         const recipients = Object.entries(perAgent).map(([id, v]) => ({
           id: Number(id), name: nameOf[id] || `#${id}`, tier: tierOf[id] || 'unset',
           status: repliers.has(Number(id)) ? 'replied' : (v.status || 'sent'),
         })).sort((a, b) => (b.status === 'replied') - (a.status === 'replied') || a.name.localeCompare(b.name));
-        return res.status(200).json({ campaign: cat, name: CAMPAIGNS[cat].name, recipients });
+        return res.status(200).json({ campaign: payload.campaign, name: keyMeta[gk]?.name || gk, recipients });
       }
 
       // ── Daily series (sends + distinct repliers) for sparklines/trend ──

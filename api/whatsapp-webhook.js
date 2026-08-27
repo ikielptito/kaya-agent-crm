@@ -14,6 +14,7 @@ import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewing
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
+import { bump as bumpCampaign } from '../lib/campaigns.js';
 import crypto from 'node:crypto';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
@@ -958,9 +959,12 @@ export async function nodeHandler(req, res) {
         await Promise.all(value.statuses.map(async st => {
           if (!st.id || !st.status) return;
           // Only advance forward — fetch current, compare rank.
+          let curStatus = null, curCampaignId = null;
           try {
-            const cur = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}&select=status`, { headers: sh });
-            const curStatus = (await cur.json())?.[0]?.status;
+            const cur = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}&select=status,campaign_id`, { headers: sh });
+            const curRow = (await cur.json())?.[0];
+            curStatus = curRow?.status || null;
+            curCampaignId = curRow?.campaign_id || null;
             if (curStatus && curStatus !== 'failed' && (RANK[st.status] || 0) <= (RANK[curStatus] || 0)) return;
           } catch (_) {}
           // Keep Meta's failure reason — without it every failed broadcast is
@@ -971,6 +975,16 @@ export async function nodeHandler(req, res) {
           await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(st.id)}`, {
             method: 'PATCH', headers: sh, body: JSON.stringify({ status: st.status, ...(errInfo ? { error: errInfo } : {}) })
           }).catch(() => {});
+          // Campaign funnel counters (command center). The monotonic RANK
+          // guard above makes each stage bump at most once per message; a
+          // 'read' that arrives without a 'delivered' event (Meta skips them
+          // sometimes) credits both stages.
+          if (curCampaignId) {
+            const db = { SUPABASE_URL, sbHeaders: sh };
+            if (st.status === 'delivered') await bumpCampaign(db, curCampaignId, { delivered: 1 });
+            else if (st.status === 'read') await bumpCampaign(db, curCampaignId, { read: 1, ...((!curStatus || curStatus === 'sent') ? { delivered: 1 } : {}) });
+            else if (st.status === 'failed') await bumpCampaign(db, curCampaignId, { failed: 1 });
+          }
           // 131026 = recipient is not a valid WhatsApp user. If this contact has
           // never once had a message delivered, the number is dead — flag it so
           // every broadcast loop skips it from now on (an inbound message from
@@ -1194,6 +1208,25 @@ export async function nodeHandler(req, res) {
       agentId: agent ? agent.id : null,
       badgeCount: (agent?.unread_count || 0) + 1,
     }).catch(() => {});
+
+    // Campaign reply credit (command center): the FIRST inbound after this
+    // agent's most recent campaign-stamped outbound (within 48h) credits
+    // exactly that one campaign — single-credit, replacing the old
+    // multi-credit 48h join done at report time. Fire-and-forget.
+    if (agent) {
+      (async () => {
+        const since = new Date(Date.now() - 48 * 3600e3).toISOString();
+        const lastCamp = (await (await fetch(
+          `${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${agent.id}&direction=eq.outbound&campaign_id=not.is.null&timestamp=gte.${since}&order=timestamp.desc&limit=1&select=campaign_id,timestamp`,
+          { headers: sbHeaders })).json())?.[0];
+        if (!lastCamp) return;
+        const between = await (await fetch(
+          `${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${agent.id}&direction=eq.inbound&timestamp=gt.${encodeURIComponent(lastCamp.timestamp)}&timestamp=lt.${encodeURIComponent(timestamp)}&select=id&limit=1`,
+          { headers: sbHeaders })).json();
+        if (Array.isArray(between) && between.length) return;   // already credited
+        await bumpCampaign({ SUPABASE_URL, sbHeaders }, lastCamp.campaign_id, { replied: 1 });
+      })().catch(() => {});
+    }
 
     // ── RELAY: THE SENDER IS ANSWERING ───────────────────────────────
     // Any "enquire with" contact — an owner, a manager, anyone holding an open
