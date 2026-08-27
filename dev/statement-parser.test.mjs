@@ -188,5 +188,104 @@ test('text-formatted numbers with separators still parse', () => {
   assert.equal(p.needs_review, false);
 });
 
+// ── Drift observed in the REAL sheets on first production import (27 Aug) ──
+
+test('wide blank gap before the merged Total still closes the block (A4 March shape)', () => {
+  const rows = [
+    ['Monthly Report'], ['March 2026'], ['A4 Tropicana Valley'], [],
+    ['No', 'Guest Name', 'Date of Stay', 'Booking Platform', 'No. Stay', 'Amount', 'Comission', 'Nett to Owner'],
+    [1, 'Ilyas', '10 March - 10 april', 'Direct', 30, 26000000, 5200000, 20800000],
+    [], [], [], [],
+    ['Total', E, E, E, E, 26000000, 5200000, 20800000],
+    [],
+    ['DATE', 'DESCRIPTON', 'VILLA', 'EXPENSESS'],
+    ['01 Mar 2026', 'Housekeeping salary', 'A4', 1000000],
+    ['TOTAL', E, E, 1000000],
+    ['TOTAL PAYOUT', E, 19800000],
+  ];
+  const p = parseMonthTab(rows, { tabTitle: 'March' });
+  assert.equal(p.units[0].era_total.nett, 20800000, 'Total row after 4 blanks must be captured');
+  assert.ok(!p.flags.includes('unparsed_rows'));
+  assert.equal(p.needs_review, false);
+});
+
+test('T0TAL PAYOUT typo (zero for O) still found', () => {
+  const rows = [
+    ['Monthly Report'], ['March 2026'], ['A4 Tropicana Valley'], [],
+    ['No', 'Guest Name', 'Date of Stay', 'Booking Platform', 'No. Stay', 'Amount', 'Comission', 'Nett to Owner'],
+    [1, 'Ilyas', '10-12 March', 'Direct', 2, 1000000, 200000, 800000],
+    ['Total', E, E, E, E, 1000000, 200000, 800000],
+    ['T0TAL PAYOUT', E, 800000],
+  ];
+  const p = parseMonthTab(rows, { tabTitle: 'March' });
+  assert.equal(p.era_payout_total, 800000);
+  assert.equal(p.needs_review, false);
+});
+
+test('"Minus from February" carry-forward becomes a negative adjustment that reconciles', () => {
+  // Real A4 March 2026: 20.8M nett − 4,462,714 exp − 2,053,995 carry = 14,283,291
+  const rows = [
+    ['Monthly Report'], ['March 2026'], ['A4 Tropicana Valley'], [],
+    ['No', 'Guest Name', 'Date of Stay', 'Booking Platform', 'No. Stay', 'Amount', 'Comission', 'Nett to Owner'],
+    [1, 'Ilyas', '10 March - 10 april', 'Direct', 30, 26000000, 5200000, 20800000],
+    ['Total', E, E, E, E, 26000000, 5200000, 20800000],
+    [],
+    ['DATE', 'DESCRIPTON', 'VILLA', 'EXPENSESS'],
+    ['01 Mar 2026', 'Expenses lumped', 'A4', 4462714],
+    ['TOTAL', E, E, 4462714],
+    [],
+    ['Minus from February ', E, 2053995],
+    [],
+    ['T0TAL PAYOUT', E, 14283291],
+  ];
+  const p = parseMonthTab(rows, { tabTitle: 'March' });
+  assert.equal(p.adjustments.length, 1);
+  assert.equal(p.adjustments[0].amount, -2053995);
+  assert.equal(p.totals.payout, 14283291);
+  const c = p.reconciliation.checks.find(x => x.name === 'payout_vs_nett_minus_expenses');
+  assert.ok(c && c.ok, 'carry-forward must reconcile the payout check');
+});
+
+test('two expense blocks in one tab both parse (B4 April catch-up shape)', () => {
+  const rows = [
+    ['Monthly Report'], ['April 2026'], ['B4 Tropicana Valley'], [],
+    ['No', 'Guest Name', 'Date of Stay', 'Booking Platform', 'No. Stay', 'Amount', 'Comission', 'Nett to Owner'],
+    [1, 'Guest', '1-3 April', 'Airbnb', 2, 1500000, 300000, 1200000],
+    ['Total', E, E, E, E, 1500000, 300000, 1200000],
+    [],
+    ['DATE', 'DESCRIPTON', 'VILLA', 'AMOUNT'],
+    ['01 Apr 2026', 'Housekeeping', 'B4', 1000000],
+    ['TOTAL', E, E, 1000000],
+    [],
+    ['DATE', 'DESCRIPTON', 'VILLA', 'AMOUNT'],
+    ['1 Feb 2026', 'Common Area Sharing cost', 'B4', 431399],
+    ['1 Feb 2026', 'Pool guy Salary', 'B4', 600000],
+    ['TOTAL', E, E, 1031399],
+    ['TOTAL PAYOUT', E, -831399],
+  ];
+  const p = parseMonthTab(rows, { tabTitle: 'April' });
+  assert.equal(p.expenses.length, 3, 'both blocks\' expense lines parse');
+  assert.equal(p.era_expense_total, 2031399, 'era totals accumulate across blocks');
+  assert.equal(p.totals.payout, 1200000 - 2031399);
+  assert.ok(!p.flags.includes('unparsed_rows'));
+});
+
+test('negative TOTAL PAYOUT (deficit month) parses and reconciles', () => {
+  const rows = [
+    ['Monthly Report'], ['February 2026'], ['A4 Tropicana Valley'], [],
+    ['No', 'Guest Name', 'Date of Stay', 'Booking Platform', 'No. Stay', 'Amount', 'Comission', 'Nett to Owner'],
+    [1, 'Artem', '22-24 Feb', 'Airbnb', 2, 3477380, 695476, 2781904],
+    ['Total', E, E, E, E, 3477380, 695476, 2781904],
+    ['DATE', 'DESCRIPTON', 'VILLA', 'AMOUNT'],
+    ['01 Feb 2026', 'Expenses lumped', 'A4', 4835899],
+    ['TOTAL', E, E, 4835899],
+    ['TOTAL PAYOUT', E, '-2,053,995'],
+  ];
+  const p = parseMonthTab(rows, { tabTitle: 'February' });
+  assert.equal(p.era_payout_total, -2053995);
+  assert.equal(p.totals.payout, -2053995);
+  assert.equal(p.needs_review, false);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
