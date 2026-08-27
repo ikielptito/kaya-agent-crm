@@ -32,7 +32,7 @@ import {
   listGroups, syncGroup, syncAllGroups, reparseStatement, recomputeTotals,
   publishStatement, unpublishStatement, refreshSnapshot, markPaid, saveProofUpload, signProofUrl,
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
-  publicStatement, runOwnerStatementSweep, periodLabel,
+  publicStatement, statementUnitNights, runOwnerStatementSweep, periodLabel,
 } from '../lib/statements.js';
 import { statementToken } from '../lib/tokens.js';
 
@@ -209,6 +209,12 @@ export default async function handler(req, res) {
         const st = (await sb(`statements?group_key=eq.${encodeURIComponent(payload.group_key)}&period=eq.${encodeURIComponent(payload.period)}&select=proof_path&limit=1`))?.[0];
         if (st?.proof_path) out.proof_url = await signProofUrl(db, st.proof_path);
       }
+      return res.status(200).json(out);
+    }
+
+    if (action === 'statement_unit_nights') {
+      const out = await statementUnitNights(db, String(payload.group_key || ''), String(payload.from || ''), String(payload.to || ''));
+      if (!out) return res.status(404).json({ error: 'Unknown group' });
       return res.status(200).json(out);
     }
 
