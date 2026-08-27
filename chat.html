@@ -1037,8 +1037,14 @@ async function api(action, payload) {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload ? { action, payload } : { action }),
   });
-  // Surface non-2xx so callers can branch on success vs. failure.
-  if (!r.ok) throw new Error(`api ${action} -> HTTP ${r.status}`);
+  // Surface non-2xx so callers can branch on success vs. failure — and carry
+  // the server's own explanation: "HTTP 409" told Ikiel nothing, while the
+  // body said "Already exists: #108 Yoga" (27 Aug 2026).
+  if (!r.ok) {
+    let detail = '';
+    try { detail = (await r.json())?.error || ''; } catch {}
+    throw new Error(detail || `api ${action} -> HTTP ${r.status}`);
+  }
   // patch_agent (and any other write that doesn't echo a row) responds 204 No
   // Content with an empty body — r.json() on that throws "Unexpected end of
   // JSON input" and falsely trips error paths. Treat 204 / empty as success.
@@ -1743,7 +1749,7 @@ function feedRow(m) {
       <div class="conv-snip">${esc(by + text.slice(0, 90))}</div>
     </div>
     <div class="conv-right">
-      <span class="conv-time">${timeAgo(new Date(m.timestamp))}</span>
+      <span class="conv-time">${m.timestamp ? timeAgo(new Date(m.timestamp)) : ''}</span>
       <div class="conv-badges">${st}</div>
     </div>
   </div>`;
@@ -1768,8 +1774,26 @@ function renderList() {
       .filter(([k]) => !matches || matches.has(k))
       .map(([, m]) => m)
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    el.innerHTML = rows.length ? rows.map(feedRow).join('')
-      : `<div class="empty">${q ? 'No messages match “' + esc(q) + '”' : 'No messages yet.'}</div>`;
+    // A search should also find CONTACTS with no messages yet (imported
+    // dormant agents, freshly synced owners) — Yoga #108 existed but was
+    // unfindable, so he looked like a missing record (27 Aug 2026).
+    let contactRows = [];
+    if (q) {
+      const norm = (s) => String(s || '').toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
+      const shown = new Set(rows.map(m => String(m.wa_num || '').replace(/\D/g, '')));
+      const hit = (name, num, extra) => (norm(name).includes(q) || (extra && norm(extra).includes(q))
+        || (qDigits.length >= 5 && String(num || '').replace(/\D/g, '').includes(qDigits)));
+      contactRows = [
+        ...state.agents.filter(a => hit(a.name, a.wa_num, a.agency))
+          .map(a => ({ wa_num: a.wa_num, agent_id: a.id, content: 'No messages yet — tap to open', timestamp: a.last_inbound_at || null, direction: 'inbound' })),
+        ...state.owners.filter(o => hit(o.name, o.wa_num, o.email))
+          .map(o => ({ wa_num: o.wa_num, owner_id: o.id, content: 'No messages yet — tap to open', timestamp: o.last_inbound_at || null, direction: 'inbound' })),
+      ].filter(m => !shown.has(String(m.wa_num || '').replace(/\D/g, '')));
+    }
+    const all = rows.concat(contactRows);
+    el.innerHTML = all.length ? all.map(feedRow).join('')
+      : `<div class="empty">${q ? 'Nothing matches “' + esc(q) + '”' : 'No messages yet.'}</div>`;
     return;
   }
   if (state.seg === 'owners') {
@@ -1792,10 +1816,20 @@ function renderList() {
     });
 
   const q = state.query.trim().toLowerCase();
-  const list = q ? convs.filter(a => {
+  let list = q ? convs.filter(a => {
     const m = state.msgMap[a.id];
     return `${a.name || ''} ${a.agency || ''} ${a.wa_num || ''} ${m?.lastContent || ''}`.toLowerCase().includes(q);
   }) : convs;
+  // A search also surfaces contacts with NO conversation yet (imported
+  // dormant agents) — otherwise an existing record looks missing and gets
+  // re-added as a duplicate attempt (Yoga #108, 27 Aug 2026).
+  if (q) {
+    const inList = new Set(list.map(a => a.id));
+    const extras = state.agents.filter(a => !inList.has(a.id)
+      && !(state.msgMap[a.id] || a.last_inbound_at || a.unread_count || a.suggested_reply)
+      && `${a.name || ''} ${a.agency || ''} ${a.wa_num || ''}`.toLowerCase().includes(q));
+    list = list.concat(extras);
+  }
 
   // The assistant console is pinned above the agent inbox (searchable by name).
   const assistRow = (!q || 'maya assistant boss console'.includes(q)) ? assistantRow() : '';
