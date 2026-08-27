@@ -10,7 +10,7 @@ import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentR
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, isViewing, isListingInfo } from '../lib/relay.js';
 import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
-import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites, resolveWindowToIso } from '../lib/viewings.js';
+import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites, resolveWindowToIso, confirmViewingOnce } from '../lib/viewings.js';
 import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
@@ -157,18 +157,17 @@ async function handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey }) {
   if (choice === 'yes') {
     const win = v?.requested_window || '';
     const schedAt = v?.scheduled_at || await resolveWindowToIso(apiKey, win);
-    if (v && (v.status === 'requested' || v.status === 'confirmed')) {
-      await updateViewing(db, v.id, {
-        status: 'confirmed', confirmed_at: new Date().toISOString(),
-        ...(schedAt ? { scheduled_at: schedAt } : {}),
-      });
-    }
+    // Atomic transition — if a parallel path (typed "Yes" in the same second)
+    // already confirmed, this returns null and we only ack, no duplicates.
+    const won = v ? await confirmViewingOnce(db, v.id, { scheduledAt: schedAt }) : null;
     await relayDone(`Viewing confirmed${win ? ` for ${win}` : ''}.`);
     await ack(`Confirmed ✓ — I've told the agent. Thank you!`);
-    await tellAgent(`Good news — ${rel.contact_name || 'the villa'} confirmed your viewing at ${prop}${win ? ` for ${win}` : ''}. 🎉`);
-    if (schedAt && v) {
-      sendViewingInvites(db, wa, { ...v, status: 'confirmed', scheduled_at: schedAt, updated_at: new Date().toISOString() })
-        .catch(e => console.warn('viewing invites failed:', e.message));
+    if (won) {
+      await tellAgent(`Good news — the villa confirmed your viewing at ${prop}${win ? ` for ${win}` : ''}. 🎉`);
+      if (schedAt) {
+        sendViewingInvites(db, wa, { ...won, scheduled_at: schedAt })
+          .catch(e => console.warn('viewing invites failed:', e.message));
+      }
     }
     return true;
   }
@@ -235,15 +234,26 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey, buttonPayload =
       const v = await viewingByRelay(db, captured.relay.id);
       if (v && (v.status === 'requested' || v.status === 'confirmed')) {
         if (captured.viewing.outcome === 'confirmed') {
-          await updateViewing(db, v.id, {
-            status: 'confirmed', confirmed_at: new Date().toISOString(),
-            ...(captured.viewing.scheduledAt ? { scheduled_at: captured.viewing.scheduledAt } : {}),
-          });
-          // Both parties get a calendar invite the moment the slot is real —
-          // only with a concrete time (a vague "yes, this week" gets none).
+          // Atomic requested→confirmed: if the button tap (or a parallel
+          // delivery) already confirmed, we lose the race and send nothing —
+          // the winner already handled invites and the agent ping.
           const schedAt = captured.viewing.scheduledAt || v.scheduled_at;
+          const won = await confirmViewingOnce(db, v.id, { scheduledAt: schedAt });
+          if (!won) {
+            // Lost the race (the button tap got there first): the winner
+            // already acked, notified the agent and sent invites. Park the
+            // relay as delivered so deliverAnswers can't re-send, and consume
+            // the message silently.
+            await fetch(`${db.SUPABASE_URL}/rest/v1/relays?id=eq.${captured.relay.id}`, {
+              method: 'PATCH', headers: db.sbHeaders,
+              body: JSON.stringify({ status: 'delivered', delivered_at: new Date().toISOString() }),
+            }).catch(() => {});
+            return true;
+          }
+          // Calendar invites only with a concrete time (a vague "yes, this
+          // week" gets none) and only for the winning path.
           if (schedAt) {
-            sendViewingInvites(db, wa, { ...v, status: 'confirmed', scheduled_at: schedAt, updated_at: new Date().toISOString() })
+            sendViewingInvites(db, wa, { ...won, scheduled_at: schedAt })
               .catch(e => console.warn('viewing invites failed:', e.message));
           }
         } else if (captured.viewing.outcome === 'declined') {
@@ -2257,7 +2267,9 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
     const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
     const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ao.slug));
     const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
-    const contactName = prop?.waContactName || 'Era';
+    // "Era" only when the number really is the ops line — a nameless owner
+    // contact must not be greeted as Era (blank → "Hi there" downstream).
+    const contactName = prop?.waContactName || (contactWa === String(ERA_WA_NUM).replace(/\D/g, '') ? 'Era' : '');
     try {
       // Thread it into the owner's inbox when we know them as an owner.
       let ownerId = null;
@@ -2300,7 +2312,9 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
     const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
     const prop = (digest?.properties || []).find(p => norm(p.slug) === norm(ov.slug));
     const contactWa = String(prop?.waNumber || ERA_WA_NUM).replace(/\D/g, '');
-    const contactName = prop?.waContactName || 'Era';
+    // "Era" only when the number really is the ops line — a nameless owner
+    // contact must not be greeted as Era (blank → "Hi there" downstream).
+    const contactName = prop?.waContactName || (contactWa === String(ERA_WA_NUM).replace(/\D/g, '') ? 'Era' : '');
     try {
       let ownerId = null;
       try {
@@ -2363,6 +2377,20 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
     const [vActive, vPast] = await Promise.all([viewingsForAgent(vdb, agent.id), viewingsAwaitingOutcome(vdb, agent.id)]);
     viewingsBlock = viewingsPromptBlock(vActive, vPast);
   } catch { /* table not migrated yet */ }
+  // Questions Maya already has in flight for this agent. Without this she
+  // re-asked "washing machine + oven?" four times in different words on one
+  // thread — each opening a fresh relay and pinging the owner again (Vira,
+  // 27 Aug 2026). With it, she references the pending ask instead.
+  try {
+    const since = new Date(Date.now() - 48 * 3600e3).toISOString();
+    const inflight = await fetch(
+      `${SUPABASE_URL}/rest/v1/relays?agent_id=eq.${agent.id}&status=in.(queued,asked)&asked_at=gte.${since}&select=property_name,rental_slug,question&order=asked_at.desc&limit=8`,
+      { headers: sbHeaders }).then(r => r.json()).catch(() => []);
+    if (Array.isArray(inflight) && inflight.length) {
+      viewingsBlock += `\nQUESTIONS ALREADY SENT TO VILLA CONTACTS (in flight, awaiting their reply — NEVER ask_owner anything that this list already covers, even reworded; tell the agent you're still waiting and will come back the moment it lands):\n`
+        + inflight.map(r => `- ${r.property_name || r.rental_slug}: "${String(r.question).slice(0, 120)}"`).join('\n') + '\n';
+    }
+  } catch { /* context nicety */ }
   // `digest` rides along: the handler's ask_owner branch resolves the listing's
   // "enquire with" contact from it (it went missing from handler scope when
   // this helper was extracted on 22 Aug 2026 — ReferenceError on every relay).
