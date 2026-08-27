@@ -423,3 +423,12 @@ create table if not exists statement_payments (
 create index if not exists idx_statement_payments_stmt on statement_payments (statement_id, paid_at);
 alter table statements add column if not exists paid_total numeric not null default 0;
 alter table statement_groups add column if not exists payout_account jsonb;
+-- Returned transfers + own-property flag (added 2026-08-28,
+-- migrations/2026-08-28-returned-payments-commission.sql): a bounced bank
+-- transfer stays in the ledger as status='returned' (audit trail) but stops
+-- counting toward paid_total; charges_commission=false marks own units
+-- (LaneHAUS) whose commission column is not management income.
+alter table statement_payments add column if not exists status text not null default 'cleared';
+alter table statement_payments add column if not exists returned_at timestamptz;
+alter table statement_payments add column if not exists return_note text;
+alter table statement_groups add column if not exists charges_commission boolean not null default true;

@@ -31,7 +31,7 @@ import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import {
   listGroups, syncGroup, syncAllGroups, reparseStatement, recomputeTotals,
   publishStatement, unpublishStatement, markPaid, saveProofUpload, signProofUrl,
-  recordPayment, deletePayment, listPayments, exportData,
+  recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, runOwnerStatementSweep, periodLabel,
 } from '../lib/statements.js';
 import { statementToken } from '../lib/tokens.js';
@@ -161,11 +161,17 @@ export default async function handler(req, res) {
     if (action === 'statement_delete_payment') {
       return res.status(200).json(await deletePayment(db, id, payload.payment_id));
     }
+    if (action === 'statement_payment_returned') {
+      return res.status(200).json(await markPaymentReturned(db, id, payload.payment_id, { note: payload.note, undo: !!payload.undo }));
+    }
     if (action === 'statement_payments') {
       return res.status(200).json({ payments: await listPayments(db, id) });
     }
     if (action === 'statement_export_data') {
-      const out = await exportData(db, String(payload.group_key || ''), { year: payload.year ? String(payload.year).replace(/\D/g, '').slice(0, 4) : null });
+      const out = await exportData(db, String(payload.group_key || ''), {
+        year: payload.year ? String(payload.year).replace(/\D/g, '').slice(0, 4) : null,
+        from: payload.from, to: payload.to,
+      });
       if (!out) return res.status(404).json({ error: 'Unknown group' });
       return res.status(200).json(out);
     }
@@ -212,6 +218,7 @@ export default async function handler(req, res) {
       if (f.owner_names !== undefined) allowed.owner_names = String(f.owner_names || '') || null;
       if (typeof f.notify === 'boolean') allowed.notify = f.notify;
       if (typeof f.active === 'boolean') allowed.active = f.active;
+      if (typeof f.charges_commission === 'boolean') allowed.charges_commission = f.charges_commission;
       if (f.sheet_file_id) allowed.sheet_file_id = String(f.sheet_file_id);
       if (f.payout_account !== undefined) {
         const a = f.payout_account || {};
