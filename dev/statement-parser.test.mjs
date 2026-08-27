@@ -320,5 +320,41 @@ test('partial payment against a deficit reduces what carries', () => {
   assert.equal(c2, null);
 });
 
+// ── Stay-date range parsing (Era's free-text formats) ───────────────
+const { parseStayRange } = await import('../lib/statements.js');
+const D = (y, m, d) => Date.UTC(y, m - 1, d);
+console.log('\nstay-date parsing:');
+
+test('"10-13 June" in a June statement', () => {
+  const r = parseStayRange('10-13 June', '2026-06');
+  assert.deepEqual([r.start, r.endEx], [D(2026, 6, 10), D(2026, 6, 13)]);
+});
+test('"25 July - 11 Aug" recorded in JUNE has zero June overlap', () => {
+  const r = parseStayRange('25 July - 11 Aug', '2026-06');
+  assert.deepEqual([r.start, r.endEx], [D(2026, 7, 25), D(2026, 8, 11)]);
+  const overlap = Math.max(0, Math.min(r.endEx, D(2026, 7, 1)) - Math.max(r.start, D(2026, 6, 1))) / 86400000;
+  assert.equal(overlap, 0);
+});
+test('"26 May - 26 June" spans into June correctly', () => {
+  const r = parseStayRange('26 May - 26 June', '2026-06');
+  assert.deepEqual([r.start, r.endEx], [D(2026, 5, 26), D(2026, 6, 26)]);
+});
+test('"29 Dec - 6 feb" in a January statement crosses BOTH year ends', () => {
+  const r = parseStayRange('29 Dec - 6 feb', '2026-01');
+  assert.deepEqual([r.start, r.endEx], [D(2025, 12, 29), D(2026, 2, 6)]);
+});
+test('"5 May-5June" without spaces, "22-27 arch" typo month', () => {
+  const a = parseStayRange('5 May-5June', '2026-05');
+  assert.deepEqual([a.start, a.endEx], [D(2026, 5, 5), D(2026, 6, 5)]);
+  const b = parseStayRange('22-27 arch', '2026-03');
+  assert.deepEqual([b.start, b.endEx], [D(2026, 3, 22), D(2026, 3, 27)]);
+});
+test('bare "1-18" inherits the statement month; garbage returns null', () => {
+  const r = parseStayRange('1-18', '2026-07');
+  assert.deepEqual([r.start, r.endEx], [D(2026, 7, 1), D(2026, 7, 18)]);
+  assert.equal(parseStayRange('', '2026-07'), null);
+  assert.equal(parseStayRange('sometime soon', '2026-07'), null);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
