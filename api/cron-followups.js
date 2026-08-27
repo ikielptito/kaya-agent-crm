@@ -31,7 +31,7 @@ import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
-import { resolveCampaign, isCampaignPaused, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
+import { resolveCampaign, isCampaignPaused, isColdImportAgent, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -308,16 +308,24 @@ export default async function handler(req, res) {
     try {
       const welcomeTpl = pickWelcomeTemplate(Object.values(templatesMap), { requireApproved: false });
       const onboardingCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders }, 'onboarding');
-      if (isCampaignPaused(onboardingCamp)) {
-        results.push({ action: 'deferred_welcome_skipped', reason: 'campaign paused (command center)' });
-      } else if (welcomeTpl) {
-        let welcomesFailed = 0;
+      const agentColdCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders }, 'agent_cold');
+      if (welcomeTpl) {
+        // Two buckets share this drain: screenshot cold imports report under
+        // 'agent_cold', everyone else under 'onboarding'. Each bucket honours
+        // its own campaign's paused status.
+        const counts = { onboarding: { sent: 0, failed: 0 }, agent_cold: { sent: 0, failed: 0 } };
         for (const agent of agents) {
           const samba = agent.campaign_engagement?.samba;
           if (!samba?.welcome_pending || !agent.wa_num) continue;
+          const cold = isColdImportAgent(agent);
+          const camp = cold ? agentColdCamp : onboardingCamp;
+          if (isCampaignPaused(camp)) {
+            results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_skipped', reason: `campaign paused (${cold ? 'agent_cold' : 'onboarding'})` });
+            continue;
+          }
           const fName = String(agent.name || '').trim().split(/\s+/)[0] || 'there';
           const mid = await sendTemplate(WA_PHONE_ID, WA_TOKEN, agent.wa_num, welcomeTpl, [fName]);
-          if (!mid) { welcomesFailed++; results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_failed' }); continue; }
+          if (!mid) { counts[cold ? 'agent_cold' : 'onboarding'].failed++; results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_failed' }); continue; }
           // Clear the flag so it sends exactly once (preserve the rest of the bucket).
           await patchAgentEngagement(SUPABASE_URL, sbHeaders, agent, 'samba', { ...samba, welcome_pending: false });
           const rendered = (welcomeTpl.body || '').replace(/\{\{1\}\}/g, fName);
@@ -326,16 +334,20 @@ export default async function handler(req, res) {
             body: JSON.stringify({
               agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
               content: rendered, timestamp: now.toISOString(), source: 'cron',
-              category: 'onboarding', template_name: welcomeTpl.name,
-              campaign_id: onboardingCamp?.id || null, status: 'sent',
+              category: cold ? 'agent_cold' : 'onboarding', template_name: welcomeTpl.name,
+              campaign_id: camp?.id || null, status: 'sent',
               wa_message_id: typeof mid === 'string' ? mid : null,
             })
           }).catch(() => {});
+          counts[cold ? 'agent_cold' : 'onboarding'].sent++;
           welcomesSent++;
-          results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_sent' });
+          results.push({ agent: agent.name || agent.id, action: 'deferred_welcome_sent', campaign: cold ? 'agent_cold' : 'onboarding' });
         }
-        if (welcomesSent || welcomesFailed) {
-          await noteRun({ SUPABASE_URL, sbHeaders }, onboardingCamp, { sent: welcomesSent, failed: welcomesFailed });
+        if (counts.onboarding.sent || counts.onboarding.failed) {
+          await noteRun({ SUPABASE_URL, sbHeaders }, onboardingCamp, counts.onboarding);
+        }
+        if (counts.agent_cold.sent || counts.agent_cold.failed) {
+          await noteRun({ SUPABASE_URL, sbHeaders }, agentColdCamp, counts.agent_cold);
         }
       }
     } catch (e) { results.push({ action: 'deferred_welcome_error', error: e.message }); }

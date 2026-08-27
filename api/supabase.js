@@ -1846,9 +1846,15 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       if (!wa || wa.length < 9) return res.status(400).json({ error: 'valid wa_num required (digits incl. country code)' });
       const dup = await (await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${wa}&select=id,name`, { headers })).json();
       if (Array.isArray(dup) && dup.length) return res.status(409).json({ error: `Already exists: #${dup[0].id} ${dup[0].name || ''}`.trim(), existing_agent_id: dup[0].id });
+      // Screenshot cold imports (Ikiel feeds Maya agent-listing screenshots)
+      // are their own acquisition campaign — tag the row so every send and
+      // reply reports under 'Agent cold outreach' instead of the generic
+      // welcome bucket.
+      const coldImport = /screenshot|cold outreach/i.test(String(notes || ''));
       const fields = baseAgentFields({
         name, waNum: wa, agency: agency || null, notes: notes || null,
-        source: 'quick_add', reason: 'recruited via quick-add form',
+        source: coldImport ? 'cold_import' : 'quick_add',
+        reason: coldImport ? 'cold outreach from listing screenshot' : 'recruited via quick-add form',
         serviceType: service_type || 'rental',
       });
       // Quiet-hours guard: outside 9am-9pm WITA, hold the welcome and let the 9am
@@ -1865,7 +1871,11 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       let welcome_sent = false;
       let welcome_deferred = deferWelcome;
       if (!deferWelcome && row?.id) {
-        const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: row.id, name, wa, source: 'api' });
+        const welcomeCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders: headers }, coldImport ? 'agent_cold' : 'onboarding').catch(() => null);
+        const wr = await sendWelcomeTemplate({
+          SUPABASE_URL, headers, agentId: row.id, name, wa, source: 'api',
+          category: coldImport ? 'agent_cold' : 'onboarding', campaignId: welcomeCamp?.id || null,
+        });
         welcome_sent = wr.sent;
         if (!wr.sent && wr.reason) console.warn('welcome template send failed:', wr.reason, wr.detail || '');
         // Timed out or transiently failed: don't lose the welcome. Flag it
@@ -1919,7 +1929,8 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
           body: JSON.stringify({ campaign_engagement: { ...prev, samba: { ...(prev.samba || {}), ...samba } } })
         }).catch(() => {});
         if (deferWelcome) { results.push({ id: a.id, name, status: 'deferred' }); continue; }
-        const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: a.id, name, wa, source: 'api' });
+        const backfillCamp = await resolveCampaign({ SUPABASE_URL, sbHeaders: headers }, 'onboarding').catch(() => null);
+        const wr = await sendWelcomeTemplate({ SUPABASE_URL, headers, agentId: a.id, name, wa, source: 'api', campaignId: backfillCamp?.id || null });
         results.push({ id: a.id, name, status: wr.sent ? 'sent' : 'send_failed', reason: wr.reason || null });
       }
       return res.status(200).json({ success: true, deferred: deferWelcome, dry_run: dryRun, results });
