@@ -2290,7 +2290,13 @@ export async function runAccountInviteSweep(ctx) {
 
   const invitedSet = await loadCategorySet(supabaseUrl, sbHeaders, [ACCOUNT_INVITE_CATEGORY]);
   const today = now.toISOString().slice(0, 10);
-  const isDormant = (a) => /^(dormant|cold)$/i.test(String(a.engagement_tier || '').trim());
+  // Eligible: the dormant/cold tiers, plus ANY agent who has never replied
+  // regardless of tier label — the audit found ~40 silent "new"/"unset"
+  // imports that predate the welcome flow and were queued for nothing
+  // (broadcast-only limbo, the Yoga case; 27 Aug 2026). One invite each,
+  // same pacing, same stamps.
+  const isDormant = (a) => /^(dormant|cold)$/i.test(String(a.engagement_tier || '').trim())
+    || (!a.last_inbound_at && !(a.campaign_engagement?.samba?.status === 'enrolled'));
   // Agents who have ever written to us go first — likelier to answer, and a
   // nudge to a known contact can't read as spam.
   const hasTalked = (a) => (a.last_inbound_at ? 0 : 1);
