@@ -32,6 +32,7 @@ import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
 import { resolveCampaign, isCampaignPaused, isColdImportAgent, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
+import { reportToken } from '../lib/tokens.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -758,6 +759,22 @@ export default async function handler(req, res) {
       }
     }
 
+    // ── OWNER STATEMENT NOTIFY (event-driven on publish) ─────────────
+    // Every published-but-unannounced monthly payout statement gets its
+    // owner(s) a samba_owner_statement_v1 template with a signed /st/ link.
+    // Dedupe is per statement (notified_at, stamped once). Sheet SYNC runs
+    // on its own cron (/api/statements?cron=1) — this is only the send leg,
+    // kept here so it inherits the campaign pause/cap/template gates.
+    let statementNotify = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      try {
+        const { runOwnerStatementSweep } = await import('../lib/statements.js');
+        statementNotify = await runOwnerStatementSweep({
+          SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap,
+        });
+      } catch (e) { statementNotify = { error: e.message }; }
+    }
+
     // ── COLD-INTRO DRIP ──────────────────────────────────────────────
     // The screenshot pipeline, fully automatic: Ikiel imports a listing
     // screenshot → prospect row ('agreed', cold). Each 9am pass sends the
@@ -1084,6 +1101,7 @@ export default async function handler(req, res) {
       listing_info_chase: listingInfo && { listings_with_gaps: listingInfo.listings_with_gaps, contacts_messaged: listingInfo.contacts_messaged, exhausted: listingInfo.exhausted, error: listingInfo.error },
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
+      statement_notify: statementNotify,
       prospect_flags: prospectFlags,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
@@ -1207,12 +1225,8 @@ async function sendTemplate(phoneId, token, to, tmpl, params) {
 }
 
 // ── Weekly owner report push (Mondays) ───────────────────────────────
-// Signed report token — MUST match api/portal.js verifyReportToken exactly
-// (same LISTING_SYNC_SECRET, HMAC-SHA256, first 16 hex chars).
-function reportToken(slug) {
-  const sig = crypto.createHmac('sha256', process.env.LISTING_SYNC_SECRET || '').update(String(slug)).digest('hex').slice(0, 16);
-  return `${slug}~${sig}`;
-}
+// Signed report token — shared signer in lib/tokens.js (MUST match the
+// portal's lib/tokens.js: same LISTING_SYNC_SECRET, HMAC-SHA256, 16 hex).
 function fmtWeekRange(week) {
   if (!week?.from || !week?.to) return 'this week';
   const f = new Date(week.from + 'T00:00:00Z'), t = new Date(week.to + 'T00:00:00Z');

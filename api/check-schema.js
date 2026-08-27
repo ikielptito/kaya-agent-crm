@@ -46,7 +46,13 @@ export default async function handler(req, res) {
     { name: 'owners.drive_folder_id',  url: '/rest/v1/owners?select=drive_folder_id&limit=1' },
     { name: 'owners.last_onboarding_nudge_at', url: '/rest/v1/owners?select=last_onboarding_nudge_at&limit=1' },
     { name: 'owners.onboarding_nudges', url: '/rest/v1/owners?select=onboarding_nudges&limit=1' },
-    { name: 'wa_messages.owner_id',    url: '/rest/v1/wa_messages?select=owner_id&limit=1' }
+    { name: 'wa_messages.owner_id',    url: '/rest/v1/wa_messages?select=owner_id&limit=1' },
+    { name: 'statement_groups table',  url: '/rest/v1/statement_groups?select=key&limit=1' },
+    { name: 'statements table',        url: '/rest/v1/statements?select=id&limit=1' },
+    { name: 'statement_lines table',   url: '/rest/v1/statement_lines?select=id&limit=1' },
+    { name: 'statement_payments table', url: '/rest/v1/statement_payments?select=id&limit=1' },
+    { name: 'statements.paid_total',   url: '/rest/v1/statements?select=paid_total&limit=1' },
+    { name: 'statement_groups.payout_account', url: '/rest/v1/statement_groups?select=payout_account&limit=1' }
   ];
 
   const results = [];

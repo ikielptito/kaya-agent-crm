@@ -336,3 +336,90 @@ create table if not exists viewings (
 );
 create index if not exists viewings_status_idx on viewings (status);
 create index if not exists viewings_agent_idx  on viewings (agent_id);
+
+-- ── OWNER STATEMENTS (added 2026-08-27) ─────────────────────────────
+-- Monthly payout statements for Samba Realty-MANAGED villas, parsed from
+-- Era's per-property report spreadsheets in Google Drive. Full DDL + seed
+-- data + the private payout-proofs storage bucket live in
+-- migrations/2026-08-27-owner-statements.sql; the create-tables are
+-- repeated here so this file stays the one-stop cumulative schema.
+create table if not exists statement_groups (
+  key            text primary key,
+  name           text not null,
+  sheet_file_id  text not null,
+  listing_slugs  text[] not null default '{}',
+  owner_wa_nums  text[] not null default '{}',
+  owner_names    text,
+  notify         boolean not null default true,
+  active         boolean not null default true,
+  created_at     timestamptz default now(),
+  updated_at     timestamptz default now()
+);
+create table if not exists statements (
+  id               bigserial primary key,
+  group_key        text not null references statement_groups(key),
+  period           text not null,
+  status           text not null default 'draft',
+  currency         text not null default 'IDR',
+  gross_total      numeric not null default 0,
+  commission_total numeric not null default 0,
+  nett_total       numeric not null default 0,
+  expenses_total   numeric not null default 0,
+  adjustments_total numeric not null default 0,
+  payout_total     numeric not null default 0,
+  era_payout_total numeric,
+  reconciliation   jsonb,
+  needs_review     boolean not null default false,
+  source_hash      text,
+  source_tab       text,
+  parsed_at        timestamptz,
+  has_manual_edits boolean not null default false,
+  source_changed   boolean not null default false,
+  discrepancy      jsonb,
+  hostex_snapshot  jsonb,
+  published_at     timestamptz,
+  published_by     text,
+  notified_at      timestamptz,
+  paid_at          timestamptz,
+  proof_path       text,
+  created_at       timestamptz default now(),
+  updated_at       timestamptz default now(),
+  unique (group_key, period)
+);
+create index if not exists idx_statements_status on statements (status, period desc);
+create table if not exists statement_lines (
+  id            bigserial primary key,
+  statement_id  bigint not null references statements(id) on delete cascade,
+  kind          text not null,
+  unit_name     text,
+  position      int not null default 0,
+  guest_name    text,
+  stay_dates    text,
+  platform      text,
+  nights        numeric,
+  amount        numeric,
+  commission    numeric,
+  nett          numeric,
+  expense_date  text,
+  description   text,
+  flags         text[] not null default '{}',
+  edited        boolean not null default false,
+  source_row    int,
+  created_at    timestamptz default now()
+);
+create index if not exists idx_statement_lines_stmt on statement_lines (statement_id, position);
+-- Partial payments (added 2026-08-27, migrations/2026-08-27-statement-payments.sql):
+-- a payout can be settled in several transfers; balance = payout_total − Σ payments.
+-- statements.status vocabulary: draft | published | partial | paid | void.
+create table if not exists statement_payments (
+  id            bigserial primary key,
+  statement_id  bigint not null references statements(id) on delete cascade,
+  amount        numeric not null,
+  paid_at       timestamptz not null default now(),
+  note          text,
+  proof_path    text,
+  created_at    timestamptz default now()
+);
+create index if not exists idx_statement_payments_stmt on statement_payments (statement_id, paid_at);
+alter table statements add column if not exists paid_total numeric not null default 0;
+alter table statement_groups add column if not exists payout_account jsonb;
