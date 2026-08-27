@@ -24,6 +24,7 @@
 //   statement_notify_preview {}                sweep dry-run (who/what/where)
 //   statement_public {group_key, period}       published-only owner payload
 //   statement_export_data {group_key, year?}   statements+lines+payments for Excel
+//   statement_wa_login_code {wa_num, token}    deliver a tap-to-sign-in link on WhatsApp
 //   statement_groups {}                        registry list
 //   statement_group_patch {key, fields}        owner names/numbers/notify/active/payout_account
 
@@ -223,6 +224,43 @@ export default async function handler(req, res) {
     }
     if (action === 'statement_invite_link') {
       return res.status(200).json({ url: `https://sambarentals.com/portal?invite=${inviteToken(String(payload.group_key || ''))}` });
+    }
+
+    // WhatsApp magic-link sign-in delivery. The portal generates a one-time
+    // token (KV, 10-min TTL) and calls here only to put the tap-to-sign-in
+    // button on WhatsApp — this side never learns whether it was used.
+    // UTILITY template with a URL button, NOT an OTP: Meta force-classifies
+    // code-style messages as AUTHENTICATION, a category it refuses to
+    // deliver to US (+1) numbers — and some owners (Romina) are on US numbers.
+    if (action === 'statement_wa_login_code') {
+      const to = String(payload.wa_num || '').replace(/\D/g, '');
+      const tok = String(payload.token || '').replace(/[^a-f0-9]/gi, '');
+      if (!to || tok.length < 16) return res.status(400).json({ error: 'wa_num and token required' });
+      // Only numbers registered on an active group may be messaged — this
+      // endpoint must not be usable to spam arbitrary numbers from our WABA.
+      const groups = await listGroups(db, { activeOnly: true });
+      const known = groups.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === to));
+      if (!known) return res.status(403).json({ error: 'Number not registered to any property' });
+      const WA_TOKEN = process.env.META_WA_TOKEN;
+      const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
+      const r = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to, type: 'template',
+          template: {
+            name: 'samba_owner_login_link',
+            language: { code: 'en' },
+            components: [
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+            ],
+          },
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: d.error?.message || 'WhatsApp send failed' });
+      return res.status(200).json({ ok: true, message_id: d.messages?.[0]?.id || null });
     }
 
     if (action === 'statement_groups') {
