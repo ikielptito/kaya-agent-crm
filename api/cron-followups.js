@@ -2043,6 +2043,45 @@ export async function runIntroSweep(ctx) {
 const ACCOUNT_INVITE_TEMPLATE = 'samba_account_invite_v1';
 const ACCOUNT_INVITE_CATEGORY = 'account_invite';
 
+// ── AUTO-RESPONDER DETECTION ────────────────────────────────────────────
+// An agent whose "replies" are an out-of-office robot looks permanently
+// engaged: every send refreshes last_inbound_at within a minute (Abirama
+// Properties — 13 inbounds, 3 distinct texts, all at 01:01, 27 Aug 2026).
+// Heuristic: among the last 5 inbounds, the same non-trivial text (>40
+// chars) appearing 3+ times is a machine — humans never resend identical
+// paragraphs. Detected agents get a durable stamp so campaign filters skip
+// them without re-checking (a real human reply later is unaffected: these
+// checks gate CAMPAIGN sends only, never Maya's replies to real messages).
+async function isAutoResponderThread(supabaseUrl, headers, agentId) {
+  try {
+    const rows = await (await fetch(
+      `${supabaseUrl}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.inbound&order=timestamp.desc&limit=5&select=content`,
+      { headers })).json();
+    if (!Array.isArray(rows) || rows.length < 3) return false;
+    const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const counts = {};
+    for (const r of rows) {
+      const c = norm(r.content);
+      if (c.length <= 40) continue;
+      counts[c] = (counts[c] || 0) + 1;
+      if (counts[c] >= 3) return true;
+    }
+    return false;
+  } catch { return false; }
+}
+
+async function stampAutoResponder(supabaseUrl, headers, agent) {
+  await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+    method: 'PATCH', headers,
+    body: JSON.stringify({
+      campaign_engagement: {
+        ...(agent.campaign_engagement || {}),
+        auto_responder: { detected_at: new Date().toISOString() },
+      },
+    }),
+  }).catch(() => {});
+}
+
 // ── CLOSING-WINDOW NUDGE (hourly, rides the relay sweep) ────────────────
 // The 24h free-text window is a wasting asset: once it shuts, reaching the
 // agent costs a template re-opener. In the final 1–2 hours of a window,
@@ -2065,6 +2104,7 @@ export async function sweepClosingWindows(db, wa) {
     summary.checked++;
     if (a.automation_override === 'paused' || a.automation_override === 'off') continue;
     const ce = a.campaign_engagement || {};
+    if (ce.auto_responder) continue;                    // robot inbox, not a person
     const inv = ce.account_invite;
     if (!inv?.sent_at) continue;                        // no invite → no open loop
     if (ce.portal_account) continue;                    // already has an account
@@ -2072,6 +2112,10 @@ export async function sweepClosingWindows(db, wa) {
     if (!(a.last_inbound_at > inv.sent_at)) continue;   // never engaged with the invite
     const num = String(a.wa_num || '').replace(/\D/g, '');
     if (!num) continue;
+    if (await isAutoResponderThread(db.SUPABASE_URL, db.sbHeaders, a.id)) {
+      await stampAutoResponder(db.SUPABASE_URL, db.sbHeaders, a);
+      continue;
+    }
     const first = firstNameOf(a.name);
     const link = `https://sambarentals.com/?signin=1&ref=acct_invite&aid=${a.id}`;
     const body = `${first && first !== 'there' ? first + ' — one' : 'One'} small thing before I let you go 😊 Your agent account is a single tap with Google: ${link}\n\nTakes 20 seconds, and every listing you share starts counting for you. If now isn't the time, no worries at all!`;
@@ -2141,13 +2185,23 @@ export async function runViewingsAnnounceSweep(ctx) {
   const recentCutoff = now.getTime() - VIEWINGS_ANNOUNCE_RECENT_DAYS * 86400e3;
   const queue = agents
     .filter(a => a.last_inbound_at && Date.parse(a.last_inbound_at) > recentCutoff)
+    .filter(a => !a.campaign_engagement?.auto_responder)
     .filter(a => !isMarketingCapped(a, config) && passesSambaBaseGate(a, config))
     .filter(a => !a.campaign_engagement?.viewings_announce && !announcedSet.has(a.id))
     .filter(a => !String(a.last_availability_alert_at || '').startsWith(today))
     .sort((a, b) => String(b.last_inbound_at || '').localeCompare(String(a.last_inbound_at || '')) || a.id - b.id);
   summary.queue = queue.length;
+  summary.auto_responders = 0;
 
-  for (const agent of queue.slice(0, cap)) {
+  for (const agent of queue) {
+    if (summary.sent >= cap) break;
+    // A robot inbox isn't an engaged agent — detect, stamp, move on without
+    // burning a cap slot on it.
+    if (await isAutoResponderThread(supabaseUrl, sbHeaders, agent.id)) {
+      await stampAutoResponder(supabaseUrl, sbHeaders, agent);
+      summary.auto_responders++;
+      continue;
+    }
     const firstName = firstNameOf(agent.name);
     let metaErr = null;
     let waMessageId = null;
