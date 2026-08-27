@@ -2406,6 +2406,8 @@ async function loadCategorySet(url, headers, categories) {
 // "I". Falls back to "there" when name is missing.
 function firstNameOf(name) {
   if (!name) return 'there';
+  // A contact saved by number gets "Hi +60166473209" otherwise (27 Aug 2026).
+  if (/\d{5,}/.test(String(name))) return 'there';
   const parts = String(name).trim().split(/\s+/);
   if (!parts.length) return 'there';
   if (parts.length > 1 && /^(I|Ni)$/i.test(parts[0])) return parts[1];
