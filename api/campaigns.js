@@ -188,9 +188,12 @@ export default async function handler(req, res) {
         for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
         const H48 = 48 * 3600e3;
         for (const chunk of chunks) {
+          // Scan inbounds across the whole 90-day retention window, NOT from
+          // row.created_at — always-on rows were created by the migration long
+          // after their sends began, which zeroed reply attribution.
           const [ags, inbs] = await Promise.all([
             sb(`agents?id=in.(${chunk.join(',')})&select=id,name,agency,engagement_tier,last_inbound_at,campaign_engagement`),
-            sb(`wa_messages?agent_id=in.(${chunk.join(',')})&direction=eq.inbound&timestamp=gte.${row.created_at || since90}&select=agent_id,timestamp&limit=10000`),
+            sb(`wa_messages?agent_id=in.(${chunk.join(',')})&direction=eq.inbound&timestamp=gte.${since90}&select=agent_id,timestamp&limit=10000`),
           ]);
           for (const a of (ags || [])) agentsMap[a.id] = a;
           for (const m of (inbs || [])) {
