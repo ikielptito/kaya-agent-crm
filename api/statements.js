@@ -85,17 +85,23 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'statement_list') {
-      let q = 'statements?select=*,statement_groups(key,name,owner_names,notify,tracks_payments)&order=period.desc,group_key.asc&limit=500';
+      let q = 'statements?select=*,statement_groups(key,name,owner_names,notify)&order=period.desc,group_key.asc&limit=500';
       if (payload.status) q += `&status=eq.${encodeURIComponent(payload.status)}`;
       if (payload.group_key) q += `&group_key=eq.${encodeURIComponent(payload.group_key)}`;
       const rows = (await sb(q)) || [];
+      // tracks_payments may predate the migration; select=* tolerates that.
+      const gRows = (await sb('statement_groups?select=*')) || [];
+      const noSettle = new Set(gRows.filter(g => g.tracks_payments === false).map(g => g.key));
+      for (const r of rows) {
+        if (r.statement_groups) r.statement_groups.tracks_payments = !noSettle.has(r.group_key);
+      }
       // Outstanding = published/partial statements still owing a POSITIVE
       // balance. Deficit months (negative payout) are not owed to anyone —
       // they carry forward into the next month on publish.
       // Groups that don't track settlement (LaneHAUS — privately arranged
       // between Ikiel and Guy) never count as money owed.
       const outstanding = rows.filter(s => (s.status === 'published' || s.status === 'partial')
-        && s.statement_groups?.tracks_payments !== false
+        && !noSettle.has(s.group_key)
         && ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)) > 0);
       return res.status(200).json({
         statements: rows,
