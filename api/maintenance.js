@@ -89,6 +89,12 @@ export default async function handler(req, res) {
       untilDate: payload.until_date, note: payload.note, who: payload.who || 'era',
     }));
 
+    if (action === 'maint_photo_remove') {
+      const { detachPhotoPaths } = await import('../lib/maintenance.js');
+      // Detach only — the same stored file may be shared with another ticket.
+      return res.status(200).json(await detachPhotoPaths(db, id, [String(payload.path || '')]));
+    }
+
     if (action === 'maint_photo') {
       const path = await savePhoto(db, id, { base64: payload.fileBase64, contentType: payload.contentType });
       return res.status(200).json({ ok: true, path });
