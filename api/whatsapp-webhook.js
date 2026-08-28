@@ -1118,6 +1118,26 @@ export async function nodeHandler(req, res) {
         buttonPayload: extracted.buttonPayload || null,
       });
       if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
+
+      // Maintenance: Era (and any cleaner in maintenance_reporters) files
+      // issues by sending a photo + description, and answers Maya's nudges
+      // here too. It only claims a message it is confident about, so her
+      // ordinary team chat still falls through to the human below.
+      try {
+        const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
+        const took = await handleStaffMaintenance({
+          db: relayDb, wa: relayWa, fromNum, text,
+          mediaType, mediaId, waToken: WA_TOKEN,
+        });
+        if (took) {
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_staff', media_type: mediaType || null, media_id: mediaId || null }),
+          }).catch(() => {});
+          return res.status(200).end();
+        }
+      } catch (e) { /* never let maintenance break team messaging */ }
+
       // Anything else from a team number is logged and left for a human. Era
       // is never an agent lead and never an owner — the portal's owner sync
       // can put her number on an owners row (Hostex overrides list her as

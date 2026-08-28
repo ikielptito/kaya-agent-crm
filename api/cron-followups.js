@@ -775,6 +775,21 @@ export default async function handler(req, res) {
       } catch (e) { statementNotify = { error: e.message }; }
     }
 
+    // ── MAINTENANCE (approval asks, completion notices, Era nudges) ───
+    // Four queues in one pass: published items the owner hasn't been asked
+    // about, approvals Era hasn't heard about, authorised work that isn't
+    // finished (nudged on next_followup_at — which Era's own reply moves),
+    // and finished work the owner hasn't been told about.
+    let maintenanceNotify = null;
+    if (!previewMode && process.env.OWNERS_ENABLED === '1') {
+      try {
+        const { runMaintenanceSweep } = await import('../lib/maintenance-sweep.js');
+        maintenanceNotify = await runMaintenanceSweep({
+          SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap,
+        });
+      } catch (e) { maintenanceNotify = { error: e.message }; }
+    }
+
     // ── COLD-INTRO DRIP ──────────────────────────────────────────────
     // The screenshot pipeline, fully automatic: Ikiel imports a listing
     // screenshot → prospect row ('agreed', cold). Each 9am pass sends the
@@ -1102,6 +1117,7 @@ export default async function handler(req, res) {
       owner_sync: ownerSync,
       weekly_reports: weeklyReports,
       statement_notify: statementNotify,
+      maintenance: maintenanceNotify,
       prospect_flags: prospectFlags,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
