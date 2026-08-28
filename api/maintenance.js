@@ -111,6 +111,19 @@ export default async function handler(req, res) {
       }));
     }
 
+    // Dry run: what would Maya file for this message? Creates nothing.
+    if (action === 'maint_parse_preview') {
+      const { matchProperty } = await import('../lib/maintenance.js');
+      const { extractReports } = await import('../lib/maintenance-intake.js');
+      const text = String(payload.text || '');
+      const matched = await matchProperty(db, text);
+      const items = await extractReports(text, { matched, hasImage: !!payload.has_image });
+      return res.status(200).json({
+        matched: matched ? { group_key: matched.group_key, slug: matched.slug, name: matched.group?.name } : null,
+        items,
+      });
+    }
+
     if (action === 'maint_reporters') return res.status(200).json({ reporters: await listReporters(db) });
     if (action === 'maint_reporter_patch') return res.status(200).json(await upsertReporter(db, payload));
 
