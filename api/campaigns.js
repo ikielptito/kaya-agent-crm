@@ -241,6 +241,26 @@ export default async function handler(req, res) {
     }
 
     // ── CONTROL ──────────────────────────────────────────────────────
+    // Push the registry's display copy (name/context/schedule/categories) onto
+    // the existing always-on rows. resolveCampaign only self-heals a MISSING
+    // row, so without this an edit to CAMPAIGN_REGISTRY never reaches the
+    // board and the two drift apart.
+    if (action === 'campaign_sync_registry') {
+      const rows = (await sb('campaigns?kind=eq.always_on&select=id,key')) || [];
+      const updated = [];
+      for (const row of rows) {
+        const reg = CAMPAIGN_REGISTRY[row.key];
+        if (!reg) continue;
+        await patchCampaign(db, row.id, {
+          name: reg.name, context: reg.context || null,
+          schedule: reg.schedule || null, categories: reg.categories || [],
+          goal: reg.goal || null,
+        });
+        updated.push(row.key);
+      }
+      return res.status(200).json({ ok: true, updated });
+    }
+
     if (action === 'campaign_control') {
       const { id, op, value } = payload || {};
       if (!op) return res.status(400).json({ error: 'op required' });
