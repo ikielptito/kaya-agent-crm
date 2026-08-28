@@ -85,14 +85,17 @@ export default async function handler(req, res) {
 
   try {
     if (action === 'statement_list') {
-      let q = 'statements?select=*,statement_groups(key,name,owner_names,notify)&order=period.desc,group_key.asc&limit=500';
+      let q = 'statements?select=*,statement_groups(key,name,owner_names,notify,tracks_payments)&order=period.desc,group_key.asc&limit=500';
       if (payload.status) q += `&status=eq.${encodeURIComponent(payload.status)}`;
       if (payload.group_key) q += `&group_key=eq.${encodeURIComponent(payload.group_key)}`;
       const rows = (await sb(q)) || [];
       // Outstanding = published/partial statements still owing a POSITIVE
       // balance. Deficit months (negative payout) are not owed to anyone —
       // they carry forward into the next month on publish.
+      // Groups that don't track settlement (LaneHAUS — privately arranged
+      // between Ikiel and Guy) never count as money owed.
       const outstanding = rows.filter(s => (s.status === 'published' || s.status === 'partial')
+        && s.statement_groups?.tracks_payments !== false
         && ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)) > 0);
       return res.status(200).json({
         statements: rows,
@@ -294,6 +297,7 @@ export default async function handler(req, res) {
       if (typeof f.notify === 'boolean') allowed.notify = f.notify;
       if (typeof f.active === 'boolean') allowed.active = f.active;
       if (typeof f.charges_commission === 'boolean') allowed.charges_commission = f.charges_commission;
+      if (typeof f.tracks_payments === 'boolean') allowed.tracks_payments = f.tracks_payments;
       if (f.sheet_file_id) allowed.sheet_file_id = String(f.sheet_file_id);
       if (f.payout_account !== undefined) {
         // International accounts carry country-specific fields (US routing,
