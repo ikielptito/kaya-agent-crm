@@ -111,6 +111,21 @@ export default async function handler(req, res) {
       }));
     }
 
+    // Recover photos that were parked but never attached (e.g. the report
+    // and its pictures crossed in flight before the ordering fix).
+    if (action === 'maint_attach_parked') {
+      const { attachPhotoPaths } = await import('../lib/maintenance.js');
+      const { getSettingValue, saveSettingValue } = await import('../lib/campaigns.js');
+      const wa = String(payload.wa_num || '').replace(/\D/g, '');
+      const ids = (Array.isArray(payload.ids) ? payload.ids : [payload.id]).map(n => parseInt(n, 10)).filter(Boolean);
+      const all = (await getSettingValue(db, 'maintenance_pending_photos')) || {};
+      const paths = (all[wa] || []).map(p => p.path).filter(Boolean);
+      if (!paths.length) return res.status(404).json({ error: 'no parked photos for that number' });
+      for (const i of ids) await attachPhotoPaths(db, i, paths);
+      if (payload.clear !== false) { delete all[wa]; await saveSettingValue(db, 'maintenance_pending_photos', all); }
+      return res.status(200).json({ ok: true, attached: paths.length, items: ids });
+    }
+
     // Dry run: what would Maya file for this message? Creates nothing.
     if (action === 'maint_parse_preview') {
       const { matchProperty } = await import('../lib/maintenance.js');
