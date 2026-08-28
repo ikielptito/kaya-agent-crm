@@ -15,6 +15,9 @@
 //   statement_reparse {id}                     discard manual edits, re-import
 //   statement_publish {id, notify_owner?}      freeze + Hostex snapshot
 //   statement_unpublish {id}                   only before the owner was notified
+//   statement_amend_start {id}                 open a transparent correction
+//   statement_amend_finalize {id, note, notify_owner?}  close it (owner-visible note)
+//   statement_amend_cancel {id}                restore pre-amendment lines/totals
 //   statement_mark_paid {id}                   legacy: pay full remaining balance
 //   statement_record_payment {id, amount, note?, paid_at?, fileBase64?, contentType?}
 //   statement_delete_payment {id, payment_id}
@@ -34,6 +37,7 @@ import {
   publishStatement, unpublishStatement, refreshSnapshot, markPaid, saveProofUpload, signProofUrl,
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, statementUnitNights, runOwnerStatementSweep, periodLabel,
+  amendStart, amendFinalize, amendCancel, hasOpenRevision,
 } from '../lib/statements.js';
 import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
 
@@ -112,9 +116,12 @@ export default async function handler(req, res) {
     }
 
     if (action === 'statement_patch_line' || action === 'statement_add_line' || action === 'statement_delete_line') {
-      const st = (await sb(`statements?id=eq.${id}&select=id,status&limit=1`))?.[0];
+      const st = (await sb(`statements?id=eq.${id}&select=id,status,revisions&limit=1`))?.[0];
       if (!st) return res.status(404).json({ error: 'Statement not found' });
-      if (st.status !== 'draft') return res.status(409).json({ error: `Statement is ${st.status} — lines are frozen` });
+      // Published lines are frozen — except inside an open amendment.
+      if (st.status !== 'draft' && !hasOpenRevision(st)) {
+        return res.status(409).json({ error: `Statement is ${st.status} — lines are frozen (use Amend)` });
+      }
 
       if (action === 'statement_patch_line') {
         const fields = {};
@@ -154,6 +161,19 @@ export default async function handler(req, res) {
       }));
     }
     if (action === 'statement_unpublish') return res.status(200).json(await unpublishStatement(db, id));
+
+    // Amendments — transparent corrections to published statements.
+    if (action === 'statement_amend_start') {
+      return res.status(200).json(await amendStart(db, id, payload.actor || 'admin'));
+    }
+    if (action === 'statement_amend_finalize') {
+      return res.status(200).json(await amendFinalize(db, id, {
+        note: payload.note, notifyOwner: !!payload.notify_owner, actor: payload.actor || 'admin',
+      }));
+    }
+    if (action === 'statement_amend_cancel') {
+      return res.status(200).json(await amendCancel(db, id));
+    }
     if (action === 'statement_refresh_snapshot') return res.status(200).json(await refreshSnapshot(db, id));
     if (action === 'statement_mark_paid') return res.status(200).json(await markPaid(db, id));
 
