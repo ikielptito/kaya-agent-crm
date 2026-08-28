@@ -248,6 +248,29 @@ export default async function handler(req, res) {
       return res.status(200).json(out);
     }
 
+    // An owner just claimed their portal account. Worth a ping: it is the
+    // moment their queued statements and maintenance requests become
+    // sendable, and Ikiel is otherwise left refreshing a page to find out.
+    if (action === 'statement_owner_claimed') {
+      const key = String(payload.group_key || '');
+      const g = (await sb(`statement_groups?key=eq.${encodeURIComponent(key)}&select=name,owner_names&limit=1`))?.[0];
+      const pend = (await sb(`maintenance_items?group_key=eq.${encodeURIComponent(key)}&status=in.(pending_approval,scheduled)&notified_at=is.null&select=id`)) || [];
+      const stmts = (await sb(`statements?group_key=eq.${encodeURIComponent(key)}&status=in.(published,partial,paid)&notified_at=is.null&select=id`)) || [];
+      const waiting = [];
+      if (stmts.length) waiting.push(`${stmts.length} statement${stmts.length > 1 ? 's' : ''}`);
+      if (pend.length) waiting.push(`${pend.length} maintenance request${pend.length > 1 ? 's' : ''}`);
+      const { postToTelegram } = await import('../lib/telegram.js');
+      await postToTelegram(
+        `<b>Owner onboarded</b>\n${g?.owner_names || key} claimed ${g?.name || key}` +
+        `${payload.owner_email ? `\n${payload.owner_email}` : ''}` +
+        (waiting.length
+          ? `\n\nMaya will send ${waiting.join(' and ')} on the next daily pass.`
+          : `\n\nNothing queued for them.`),
+        { parse_mode: 'HTML' },
+      ).catch(() => {});
+      return res.status(200).json({ ok: true, queued: { statements: stmts.length, maintenance: pend.length } });
+    }
+
     if (action === 'statement_preview_link') {
       return res.status(200).json({ url: `https://sambarentals.com/portal?preview=${previewToken(String(payload.group_key || ''))}` });
     }
