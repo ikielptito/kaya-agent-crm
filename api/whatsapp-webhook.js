@@ -1194,7 +1194,7 @@ export async function nodeHandler(req, res) {
         // "sudah" closes today's clean; "besok saja" moves it. Only reached
         // when no inspection round is open, so a photo round is never
         // mistaken for a request to reschedule.
-        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text })) {
+        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })) {
           await logStaff('housekeeping');
           return res.status(200).end();
         }
@@ -1205,6 +1205,21 @@ export async function nodeHandler(req, res) {
             mediaType, mediaId, waToken: WA_TOKEN,
           });
           if (took) { await logStaff('maintenance_staff'); return res.status(200).end(); }
+
+          // Backstop. Nothing claimed this message, which means the keyword
+          // gate did not recognise it — and that gate is a word list, so it
+          // only knows the phrasings somebody thought of. One cheap model
+          // call decides whether it was a report before it is dropped. This
+          // is the class of bug where Maya silently ignores a leak because
+          // it was worded unusually, and a dropped message leaves no trace.
+          const { couldBeMaintenance } = await import('../lib/maintenance-intake.js');
+          if (await couldBeMaintenance(text, mediaType === 'image' && !!mediaId)) {
+            const forced = await handleStaffMaintenance({
+              db: relayDb, wa: relayWa, fromNum, text,
+              mediaType, mediaId, waToken: WA_TOKEN, force: true,
+            });
+            if (forced) { await logStaff('maintenance_staff'); return res.status(200).end(); }
+          }
         }
         await logStaff('staff');
         return res.status(200).end();

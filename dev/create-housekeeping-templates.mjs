@@ -29,6 +29,26 @@ Kalau ada kendala atau tidak bisa hari ini, balas saja pesan ini. Terima kasih.`
     example: ['HAUS Canggu · Unit 2', 'bersih-bersih setelah tamu check out'],
   },
   {
+    // Same body as samba_hk_task, plus three one-tap answers. A housekeeper
+    // standing in a villa with wet hands will tap a button; she will often
+    // not compose a sentence. Whether she answers at all is the difference
+    // between a schedule and a guess.
+    //
+    // Free text still works and still means the same things — the buttons
+    // are a shortcut, never the only way through.
+    name: 'samba_hk_task_v2',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo, ada jadwal untuk hari ini.
+
+Villa: {{1}}
+Tugas: {{2}}
+
+Kalau sudah selesai atau ada kendala, tekan tombol di bawah. Terima kasih.`,
+    example: ['HAUS Canggu · Unit 2', 'bersih-bersih setelah tamu check out'],
+    quickReplies: ['Sudah selesai', 'Besok saja', 'Tidak bisa'],
+  },
+  {
     name: 'samba_hk_week',
     language: 'id',
     category: 'UTILITY',
