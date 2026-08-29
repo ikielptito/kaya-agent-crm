@@ -4,7 +4,7 @@
 // tenant asleep in it, or leaves a unit uncleaned between tenancies, and
 // nobody finds out until someone complains. So the rules are pure functions
 // and every rule is pinned here.
-import { planTasks, vacancyRuns, DEFAULTS } from '../lib/housekeeping.js';
+import { planTasks, DEFAULTS } from '../lib/housekeeping.js';
 
 let pass = 0, fail = 0;
 const t = (name, got, expect) => {
@@ -17,27 +17,15 @@ const datesOf = (tasks, kind, slug) =>
   tasks.filter(x => x.kind === kind && (!slug || x.slug === slug)).map(x => x.task_date).sort();
 
 const unit = (slug, stays) => ({ slug, stays });
+// Most fixtures below pin ONE rule, so they switch the twice-weekly clean off
+// rather than have its Mondays and Thursdays collide with what is under test.
+const NO_CLEANS = { 'haus-1': [], 'haus-2': [], 'villa-saturno': [], 'tropicana-b4': [] };
 // The annotation the portal adds; recreated here so the fixtures read like
 // the real payload.
 const stay = (check_in, check_out, vacant_days_before = null) => ({
   check_in, check_out, nights: Math.round((Date.parse(check_out) - Date.parse(check_in)) / 86400000),
   vacant_days_before,
 });
-
-// ── Vacancy runs ─────────────────────────────────────────────────────
-// check_out is EXCLUSIVE: a stay ending on the 5th leaves the villa free on
-// the 5th, so back-to-back tenants leave a run of zero days, not one.
-t('back-to-back leaves no vacancy',
-  vacancyRuns([stay('2026-09-01', '2026-09-05'), stay('2026-09-05', '2026-09-10')], '2026-09-30'),
-  [{ start: '2026-09-10', end: '2026-09-30', days: 20 }]);
-
-t('a real gap is measured from the checkout day',
-  vacancyRuns([stay('2026-09-01', '2026-09-05'), stay('2026-09-12', '2026-09-20')], '2026-09-20'),
-  [{ start: '2026-09-05', end: '2026-09-12', days: 7 }]);
-
-t('overlapping stays merge rather than double-count',
-  vacancyRuns([stay('2026-09-01', '2026-09-10'), stay('2026-09-04', '2026-09-14')], '2026-09-16'),
-  [{ start: '2026-09-14', end: '2026-09-16', days: 2 }]);
 
 // ── Turnover ─────────────────────────────────────────────────────────
 {
@@ -52,31 +40,6 @@ t('overlapping stays merge rather than double-count',
     ['2026-09-04', true, '2026-09-04']);
 }
 
-// ── During a long stay ───────────────────────────────────────────────
-{
-  // A four-week tenancy starting today: cleans on days 7, 14 and 21.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-09-01', '2026-09-29')])] });
-  t('a long stay gets a weekly clean', datesOf(p, 'during_stay'),
-    ['2026-09-08', '2026-09-15', '2026-09-22']);
-}
-{
-  // A week-long stay is under the threshold and gets nothing but its turnover.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-09-01', '2026-09-08')])] });
-  t('a short stay is left alone', datesOf(p, 'during_stay'), []);
-}
-{
-  // The last clean must never land on or after the checkout, which already
-  // has a turnover clean of its own.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-09-01', '2026-09-15')])] });
-  t('no in-stay clean on the checkout day', datesOf(p, 'during_stay'), ['2026-09-08']);
-}
-{
-  // A 22-night tenancy ending on the 6th: the day-21 clean falls on the 5th,
-  // one day before the turnover clean, so it is dropped as duplicated work.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-15', '2026-09-06')])] });
-  t('no in-stay clean right before the turnover', datesOf(p, 'during_stay'), []);
-}
-
 // ── Before an arrival ────────────────────────────────────────────────
 {
   const p = planTasks({ today: TODAY, units: [unit('haus-1', [
@@ -89,20 +52,51 @@ t('overlapping stays merge rather than double-count',
   t('a two-day gap needs no freshen-up', datesOf(p, 'pre_arrival'), []);
 }
 
-// ── An empty villa ───────────────────────────────────────────────────
+// ── The regular twice-weekly clean ───────────────────────────────────
+// This is the service Samba sells, not a rule derived from bookings: fixed
+// weekdays per villa, running whether or not anyone is staying.
 {
-  // Emptied on 20 August and nothing booked: visits every 14 days from then,
-  // so 3 and 17 September fall inside the 21-day horizon.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-07-01', '2026-08-20')])] });
-  t('an empty villa is visited every fortnight', datesOf(p, 'vacant_upkeep'),
-    ['2026-09-03', '2026-09-17']);
+  // 1 Sept 2026 is a Tuesday. Monday/Thursday over three weeks from then.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: { 'haus-1': [1, 4] } });
+  t('regular cleans land on the villa\'s own weekdays', datesOf(p, 'regular'),
+    ['2026-09-03', '2026-09-07', '2026-09-10', '2026-09-14', '2026-09-17', '2026-09-21']);
 }
 {
-  // A gap of a week between tenants is not long enough to warrant a visit
-  // of its own; the turnover and the pre-arrival already cover it.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [
-    stay('2026-08-25', '2026-09-05'), stay('2026-09-12', '2026-09-30', 7)])] });
-  t('a short gap needs no upkeep visit', datesOf(p, 'vacant_upkeep'), []);
+  // An empty villa keeps the rhythm: the twice-weekly clean is the product,
+  // and it is what keeps a vacant villa showing well for viewings.
+  const empty = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: { 'haus-1': [1, 4] } });
+  const full = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-01', '2026-10-01')])], careDays: { 'haus-1': [1, 4] } });
+  t('an empty villa is cleaned as often as an occupied one',
+    datesOf(empty, 'regular').length, datesOf(full, 'regular').length);
+}
+{
+  // Different villas, different days, so one housekeeper is not doing four
+  // properties on one morning.
+  const p = planTasks({
+    today: TODAY,
+    units: [unit('haus-1', []), unit('haus-2', [])],
+    careDays: { 'haus-1': [1, 4], 'haus-2': [2, 5] },
+  });
+  t('each villa follows its own days', datesOf(p, 'regular', 'haus-2'),
+    ['2026-09-01', '2026-09-04', '2026-09-08', '2026-09-11', '2026-09-15', '2026-09-18', '2026-09-22']);
+}
+{
+  // A checkout day already has a turnover clean; a routine clean on top would
+  // send the same person to the same villa twice for one visit's work.
+  const p = planTasks({
+    today: TODAY,
+    units: [unit('haus-1', [stay('2026-08-01', '2026-09-03')])],   // checkout on a Thursday
+    careDays: { 'haus-1': [1, 4] },
+  });
+  t('no regular clean on a turnover day', datesOf(p, 'regular').includes('2026-09-03'), false);
+  t('the turnover is still there', datesOf(p, 'turnover'), ['2026-09-03']);
+}
+{
+  // A villa with no property_care row is still cleaned, on the default days,
+  // rather than silently dropping off the schedule.
+  const p = planTasks({ today: TODAY, units: [unit('haus-9', [])] });
+  t('an unconfigured villa falls back to the default days',
+    datesOf(p, 'regular').length > 0, true);
 }
 
 // ── Inspections ──────────────────────────────────────────────────────
@@ -111,8 +105,8 @@ t('overlapping stays merge rather than double-count',
   // the first run puts every unit's inspection on one morning, and one
   // housekeeper covering four villas cannot do four photo rounds in a day.
   // The offset is a stable hash of the slug, so it never moves between runs.
-  const p1 = planTasks({ today: TODAY, units: [unit('haus-1', [])] });
-  const p2 = planTasks({ today: TODAY, units: [unit('haus-1', [])] });
+  const p1 = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS });
+  const p2 = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS });
   const d = datesOf(p1, 'inspection')[0];
   t('a never-inspected villa is scheduled within the fortnight',
     d >= TODAY && d <= '2026-09-14', true);
@@ -123,23 +117,23 @@ t('overlapping stays merge rather than double-count',
   const slugs = ['haus-1', 'haus-2', 'haus-4', 'haus-5', 'lanehaus-1', 'lanehaus-3',
     'villa-saturno', 'tropicana-a4', 'tropicana-a5', 'tropicana-b2', 'tropicana-b3',
     'tropicana-b4', 'tropicana-b5', 'tropicana-b6'];
-  const p = planTasks({ today: TODAY, units: slugs.map(s => unit(s, [])) });
+  const p = planTasks({ today: TODAY, units: slugs.map(s => unit(s, [])), careDays: Object.fromEntries(slugs.map(s => [s, []])) });
   const perDay = {};
   for (const x of p.filter(y => y.kind === 'inspection')) perDay[x.task_date] = (perDay[x.task_date] || 0) + 1;
   t('all fourteen villas are scheduled', p.filter(y => y.kind === 'inspection').length, 14);
   t('no more than two villas inspected on any one day', Math.max(...Object.values(perDay)) <= 2, true);
 }
 {
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': '2026-08-25' } });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, lastInspection: { 'haus-1': '2026-08-25' } });
   t('the next round is a fortnight after the last', datesOf(p, 'inspection'), ['2026-09-08']);
 }
 {
   // A round that was missed must come due now, not slide forward for ever.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': '2026-07-01' } });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, lastInspection: { 'haus-1': '2026-07-01' } });
   t('a missed round is due immediately', datesOf(p, 'inspection'), [TODAY]);
 }
 {
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': '2026-08-31' } });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, lastInspection: { 'haus-1': '2026-08-31' } });
   t('a fresh inspection is not repeated', datesOf(p, 'inspection'), ['2026-09-14']);
 }
 {
@@ -147,12 +141,12 @@ t('overlapping stays merge rather than double-count',
   // ASKED FOR. Anchoring on completions alone meant an ignored inspection
   // stayed permanently due, minting a new task — and a new WhatsApp message
   // — every single day for every villa.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': TODAY } });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, lastInspection: { 'haus-1': TODAY } });
   t('an inspection already asked for today is not reissued', datesOf(p, 'inspection'), ['2026-09-15']);
 }
 {
   // A round scheduled for the future must not pull the next one forward.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': '2026-09-14' } });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, lastInspection: { 'haus-1': '2026-09-14' } });
   t('a future round pushes the next beyond the horizon', datesOf(p, 'inspection'), []);
 }
 
@@ -164,6 +158,7 @@ t('overlapping stays merge rather than double-count',
   const p = planTasks({
     today: TODAY,
     units: [unit('haus-2', [stay('2026-08-01', '2026-09-06')])],
+    careDays: NO_CLEANS,
     lastInspection: { 'haus-2': '2026-08-23' },      // due 6 Sept
   });
   t('turnover keeps its date', datesOf(p, 'turnover'), ['2026-09-06']);
@@ -174,6 +169,7 @@ t('overlapping stays merge rather than double-count',
   const p = planTasks({
     today: TODAY,
     units: [unit('haus-2', [stay('2026-08-01', '2026-09-10')])],
+    careDays: NO_CLEANS,
     lastInspection: { 'haus-2': '2026-08-23' },
   });
   t('inspection keeps its date when the day is free', datesOf(p, 'inspection'), ['2026-09-06']);
@@ -183,6 +179,7 @@ t('overlapping stays merge rather than double-count',
   const p = planTasks({
     today: TODAY,
     units: [unit('haus-2', [stay('2026-08-01', '2026-09-06'), stay('2026-09-07', '2026-09-20', 1)])],
+    careDays: NO_CLEANS,
     lastInspection: { 'haus-2': '2026-08-23' },
   });
   const insp = datesOf(p, 'inspection')[0];
@@ -192,7 +189,7 @@ t('overlapping stays merge rather than double-count',
 
 // ── The horizon ──────────────────────────────────────────────────────
 {
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-06-01', '2026-06-20')])] });
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-06-01', '2026-06-20')])], careDays: NO_CLEANS });
   t('nothing is scheduled in the past', p.filter(x => x.task_date < TODAY), []);
   t('nothing is scheduled beyond the horizon',
     p.filter(x => x.task_date > '2026-09-22'), []);
@@ -210,8 +207,9 @@ t('overlapping stays merge rather than double-count',
   });
   t('every villa gets an inspection', datesOf(p, 'inspection').length, 3);
   t('only the leaving tenant makes a turnover', datesOf(p, 'turnover'), ['2026-09-06']);
-  t('only the long tenancy makes in-stay cleans',
-    [...new Set(p.filter(x => x.kind === 'during_stay').map(x => x.slug))], ['villa-saturno']);
+  t('every villa gets its regular cleans regardless of occupancy',
+    [...new Set(p.filter(x => x.kind === 'regular').map(x => x.slug))].sort(),
+    ['haus-1', 'tropicana-b4', 'villa-saturno']);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

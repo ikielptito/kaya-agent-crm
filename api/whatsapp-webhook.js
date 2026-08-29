@@ -1184,10 +1184,17 @@ export async function nodeHandler(req, res) {
         // An inspection round in progress takes precedence over ordinary
         // reporting: her photos belong to that round, and only the ones that
         // actually describe a fault also become work orders.
-        const { handleInspection } = await import('../lib/housekeeping-intake.js');
+        const { handleInspection, handleCleaningReply } = await import('../lib/housekeeping-intake.js');
         if (await handleInspection({
           db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
         })) {
+          await logStaff('housekeeping');
+          return res.status(200).end();
+        }
+        // "sudah" closes today's clean; "besok saja" moves it. Only reached
+        // when no inspection round is open, so a photo round is never
+        // mistaken for a request to reschedule.
+        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text })) {
           await logStaff('housekeeping');
           return res.status(200).end();
         }

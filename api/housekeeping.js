@@ -73,10 +73,44 @@ export default async function handler(req, res) {
       return res.status(200).json({ removed: removed.length, ...built });
     }
 
+    // Each villa's cleaning weekdays. clean_days uses Postgres numbering,
+    // 0 = Sunday, and the generator reads this rather than any hardcoded pair.
+    if (action === 'hk_care') {
+      return res.status(200).json({ care: await sbGet('property_care?select=*&order=slug.asc') });
+    }
+    if (action === 'hk_care_patch') {
+      const slug = String(payload.slug || '');
+      if (!slug) return res.status(400).json({ error: 'slug required' });
+      const days = [...new Set((Array.isArray(payload.clean_days) ? payload.clean_days : [])
+        .map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/property_care?on_conflict=slug`, {
+        method: 'POST',
+        headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify({
+          slug, clean_days: days,
+          ...(payload.active != null ? { active: !!payload.active } : {}),
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      // Changing the days only affects tasks nobody has been told about; a
+      // clean already asked for stays where it is.
+      return res.status(200).json({ ok: true, care: (await r.json())[0] || null });
+    }
+
     if (action === 'hk_patch') {
       const fields = {};
       for (const [k, v] of Object.entries(payload.fields || {})) if (PATCHABLE.has(k)) fields[k] = v;
       if (!Object.keys(fields).length) return res.status(400).json({ error: 'nothing to change' });
+      // Moving a task is recorded, so the schedule can say a date was changed
+      // by hand rather than presenting it as what the rule produced.
+      if (fields.task_date) {
+        fields.moved_by = payload.actor || 'admin';
+        fields.moved_at = new Date().toISOString();
+        // A moved task has to be announced again on its new day.
+        fields.notified_at = null;
+        fields.status = 'planned';
+      }
       fields.updated_at = new Date().toISOString();
       const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_tasks?id=eq.${id}`, {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(fields),
