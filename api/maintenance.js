@@ -12,6 +12,10 @@
 //   maint_approve {id, by?}                        (owner or admin on their behalf)
 //   maint_decline {id, note?, by?}
 //   maint_complete {id, note?, actual_cost?}       → queues "it's finished"
+//   maint_assign {id, staff_id}                    → dispatch a tukang
+//   maint_unassign {id}
+//   maint_confirm_visit {id, at}                   → a time agreed by phone
+//   maint_job {id}                                 → the /j/ job sheet payload
 //   maint_reopen {id}
 //   maint_snooze {id, until_date?, note?}          push the next Era nudge
 //   maint_photo {id, fileBase64, contentType}      attach a photo
@@ -88,6 +92,39 @@ export default async function handler(req, res) {
     if (action === 'maint_snooze')   return res.status(200).json(await snoozeItem(db, id, {
       untilDate: payload.until_date, note: payload.note, who: payload.who || 'era',
     }));
+
+    // ── Tukang dispatch ─────────────────────────────────────────────
+    if (action === 'maint_assign') {
+      const { assignTukang } = await import('../lib/maintenance-dispatch.js');
+      return res.status(200).json(await assignTukang(db, id, payload.staff_id, { actor: payload.actor || 'admin' }));
+    }
+    if (action === 'maint_unassign') {
+      const { unassignTukang } = await import('../lib/maintenance-dispatch.js');
+      return res.status(200).json(await unassignTukang(db, id, { actor: payload.actor || 'admin' }));
+    }
+    // Era agreed a time on the phone rather than through Maya.
+    if (action === 'maint_confirm_visit') {
+      const { confirmVisitOnce } = await import('../lib/maintenance-dispatch.js');
+      const at = payload.at ? new Date(payload.at) : null;
+      if (!at || Number.isNaN(at.getTime())) return res.status(400).json({ error: 'a valid date and time is required' });
+      const row = await confirmVisitOnce(db, id, at.toISOString());
+      if (!row) return res.status(409).json({ error: 'that job is no longer waiting to be scheduled' });
+      // Era typed this time herself, so close her update latch: being told
+      // "Dian confirmed Wednesday 9am" seconds after entering it is noise,
+      // and noise is what makes people stop reading Maya's messages.
+      await fetch(`${SUPABASE_URL}/rest/v1/maintenance_items?id=eq.${id}`, {
+        method: 'PATCH', headers: sbHeaders,
+        body: JSON.stringify({ era_dispatch_update_at: new Date().toISOString(), era_dispatch_state: 'confirmed' }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, visit_at: row.visit_at });
+    }
+    // The job sheet behind /j/<token>, fetched by the portal server-to-server.
+    if (action === 'maint_job') {
+      const { jobSheet } = await import('../lib/maintenance-dispatch.js');
+      const job = await jobSheet(db, parseInt(payload.item_id ?? payload.id, 10));
+      if (!job) return res.status(404).json({ error: 'No job for that link' });
+      return res.status(200).json(job);
+    }
 
     if (action === 'maint_photo_remove') {
       const { detachPhotoPaths } = await import('../lib/maintenance.js');

@@ -155,7 +155,18 @@ export default async function handler(req, res) {
       // And the closing-window nudge: one last in-window message to agents
       // with a concrete open loop before free text becomes impossible.
       const closing = await sweepClosingWindows({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }).catch(e => ({ error: e.message }));
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing });
+      // Housekeeping tasks are DERIVED on this beat, not sent. It is the only
+      // sub-daily cron either repo has, so a booking made at 14:05 has its
+      // cleaning task by 15:05 instead of waiting for tomorrow morning.
+      // Nothing is messaged until the 9am pass, and re-deriving a task that
+      // already exists is a no-op thanks to unique(slug, task_date, kind).
+      const housekeeping = await (async () => {
+        try {
+          const { generateTasks } = await import('../lib/housekeeping.js');
+          return await generateTasks({ SUPABASE_URL, sbHeaders });
+        } catch (e) { return { error: e.message }; }
+      })();
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
@@ -776,10 +787,11 @@ export default async function handler(req, res) {
     }
 
     // ── MAINTENANCE (approval asks, completion notices, Era nudges) ───
-    // Four queues in one pass: published items the owner hasn't been asked
+    // Eight queues in one pass: published items the owner hasn't been asked
     // about, approvals Era hasn't heard about, authorised work that isn't
     // finished (nudged on next_followup_at — which Era's own reply moves),
-    // and finished work the owner hasn't been told about.
+    // finished work the owner hasn't been told about, and the four dispatch
+    // queues that get a tukang to the villa and keep Era posted.
     let maintenanceNotify = null;
     if (!previewMode && process.env.OWNERS_ENABLED === '1') {
       try {
@@ -788,6 +800,23 @@ export default async function handler(req, res) {
           SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap,
         });
       } catch (e) { maintenanceNotify = { error: e.message }; }
+    }
+
+    // ── HOUSEKEEPING ─────────────────────────────────────────────────
+    // The morning's visits, and on Mondays the week ahead. Tasks themselves
+    // were derived on the hourly beat; this only speaks. Unlike maintenance
+    // there is no OWNERS_ENABLED gate: these messages go to our own staff,
+    // never to an owner, so nothing here can surprise a villa owner.
+    let housekeepingNotify = null;
+    if (!previewMode) {
+      try {
+        const { runHousekeepingSweep } = await import('../lib/housekeeping-sweep.js');
+        const { catalogNames } = await import('../lib/housekeeping.js');
+        housekeepingNotify = await runHousekeepingSweep({
+          SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap,
+          catalogNames: await catalogNames({ SUPABASE_URL, sbHeaders }).catch(() => ({})),
+        });
+      } catch (e) { housekeepingNotify = { error: e.message }; }
     }
 
     // ── COLD-INTRO DRIP ──────────────────────────────────────────────
@@ -1118,6 +1147,7 @@ export default async function handler(req, res) {
       weekly_reports: weeklyReports,
       statement_notify: statementNotify,
       maintenance: maintenanceNotify,
+      housekeeping: housekeepingNotify,
       prospect_flags: prospectFlags,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,

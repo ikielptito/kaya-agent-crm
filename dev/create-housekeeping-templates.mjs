@@ -1,0 +1,85 @@
+#!/usr/bin/env node
+// Submit the three housekeeping templates to Meta for approval.
+//
+// All Indonesian: Gede, Naomi, Ita, Ana and Putu do not work in English, and
+// a cleaning schedule nobody can read is not a schedule.
+//
+// Why templates rather than plain messages: the housekeepers rarely message
+// Maya first, so the 24-hour window is almost always shut when the morning's
+// work needs sending. A template opens it; once she replies, everything else
+// that day is free text.
+//
+// Run with your Vercel LISTING_SYNC_SECRET:
+//   SYNC_SECRET=xxxxxxxx node dev/create-housekeeping-templates.mjs
+//   node dev/create-housekeeping-templates.mjs status
+
+const ENDPOINT = 'https://kaya-agent-crm.vercel.app/api/whatsapp-templates';
+
+const TEMPLATES = [
+  {
+    name: 'samba_hk_task',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo, ada jadwal untuk hari ini.
+
+Villa: {{1}}
+Tugas: {{2}}
+
+Kalau ada kendala atau tidak bisa hari ini, balas saja pesan ini. Terima kasih.`,
+    example: ['HAUS Canggu · Unit 2', 'bersih-bersih setelah tamu check out'],
+  },
+  {
+    name: 'samba_hk_week',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo {{1}}, ini jadwal Anda untuk minggu ini.
+
+{{2}}
+
+Kalau ada hari yang tidak bisa, kabari sekarang supaya bisa diatur. Terima kasih.`,
+    example: ['Putu', 'Senin, 31 Agustus: HAUS Canggu · Unit 2 — bersih-bersih setelah tamu check out\nRabu, 2 September: HAUS Canggu · Unit 4 — siapkan villa sebelum tamu datang'],
+  },
+  {
+    name: 'samba_hk_inspection',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo, hari ini jadwalnya pemeriksaan rutin di {{1}}.
+
+Tolong kirim foto: kamar mandi, langit-langit, dinding dekat AC, dapur, dan kolam kalau ada. Kalau ada jamur, rembes air, atau yang rusak, foto dari dekat ya.
+
+Kirim fotonya langsung ke chat ini. Terima kasih.`,
+    example: ['Villa Saturno'],
+  },
+];
+
+async function status() {
+  const r = await fetch(ENDPOINT);
+  const j = await r.json();
+  for (const t of TEMPLATES) {
+    const found = (j.templates || []).find(x => x.name === t.name);
+    console.log(`${t.name.padEnd(24)} ${found ? found.status + (found.category ? ' · ' + found.category : '') : 'not found yet'}`);
+  }
+  console.log('\nThe housekeeping sweep skips any queue whose template is not APPROVED,');
+  console.log('so nothing else breaks while these are pending.');
+}
+
+async function create() {
+  const SECRET = process.env.SYNC_SECRET;
+  if (!SECRET) {
+    console.error('Set SYNC_SECRET to your Vercel LISTING_SYNC_SECRET, e.g.:\n  SYNC_SECRET=xxxx node dev/create-housekeeping-templates.mjs');
+    process.exit(1);
+  }
+  for (const t of TEMPLATES) {
+    const r = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SECRET },
+      body: JSON.stringify({ action: 'create', ...t }),
+    });
+    const j = await r.json();
+    console.log(`${t.name.padEnd(24)} ${r.ok ? 'submitted' : 'FAILED'} ${JSON.stringify(j).slice(0, 200)}`);
+  }
+  console.log('\nCheck with:\n  node dev/create-housekeeping-templates.mjs status');
+}
+
+if (process.argv[2] === 'status') await status();
+else await create();

@@ -1150,6 +1150,60 @@ export async function nodeHandler(req, res) {
       return res.status(200).end();
     }
 
+    // ── STAFF ON THE GROUND ───────────────────────────────────────
+    // Housekeepers, the pool man and the tukang are in the staff register
+    // but they are not the office team, so they arrive here rather than in
+    // the TEAM_NUMS branch above. Before this existed only Era and Ikiel
+    // could reach the maintenance handlers, which meant a cleaner sending a
+    // photo of a leak was answered by sales-mode Maya.
+    //
+    // Two kinds of message can be theirs: a reply about a repair we
+    // dispatched to them, or a new issue they are reporting. Either way, a
+    // known staff member is never an agent lead — if neither handler claims
+    // the message it is logged and left for a human rather than falling
+    // through to Maya, who would try to rent them a villa.
+    try {
+      const { staffByWa } = await import('../lib/staff.js');
+      const person = await staffByWa(relayDb, fromNum);
+      if (person && person.active) {
+        const logStaff = (category) => fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+          method: 'POST', headers: sbHeaders,
+          body: JSON.stringify({
+            agent_id: null, wa_num: fromNum, direction: 'inbound',
+            content: extracted.dbContent || text, wa_message_id: waMessageId,
+            timestamp: new Date().toISOString(), source: 'webhook', category,
+            media_type: mediaType || null, media_id: mediaId || null,
+          }),
+        }).catch(() => {});
+
+        const { handleTukangReply } = await import('../lib/maintenance-dispatch.js');
+        if (await handleTukangReply(relayDb, relayWa, { from: fromNum, text })) {
+          await logStaff('maintenance_tukang');
+          return res.status(200).end();
+        }
+        // An inspection round in progress takes precedence over ordinary
+        // reporting: her photos belong to that round, and only the ones that
+        // actually describe a fault also become work orders.
+        const { handleInspection } = await import('../lib/housekeeping-intake.js');
+        if (await handleInspection({
+          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
+        })) {
+          await logStaff('housekeeping');
+          return res.status(200).end();
+        }
+        if (person.can_report) {
+          const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
+          const took = await handleStaffMaintenance({
+            db: relayDb, wa: relayWa, fromNum, text,
+            mediaType, mediaId, waToken: WA_TOKEN,
+          });
+          if (took) { await logStaff('maintenance_staff'); return res.status(200).end(); }
+        }
+        await logStaff('staff');
+        return res.status(200).end();
+      }
+    } catch (e) { /* never let staff routing break ordinary messaging */ }
+
     // Find matching agent
     const agentRes = await fetch(
       `${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${fromNum}&select=*`,
