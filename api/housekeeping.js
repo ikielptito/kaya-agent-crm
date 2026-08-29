@@ -57,6 +57,22 @@ export default async function handler(req, res) {
       return res.status(200).json(await generateTasks(db));
     }
 
+    // Throw away tasks nobody has been told about and rebuild from scratch.
+    // Deliberately limited to status 'planned' with notified_at null: a visit
+    // a housekeeper has already been asked to make is a promise, and a
+    // completed one is a record. Neither is ours to delete. Use this after
+    // changing a threshold, or when the schedule was first generated with
+    // rules that have since been fixed.
+    if (action === 'hk_replan') {
+      const r = await fetch(
+        `${SUPABASE_URL}/rest/v1/housekeeping_tasks?status=eq.planned&notified_at=is.null`,
+        { method: 'DELETE', headers: { ...sbHeaders, Prefer: 'return=representation' } });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      const removed = (await r.json().catch(() => [])) || [];
+      const built = await generateTasks(db);
+      return res.status(200).json({ removed: removed.length, ...built });
+    }
+
     if (action === 'hk_patch') {
       const fields = {};
       for (const [k, v] of Object.entries(payload.fields || {})) if (PATCHABLE.has(k)) fields[k] = v;

@@ -107,8 +107,27 @@ t('overlapping stays merge rather than double-count',
 
 // ── Inspections ──────────────────────────────────────────────────────
 {
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])] });
-  t('a villa never inspected is inspected today', datesOf(p, 'inspection'), [TODAY]);
+  // A villa with no history starts on a staggered day, not today: otherwise
+  // the first run puts every unit's inspection on one morning, and one
+  // housekeeper covering four villas cannot do four photo rounds in a day.
+  // The offset is a stable hash of the slug, so it never moves between runs.
+  const p1 = planTasks({ today: TODAY, units: [unit('haus-1', [])] });
+  const p2 = planTasks({ today: TODAY, units: [unit('haus-1', [])] });
+  const d = datesOf(p1, 'inspection')[0];
+  t('a never-inspected villa is scheduled within the fortnight',
+    d >= TODAY && d <= '2026-09-14', true);
+  t('the staggered date is stable across runs', datesOf(p2, 'inspection'), [d]);
+}
+{
+  // The real portfolio: nobody should face more than one round a day.
+  const slugs = ['haus-1', 'haus-2', 'haus-4', 'haus-5', 'lanehaus-1', 'lanehaus-3',
+    'villa-saturno', 'tropicana-a4', 'tropicana-a5', 'tropicana-b2', 'tropicana-b3',
+    'tropicana-b4', 'tropicana-b5', 'tropicana-b6'];
+  const p = planTasks({ today: TODAY, units: slugs.map(s => unit(s, [])) });
+  const perDay = {};
+  for (const x of p.filter(y => y.kind === 'inspection')) perDay[x.task_date] = (perDay[x.task_date] || 0) + 1;
+  t('all fourteen villas are scheduled', p.filter(y => y.kind === 'inspection').length, 14);
+  t('no more than two villas inspected on any one day', Math.max(...Object.values(perDay)) <= 2, true);
 }
 {
   const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], lastInspection: { 'haus-1': '2026-08-25' } });
