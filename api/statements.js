@@ -290,9 +290,16 @@ export default async function handler(req, res) {
       if (!to || tok.length < 16) return res.status(400).json({ error: 'wa_num and token required' });
       // Only numbers registered on an active group may be messaged — this
       // endpoint must not be usable to spam arbitrary numbers from our WABA.
-      const groups = await listGroups(db, { activeOnly: true });
-      const known = groups.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === to));
-      if (!known) return res.status(403).json({ error: 'Number not registered to any property' });
+      // Normally only numbers already registered on a property may be
+      // messaged, so this endpoint can never be used to reach strangers.
+      // allow_unregistered is the one exception: an admin assigning a villa
+      // to its owner by number, which is by definition a first contact. The
+      // caller is already holding the sync secret and an admin password.
+      if (!payload.allow_unregistered) {
+        const groups = await listGroups(db, { activeOnly: true });
+        const known = groups.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === to));
+        if (!known) return res.status(403).json({ error: 'Number not registered to any property' });
+      }
       const WA_TOKEN = process.env.META_WA_TOKEN;
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
