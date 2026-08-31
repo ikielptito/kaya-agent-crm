@@ -1013,23 +1013,44 @@ export async function nodeHandler(req, res) {
           // 131049 = Meta's per-user marketing cap: this person doesn't engage
           // with marketing templates and Meta is throttling us. Retrying within
           // 24h can get us blocked for another 24h, so back off: record a cap
-          // until tomorrow (settings.marketing_caps, read by every broadcast
-          // loop). A third cap in a row drops them to a monthly digest.
+          // (settings.marketing_caps, read by every broadcast loop).
+          //
+          // The backoff MUST outlast a whole send cycle. A flat 24h did not:
+          // the broadcast runs at a fixed hour every day (waves 01:00/01:20/
+          // 01:40 UTC), so a cap stamped at 01:02 expired mid-way through the
+          // next morning's waves and the same number was re-sent, re-throttled
+          // and re-capped. Every one of the 62 caps on file was stamped inside
+          // 01:00–01:42, and strikes climbed (one number reached 13) instead of
+          // the cap ever taking effect. Days, not hours, and escalating: each
+          // strike buys a longer rest, so a chronically throttled number leaves
+          // the broadcast pool on its own.
           if (errInfo && /\b131049\b/.test(errInfo) && st.recipient_id) {
             try {
               const num = String(st.recipient_id).replace(/\D/g, '');
               const capRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.marketing_caps&select=value`, { headers: sh });
               const caps = (await capRes.json())?.[0]?.value || {};
               const prev = caps[num] || { count: 0 };
-              caps[num] = { until: new Date(Date.now() + 24 * 3600e3).toISOString(), count: (prev.count || 0) + 1, last: new Date().toISOString() };
-              // Prune entries older than 30 days so the blob stays small.
-              const cutoff = Date.now() - 30 * 86400e3;
-              for (const k of Object.keys(caps)) if (Date.parse(caps[k].last || 0) < cutoff) delete caps[k];
+              const strike = (prev.count || 0) + 1;
+              // 1st → 3 days, 2nd → 14 days, 3rd and beyond → 60 days.
+              const restDays = strike >= 3 ? 60 : strike === 2 ? 14 : 3;
+              caps[num] = { until: new Date(Date.now() + restDays * 86400e3).toISOString(), count: strike, last: new Date().toISOString() };
+              // Prune spent entries so the blob stays small — but never prune
+              // one that is still holding a number back. The longest rest is
+              // 60 days, so a flat 30-day cutoff would have deleted a live
+              // 60-day cap and put the number straight back in the pool.
+              const cutoff = Date.now() - 90 * 86400e3;
+              for (const k of Object.keys(caps)) {
+                const stale = Date.parse(caps[k].last || 0) < cutoff;
+                const expired = !caps[k].until || Date.parse(caps[k].until) <= Date.now();
+                if (stale && expired) delete caps[k];
+              }
               await fetch(`${SUPABASE_URL}/rest/v1/settings`, {
                 method: 'POST', headers: { ...sh, Prefer: 'resolution=merge-duplicates,return=minimal' },
                 body: JSON.stringify({ key: 'marketing_caps', value: caps })
               }).catch(() => {});
-              if (caps[num].count >= 3) {
+              // Two strikes is already Meta telling us twice. Waiting for a
+              // third only worked when the cap silently expired every night.
+              if (caps[num].count >= 2) {
                 await fetch(`${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${num}&or=(contact_frequency.is.null,contact_frequency.eq.,contact_frequency.eq.weekly)`, {
                   method: 'PATCH', headers: sh, body: JSON.stringify({ contact_frequency: 'monthly' })
                 }).catch(() => {});

@@ -1282,6 +1282,17 @@ function fmtWeekRange(week) {
 }
 // Send the approved template with body params + the dynamic URL-button suffix
 // (the report token, appended to the button's https://sambarentals.com/r/ base).
+//
+// STILL OPEN (31 Aug 2026): a report on the owner's own villa is a utility
+// message, but this template is filed at Meta as MARKETING, so it sits under
+// the per-user marketing throttle — Ikiel's own number took 13 consecutive
+// 131049s and stopped receiving reports at all. Refiling does not fix it on its
+// own: Meta classifies from the body text, not the requested category, and a
+// byte-identical UTILITY resubmission came straight back as MARKETING. Landing
+// UTILITY means dropping the line that sells ("how you compare to similar
+// villas") and sticking to the owner's own numbers — an owner-facing copy
+// change, so Ikiel's call rather than a silent rewrite. See the relay in
+// lib/relay.js for the wording that did classify as UTILITY.
 async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, enquiries, tok }) {
   try {
     const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
@@ -1555,6 +1566,10 @@ const AUTO_RESUME_DAYS = 7;
 // below rolls into the Monday digest. Raising this is the single biggest lever
 // on volume + relevance.
 const HIGH_SIGNAL_MIN = 3;
+// Days of silence after which the Monday digest drops an agent from weekly to
+// a ~monthly rhythm. Measured from last_inbound_at, so it is self-healing: any
+// reply pulls the agent straight back into the weekly send.
+const DIGEST_SILENT_DAYS = 30;
 // Samba opt-in states live on campaign_engagement.samba.status. Existing
 // values: 'opted_in', 'enrolled', 'unsubscribed'. This one marks a contact who
 // has had the cold first-contact carousel and has not replied yet — tracked,
@@ -1595,7 +1610,7 @@ export async function runAvailabilityNotifications(ctx) {
     enabled: false, ran: false, recipients: 0,
     event_alerts_sent: 0, weekly_digest_sent: 0,
     skipped_no_changes: 0, skipped_freq_cap: 0, skipped_opt_out: 0,
-    skipped_not_eligible: 0, errors: [],
+    skipped_not_eligible: 0, skipped_silent_digest: 0, errors: [],
     preview: previewMode ? {} : undefined,
   };
 
@@ -1862,9 +1877,35 @@ export async function runAvailabilityNotifications(ctx) {
     const freq = String(agent.contact_frequency || '').toLowerCase();
     if (freq === 'paused') { summary.skipped_freq_cap++; continue; }
     if (!isMonday && (freq === 'weekly' || freq === 'monthly')) { summary.skipped_freq_cap++; continue; }
-    if (isMonday && freq === 'monthly' && agent.last_availability_alert_at) {
-      const daysSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 8.64e7;
-      if (daysSince < 27) { summary.skipped_freq_cap++; continue; }
+
+    // Monday digest used to reach EVERY non-paused agent. On 31 Aug 2026 that
+    // was 277 people, of whom 106 had never once replied and 91 more had been
+    // silent 31+ days — 71% of the audience getting a marketing template every
+    // week with no engagement. Meta reads that the way it is meant to be read
+    // (131049: 52 numbers throttled in one weekend, 18% of all sends failing),
+    // and the throttle spills onto messages that matter, including the owner
+    // relay that should have reached a villa contact while an agent had a
+    // client waiting to view.
+    //
+    // So silence sets the cadence: no reply in DIGEST_SILENT_DAYS → the same
+    // ~monthly rhythm an explicit 'monthly' preference gets. Derived from
+    // last_inbound_at rather than stored, so a single reply promotes an agent
+    // back to weekly on the next run with nothing to reset by hand.
+    const silentDays = agent.last_inbound_at
+      ? (now.getTime() - new Date(agent.last_inbound_at).getTime()) / 8.64e7
+      : Infinity;
+    const monthlyCadence = freq === 'monthly' || (isMonday && silentDays > DIGEST_SILENT_DAYS);
+    if (isMonday && monthlyCadence) {
+      if (!agent.last_availability_alert_at) {
+        // Never had one — let it through, then the 27-day gate applies.
+      } else {
+        const daysSince = (now.getTime() - new Date(agent.last_availability_alert_at).getTime()) / 8.64e7;
+        if (daysSince < 27) {
+          if (freq !== 'monthly') summary.skipped_silent_digest = (summary.skipped_silent_digest || 0) + 1;
+          else summary.skipped_freq_cap++;
+          continue;
+        }
+      }
     }
 
     // Tier-based cadence (event alerts only; the Monday digest still reaches
@@ -2029,7 +2070,7 @@ export async function runAvailabilityNotifications(ctx) {
   // Command-center bookkeeping: the day's campaign row gets the run stamped
   // and its lifetime counters advanced (waves accumulate — bump is atomic).
   const introSent = summary.intro_sent || 0;
-  const skips = (summary.skipped_freq_cap || 0) + (summary.skipped_opt_out || 0) + (summary.skipped_tier_cap || 0);
+  const skips = (summary.skipped_freq_cap || 0) + (summary.skipped_opt_out || 0) + (summary.skipped_tier_cap || 0) + (summary.skipped_silent_digest || 0);
   if (isMonday) {
     await noteRun(campDb, digestCamp, { sent: summary.weekly_digest_sent, skipped: skips, failed: summary.errors.length, summary: { wave: summary.wave || 'all', sent: summary.weekly_digest_sent, skipped: skips, errors: summary.errors.length } });
   } else {
