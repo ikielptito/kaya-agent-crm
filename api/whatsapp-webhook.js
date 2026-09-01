@@ -1140,6 +1140,24 @@ export async function nodeHandler(req, res) {
       });
       if (flushed || answered || (asked && isBareAck(text))) return res.status(200).end();
 
+      // A question Maya explicitly put to this person (payroll clarifications
+      // and the like). Checked BEFORE the maintenance handlers on purpose:
+      // while one is open, "yes, it's Ita now" is far more likely an answer
+      // to it than a new work order — and the model falls through on anything
+      // unrelated, so the logged-for-a-human default below still holds for
+      // ordinary chat. handleRelayReply above keeps first claim: an open
+      // agent relay is a promise to an agent, and it was here first.
+      try {
+        const { handleTeamQuestionReply } = await import('../lib/team-questions.js');
+        if (await handleTeamQuestionReply({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY })) {
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_question' }),
+          }).catch(() => {});
+          return res.status(200).end();
+        }
+      } catch (e) { /* never let a Q&A break team messaging */ }
+
       // Maintenance: Era (and any cleaner in maintenance_reporters) files
       // issues by sending a photo + description, and answers Maya's nudges
       // here too. It only claims a message it is confident about, so her
