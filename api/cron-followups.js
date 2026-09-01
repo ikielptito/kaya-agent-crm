@@ -1305,35 +1305,45 @@ function fmtWeekRange(week) {
 // Send the approved template with body params + the dynamic URL-button suffix
 // (the report token, appended to the button's https://sambarentals.com/r/ base).
 //
-// STILL OPEN (31 Aug 2026): a report on the owner's own villa is a utility
-// message, but this template is filed at Meta as MARKETING, so it sits under
-// the per-user marketing throttle — Ikiel's own number took 13 consecutive
-// 131049s and stopped receiving reports at all. Refiling does not fix it on its
-// own: Meta classifies from the body text, not the requested category, and a
-// byte-identical UTILITY resubmission came straight back as MARKETING. Landing
-// UTILITY means dropping the line that sells ("how you compare to similar
-// villas") and sticking to the owner's own numbers — an owner-facing copy
-// change, so Ikiel's call rather than a silent rewrite. See the relay in
-// lib/relay.js for the wording that did classify as UTILITY.
+// RESOLVED 1 Sep 2026, after a month of this template throttling its own
+// owners (Ikiel's number took 13 consecutive 131049s and stopped receiving
+// reports): the ping was MARKETING because its body advertised "how you
+// compare to similar villas". Meta classifies from the body text — a
+// byte-identical UTILITY resubmission came straight back as MARKETING — so
+// the fix is copy, not category. v3 drops the comparative line FROM THE PING
+// ONLY; the report page keeps its full "How you compare" section, so owners
+// lose nothing once they tap through. Same walk as the owner-question relay:
+// newest first, fall through only while a template is not usable yet, so v3
+// takes over the moment it clears review with no deploy.
+const OWNER_REPORT_TEMPLATES = ['samba_owner_weekly_report_v3', 'samba_owner_weekly_report'];
+const REPORT_TEMPLATE_MISSING = new Set([132001, 132000, 132005, 132007, 132012, 132015]);
 async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, enquiries, tok }) {
-  try {
-    const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp', to, type: 'template',
-        template: {
-          name: 'samba_owner_weekly_report',
-          language: { code: 'en' },
-          components: [
-            { type: 'body', parameters: [name, week, views, enquiries].map(text => ({ type: 'text', text: String(text) })) },
-            { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
-          ],
-        },
-      }),
-    });
-    return r.ok;
-  } catch (e) { return false; }
+  for (const tmpl of OWNER_REPORT_TEMPLATES) {
+    try {
+      const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to, type: 'template',
+          template: {
+            name: tmpl,
+            language: { code: 'en' },
+            components: [
+              { type: 'body', parameters: [name, week, views, enquiries].map(text => ({ type: 'text', text: String(text) })) },
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+            ],
+          },
+        }),
+      });
+      if (r.ok) return true;
+      const code = (await r.json().catch(() => ({})))?.error?.code ?? null;
+      // Only "that template is not usable yet" falls through to the older
+      // name. Any other refusal — a throttle, a bad number — must not be
+      // retried on the marketing template; that is the loop this ends.
+      if (!REPORT_TEMPLATE_MISSING.has(code)) return false;
+    } catch (e) { return false; }
+  }
+  return false;
 }
 export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, preview = false }) {
   if (!preview && (!WA_TOKEN || !WA_PHONE_ID)) return { skipped: 'no WhatsApp credentials' };
