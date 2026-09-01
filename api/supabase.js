@@ -1342,6 +1342,20 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       });
       return res.status(200).json({ success: true, count: next.length });
 
+    } else if (action === 'delivery_health') {
+      // On-demand delivery health: the same snapshot the nightly pass logs,
+      // computed fresh, plus the stored history for trend. Read-only — no
+      // Telegram, no LLM, no writes (preview mode).
+      const { runDeliveryHealth } = await import('../lib/delivery-health.js');
+      const db = { SUPABASE_URL, sbHeaders: headers };
+      const fresh = await runDeliveryHealth(db, {
+        waToken: process.env.META_WA_TOKEN, phoneId: process.env.META_WA_PHONE_ID,
+        wabaId: process.env.META_WABA_ID, preview: true,
+      });
+      const histRes = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.delivery_health_log&select=value', { headers });
+      const history = (await histRes.json())?.[0]?.value || [];
+      return res.status(200).json({ now: fresh.snapshot, alerts: fresh.alerts, history: history.slice(0, 14) });
+
     } else if (action === 'analytics') {
       // Powers the console's Analytics view: the agent-level funnel
       // (enrolled → messaged → read → replied → clicked → enquired), per-format

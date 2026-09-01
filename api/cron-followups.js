@@ -819,6 +819,23 @@ export default async function handler(req, res) {
       } catch (e) { housekeepingNotify = { error: e.message }; }
     }
 
+    // ── DELIVERY HEALTH ──────────────────────────────────────────────
+    // The nightly physical: yesterday's failures by error code, the phone
+    // number's quality rating, per-template quality scores — checked against
+    // a stored baseline. Quiet day: logged, nothing sent. Threshold tripped:
+    // the model reads the failing rows and Ikiel gets a diagnosis on
+    // Telegram instead of discovering a bad weekend by feel.
+    let deliveryHealth = null;
+    if (!previewMode) {
+      try {
+        const { runDeliveryHealth } = await import('../lib/delivery-health.js');
+        deliveryHealth = await runDeliveryHealth({ SUPABASE_URL, sbHeaders }, {
+          waToken: WA_TOKEN, phoneId: WA_PHONE_ID, wabaId: process.env.META_WABA_ID,
+          apiKey: process.env.ANTHROPIC_API_KEY,
+        });
+      } catch (e) { deliveryHealth = { error: e.message }; }
+    }
+
     // ── COLD-INTRO DRIP ──────────────────────────────────────────────
     // The screenshot pipeline, fully automatic: Ikiel imports a listing
     // screenshot → prospect row ('agreed', cold). Each 9am pass sends the
@@ -1118,6 +1135,10 @@ export default async function handler(req, res) {
         briefing: !!ownerReport?.sent,
         review: weeklyReview?.grade || (weeklyReview?.staged ? 'staged' : null),
         backfilled: backfill?.created || 0,
+        // How many the silence gate held out of the Monday digest — the
+        // number that proves (or indicts) the 31 Aug cadence change.
+        digest_silent_skips: availabilityResult?.skipped_silent_digest || 0,
+        health_alerts: deliveryHealth?.alerts?.length || 0,
         spend: +(+todaySpend).toFixed(2),
       });
     }
@@ -1148,6 +1169,7 @@ export default async function handler(req, res) {
       statement_notify: statementNotify,
       maintenance: maintenanceNotify,
       housekeeping: housekeepingNotify,
+      delivery_health: deliveryHealth ? { alerts: deliveryHealth.alerts, fail_rate: deliveryHealth.snapshot?.fail_rate } : null,
       prospect_flags: prospectFlags,
       portal_analytics: portalAnalytics,
       auto_resumed_pauses: autoResumed,
