@@ -62,6 +62,32 @@ export default async function handler(req, res) {
       return res.status(200).json(stays);
     }
 
+    // A clean Era adds by hand from the schedule. origin_date is the date it
+    // was created on, so a later move keeps its identity the way generated
+    // visits do; the (slug, origin_date, kind) uniqueness means "there is
+    // already a regular clean that day" comes back as a plain answer rather
+    // than a duplicate row.
+    if (action === 'hk_create') {
+      const slug = String(payload.slug || '');
+      const task_date = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.task_date)) ? payload.task_date : null;
+      const kind = ['turnover', 'regular', 'pre_arrival', 'inspection'].includes(payload.kind) ? payload.kind : null;
+      if (!slug || !task_date || !kind) return res.status(400).json({ error: 'villa, day and kind are required' });
+      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+      if (task_date < today) return res.status(400).json({ error: 'that day has already passed' });
+      const row = {
+        slug, task_date, origin_date: task_date, kind, status: 'planned',
+        assigned_staff_id: payload.assigned_staff_id ? Number(payload.assigned_staff_id) : null,
+        notes: payload.notes ? String(payload.notes).slice(0, 500) : null,
+        moved_by: payload.actor || 'admin', moved_at: new Date().toISOString(),
+      };
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_tasks`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(row),
+      });
+      if (r.status === 409) return res.status(409).json({ error: `there is already a ${kind.replace('_', ' ')} at that villa on that day` });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      return res.status(201).json({ ok: true, task: (await r.json())[0] || null });
+    }
+
     if (action === 'hk_generate') {
       return res.status(200).json(await generateTasks(db));
     }
