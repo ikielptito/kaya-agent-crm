@@ -15,6 +15,7 @@ import webpush from 'web-push';
 import { AUTO_REPLY_RE } from '../lib/sla.js';
 import { getSpendAllowance, describeAllowance } from '../lib/spend.js';
 import { bump as bumpCampaign } from '../lib/campaigns.js';
+import { refreshAgentMemory, memoryBlock } from '../lib/agent-memory.js';
 import crypto from 'node:crypto';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
@@ -553,6 +554,68 @@ async function loadRentals(supabaseUrl, sbHeaders) {
   return null;
 }
 
+// One villa, in full — used only for the villas actually in play this turn.
+function rentalDetailBlock(p, i) {
+  const rate = p.monthly_rate_idr
+    ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` + (p.yearly_rate_idr ? ` (or IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year)` : '')
+    : 'rate TBC — say "let me check with Ikiel"';
+  const badge = p.badge ? ` [${String(p.badge).toUpperCase()}]` : '';
+  const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
+  const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
+  const actualRev = p.monthly_revenue_idr ? `~IDR ${(p.monthly_revenue_idr / 1e6).toFixed(1)}M/mo actual revenue` : null;
+  const links = [p.photos_url && `photos: ${p.photos_url}`, p.maps_url && `map: ${p.maps_url}`, p.portal_url && `portal: ${p.portal_url}`].filter(Boolean).join(' · ');
+  return [
+    `${i + 1}. ${p.name.toUpperCase()}${badge}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
+    p.slug ? `   Slug: ${p.slug}` : null,
+    p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
+    `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
+    occ || actualRev ? `   Performance: ${[occ, actualRev].filter(Boolean).join(', ')}` : null,
+    p.amenities ? `   Amenities: ${p.amenities}` : null,
+    p.features ? `   Features: ${p.features}` : null,
+    p.extended_info ? `   Details:\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null,
+    links ? `   Links: ${links}` : null,
+    p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
+    p.commission_pct ? `   Agent commission: ${p.commission_pct}%` : null,
+  ].filter(Boolean).join('\n');
+}
+
+// The villas in play this turn: named in the thread or the message, fitting
+// the known client brief, or sent as cards recently. Everything else stays a
+// short card. Before this, all thirty villas rode along in full on every
+// reply (~18k tokens) and the one that mattered had to be found in the pile.
+function relevantRentalSlugs(rentals, { thread = '', inbound = '', brief = null, cap = 6 } = {}) {
+  if (!Array.isArray(rentals)) return [];
+  const hay = `${thread}\n${inbound}`.toLowerCase();
+  const hits = new Set();
+  for (const p of rentals) {
+    // Whole-word matches only: "lanehaus 1" must not light up "haus 1".
+    const names = [p.name, p.slug, p.slug && p.slug.replace(/[-_]+/g, ' ')].filter(Boolean).map(x => String(x).toLowerCase().replace(/\s*[–-]\s*/g, ' '));
+    const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*[–-]?\\s*');
+    if (names.some(n => n.length >= 4 && new RegExp(`(^|[^a-z0-9])${esc(n)}(?![a-z0-9])`, 'i').test(hay))) hits.add(p.slug);
+  }
+  if (brief && typeof brief === 'object') {
+    const budget = Number(String(brief.budget_max_month || '').replace(/[^0-9.]/g, '')) || 0;
+    const budgetIdr = budget ? (budget < 1000 ? budget * 1e6 : budget) : 0;   // "35" / "35jt" → 35M
+    const beds = parseInt(brief.beds, 10) || 0;
+    const area = String(brief.area || '').toLowerCase();
+    for (const p of rentals) {
+      if (hits.size >= cap) break;
+      const okBudget = !budgetIdr || !p.monthly_rate_idr || p.monthly_rate_idr <= budgetIdr * 1.15;
+      const okBeds = !beds || !p.beds || Number(p.beds) >= beds;
+      const okArea = !area || [p.area, p.full_location].some(x => x && String(x).toLowerCase().includes(area.split(/[ ,/]/)[0]));
+      if (okBudget && okBeds && okArea) hits.add(p.slug);
+    }
+  }
+  return [...hits].slice(0, cap);
+}
+
+function buildRentalDetails(rentals, slugs) {
+  if (!Array.isArray(rentals) || !slugs?.length) return '';
+  const chosen = rentals.filter(p => slugs.includes(p.slug));
+  if (!chosen.length) return '';
+  return `VILLAS IN PLAY THIS TURN (full detail — everything else in the portfolio is summarised above; ask for a card's villa by name if you need more):\n\n${chosen.map((p, i) => rentalDetailBlock(p, i)).join('\n\n')}\n`;
+}
+
 function buildRentalsContext(rentals) {
   if (!rentals || rentals.length === 0) {
     return `SAMBA REALTY RENTAL PORTFOLIO:
@@ -576,22 +639,20 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     const mapsLink = p.maps_url ? `map: ${p.maps_url}` : null;
     const portalLink = p.portal_url ? `portal: ${p.portal_url}` : null;
     const links = [photoLink, mapsLink, portalLink].filter(Boolean).join(' · ');
+    // The short card: what matching needs (type, beds, rate, area, stay, the
+    // headline amenities) and nothing else. Full detail is added per turn
+    // for the villas in play — see buildRentalDetails.
+    const short = (v, n) => { const x = String(v || '').replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
+    void occ; void actualRev; void links;
     const lines = [
       `${i + 1}. ${p.name.toUpperCase()}${badge}${p.area ? ' -- ' + p.area : ''}${p.full_location ? ' (' + p.full_location + ')' : ''}`,
-      p.slug ? `   Slug: ${p.slug}` : null,
-      p.property_type ? `   Type: ${p.property_type}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''}` : null,
-      `   Rate: ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}`,
-      occ || actualRev ? `   Performance: ${[occ, actualRev].filter(Boolean).join(', ')}` : null,
-      p.amenities ? `   Amenities: ${p.amenities}` : null,
-      p.features ? `   Features: ${p.features}` : null,
-      p.extended_info ? `   Details:\n${p.extended_info.split('\n').map(l => '     ' + l).join('\n')}` : null,
-      links ? `   Links: ${links}` : null,
-      p.maya_notes ? `   Notes for Maya: ${p.maya_notes}` : null,
-      p.commission_pct ? `   Agent commission: ${p.commission_pct}%` : null
+      `   Slug: ${p.slug || '?'} · ${p.property_type || 'property'}${capacity ? ', ' + capacity : ''}${p.sqm ? ', ' + p.sqm + ' sqm' : ''} · ${rate}${p.min_stay_nights > 1 ? `, min ${p.min_stay_nights} nights` : ''}${p.commission_pct ? ` · commission ${p.commission_pct}%` : ''}`,
+      p.amenities ? `   Amenities: ${short(p.amenities, 160)}` : null,
+      p.maya_notes && /floor|negoti|min(imum)?|never|only|do not|don't/i.test(p.maya_notes) ? `   Note: ${short(p.maya_notes, 140)}` : null,
     ].filter(Boolean);
     return lines.join('\n');
   });
-  return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB):\n\n${blocks.join('\n\n')}\n\nSAMBA RENTAL HARD RULES (zero exceptions):
+  return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB — short cards; the villas in play this turn appear in full further down):\n\n${blocks.join('\n\n')}\n\nSAMBA RENTAL HARD RULES (zero exceptions):
 1. ALWAYS quote MONTHLY IDR rates. Never quote nightly USD or nightly IDR rates unless the agent explicitly asks for short-term/Airbnb pricing.
 2. NEVER invent prices, bedroom counts, locations, property types, or amenities. Every fact you state must be present in the data block above.
 3. If an agent asks about a property and a field isn't in the DB, do not guess: ask the listed contact via ask_owner and tell the agent you are checking with the villa (see THE LISTED CONTACT HANDLES THE VILLA).
@@ -715,15 +776,21 @@ const DAILY_SPEND_CAP_USD = Number(process.env.MAYA_DAILY_CAP_USD) > 0 ? Number(
 // reply must be charged at Haiku rates, or the cap wouldn't move even though the
 // spend dropped.
 const MODEL_RATES = {
+  'claude-sonnet-5':   { in: 2 / 1e6,  out: 10 / 1e6, cr: 0.20 / 1e6, cw: 2.50 / 1e6 },
   'claude-sonnet-4-6': { in: 3 / 1e6,  out: 15 / 1e6, cr: 0.30 / 1e6, cw: 3.75 / 1e6 },
   'claude-haiku-4-5':  { in: 1 / 1e6,  out: 5 / 1e6,  cr: 0.10 / 1e6, cw: 1.25 / 1e6 },
+  'claude-opus-4-8':   { in: 5 / 1e6,  out: 25 / 1e6, cr: 0.50 / 1e6, cw: 6.25 / 1e6 },
   'claude-opus-5':     { in: 5 / 1e6,  out: 25 / 1e6, cr: 0.50 / 1e6, cw: 6.25 / 1e6 },
 };
 
 // Maya's reply models. Sonnet is the default/safe choice; Haiku handles the
 // clearly-trivial traffic (~3x cheaper) when MAYA_HAIKU_ROUTING is enabled.
-const SONNET_MODEL = 'claude-sonnet-4-6';
+const SONNET_MODEL = 'claude-sonnet-5';
 const HAIKU_MODEL = 'claude-haiku-4-5';
+// The judgement model: a multi-criteria client brief, a negotiation, a
+// complaint. Opus 4.8 (Ikiel's pick, 3 Sep 2026) at 2.5× Sonnet 5's rate, on
+// the turns where a wrong call costs a viewing. Off with MAYA_OPUS_ROUTING=0.
+const OPUS_MODEL = 'claude-opus-4-8';
 
 // Output cap for one reply hop. With the response constrained to the JSON
 // contract below, a hop is just the object itself — 4000 is headroom, not a
@@ -819,7 +886,7 @@ const MAYA_REPLY_FORMAT = { type: 'json_schema', schema: MAYA_REPLY_SCHEMA };
 // alert), never fall back to shipping the raw text: that is exactly how a
 // 700-word internal monologue once landed in an agent's draft box.
 function parseReplyJson(data) {
-  const raw = (data.content?.[0]?.text || '').trim();
+  const raw = ((data.content || []).find(b => b.type === 'text')?.text || '').trim();
   if (data.stop_reason === 'max_tokens') {
     return { error: `output truncated at max_tokens (${raw.length} chars)`, raw };
   }
@@ -839,7 +906,25 @@ function parseReplyJson(data) {
 // complaints, an image, a first-ever message, or length/multi-question — stays
 // on Sonnet. Off unless MAYA_HAIKU_ROUTING === '1', so rollout is opt-in and the
 // weekly Opus review (which audits the split) has data before we trust it.
-function pickReplyModel(text, { hasImage = false, firstContact = false } = {}) {
+function needsJudgement(text, agent) {
+  const t = String(text || '');
+  const low = t.toLowerCase();
+  const brief = agent?.conversation_history?.brief || {};
+  const briefFields = Object.entries(brief).filter(([k, v]) => v && k !== 'stage').length;
+  const state = agent?.conversation_history?.state || {};
+  // A brief in play with two or more hard criteria — matching across the
+  // portfolio is where a near-miss gets sold as a fit.
+  if (briefFields >= 2 && /\d/.test(t)) return true;
+  // Money and criteria in the message itself.
+  const criteria = (low.match(/budget|jt\b|juta|million|\bm\/mo|\/mo|per month|bedroom|\bbr\b|\bbed|bath|pool|pet|dog|cat|garden|enclosed|area|canggu|pererenan|seminyak|umalas|berawa|ubud|sanur|uluwatu|yearly|per year|min(imum)? stay|nights?\b/g) || []).length;
+  if (criteria >= 3) return true;
+  // Negotiation, complaint, or anything with a temperature.
+  if (/negoti|discount|lower|cheaper|best price|final price|offer|counter|complain|disappoint|not happy|unhappy|refund|deposit back|cancel|legal|contract|lawyer|block this/i.test(low)) return true;
+  if (['negotiating', 'complaint', 'frustrated', 'rejecting'].includes(String(state.intent || '').toLowerCase())) return true;
+  return false;
+}
+function pickReplyModel(text, { hasImage = false, firstContact = false, agent = null } = {}) {
+  if (process.env.MAYA_OPUS_ROUTING !== '0' && needsJudgement(text, agent)) return OPUS_MODEL;
   if (process.env.MAYA_HAIKU_ROUTING !== '1') return SONNET_MODEL;
   const t = String(text || '').trim();
   const low = t.toLowerCase();
@@ -1733,7 +1818,7 @@ export async function nodeHandler(req, res) {
     }
 
     // Generate a reply with Claude — load live project + rental data from DB first
-    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock }
+    const { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock, rentals }
       = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
     // Vision: when the agent sent an image, fetch its bytes so Maya can
     // actually look at it (listing screenshots, property photos, documents
@@ -1746,7 +1831,7 @@ export async function nodeHandler(req, res) {
           + '[The agent sent the attached image — look at it and respond helpfully. If it shows a property, listing screenshot, or document, address its content directly; if it is unrelated small talk (memes, greetings), respond naturally and briefly.]';
       }
     }
-    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalSlugs, availabilityContext, inboundImage, playbookBlock, viewingsBlock);
+    const aiResult = await generateReply(ANTHROPIC_KEY, agent, inboundText, mode, liveContext, liveBrochures, recentThread, rentalsContext, campaignContext, rentalSlugs, availabilityContext, inboundImage, playbookBlock, viewingsBlock, rentals);
 
     // Increment today's spend by the ACTUAL token cost of the Claude call(s),
     // computed from the Anthropic usage block (a date-range availability lookup
@@ -2363,7 +2448,10 @@ async function fetchRecentThread(url, headers, agentId, limit = 45) {
       if (titles) { burst.push(...titles); burstTime = t; continue; }
       flushBurst();
       const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
-      lines.push(`[${t}] ${sender}: ${humanizeMarker(m.content || '').slice(0, 200)}`);
+      // The agent's words stay whole (a client brief is often 400–800 chars and
+      // used to lose its budget or bedroom count here); Maya's own long
+      // messages are trimmed — she can refer to them, she need not reread them.
+      lines.push(`[${t}] ${sender}: ${humanizeMarker(m.content || '').slice(0, m.direction === 'outbound' ? 320 : 1200)}`);
     }
     flushBurst();
     return lines.join('\n');
@@ -2556,6 +2644,15 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
   const rentalSlugs = buildRentalSlugs(rentals);
   // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
   const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
+  // Long-term memory: rebuilt from the messages behind the window every ~15
+  // messages. Awaited so this very reply already carries it; bounded so a slow
+  // Haiku call can never hold a reply hostage.
+  try {
+    await Promise.race([
+      refreshAgentMemory({ SUPABASE_URL, sbHeaders }, process.env.ANTHROPIC_API_KEY, agent),
+      new Promise(r => setTimeout(r, 9000)),
+    ]);
+  } catch { /* memory is a nicety; the reply is the job */ }
   // If this agent is engaged in an active campaign, fetch the campaign's context
   // so Maya knows the specific focus / promo / framing for this batch. With two
   // possible engagements (KAYA + Samba), use the most-recently-active one.
@@ -2592,7 +2689,7 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
   // `digest` rides along: the handler's ask_owner branch resolves the listing's
   // "enquire with" contact from it (it went missing from handler scope when
   // this helper was extracted on 22 Aug 2026 — ReferenceError on every relay).
-  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock };
+  return { liveContext, liveBrochures, rentalsContext, availabilityContext, rentalSlugs, recentThread, campaignContext, playbookBlock, digest, viewingsBlock, rentals };
 }
 
 // DRY RUN — run the full agent reply pipeline (live KB, availability, thread,
@@ -2623,14 +2720,14 @@ export async function previewAgentReply({ SUPABASE_URL, sbHeaders, ANTHROPIC_KEY
   }
   if (!text) return { error: 'no inbound message to reply to' };
   const ctx = await assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent);
-  const result = await generateReply(ANTHROPIC_KEY, agent, text, mode || 'hybrid', ctx.liveContext, ctx.liveBrochures, ctx.recentThread, ctx.rentalsContext, ctx.campaignContext, ctx.rentalSlugs, ctx.availabilityContext, null, ctx.playbookBlock, ctx.viewingsBlock);
+  const result = await generateReply(ANTHROPIC_KEY, agent, text, mode || 'hybrid', ctx.liveContext, ctx.liveBrochures, ctx.recentThread, ctx.rentalsContext, ctx.campaignContext, ctx.rentalSlugs, ctx.availabilityContext, null, ctx.playbookBlock, ctx.viewingsBlock, ctx.rentals);
   // debug: also return the data blocks Maya was reasoning over, so a wrong
   // recommendation can be traced to the data vs the prompt.
-  const extra = debug ? { context: { thread: ctx.recentThread, availability: ctx.availabilityContext, rentals: ctx.rentalsContext } } : {};
+  const extra = debug ? { context: { thread: ctx.recentThread, availability: ctx.availabilityContext, rentals: ctx.rentalsContext, in_play: relevantRentalSlugs(ctx.rentals, { thread: ctx.recentThread, inbound: text, brief: agent.conversation_history?.brief }), memory: agent.conversation_history?.memory?.text || '' } } : {};
   return { inbound: text, ...result, ...extra };
 }
 
-async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '', viewingsBlock = '') {
+async function generateReply(apiKey, agent, inbound, mode, portfolioContext, brochures, recentThread, rentalsContext, campaignContext, rentalSlugs = [], availabilityContext = '', inboundImage = null, playbookBlock = '', viewingsBlock = '', rentals = null) {
   const brochureMap = brochures || FALLBACK_BROCHURES;
   const portfolio = portfolioContext || FALLBACK_PORTFOLIO;
   const brochureKeys = Object.keys(brochureMap).join(', ');
@@ -2638,7 +2735,7 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
 
   // Pick Haiku vs Sonnet for this reply (no-op → Sonnet unless routing is on).
   // A first-ever message (no prior thread) always gets Sonnet — first impression.
-  const replyModel = pickReplyModel(inbound, { hasImage: !!inboundImage, firstContact: !recentThread });
+  const replyModel = pickReplyModel(inbound, { hasImage: !!inboundImage, firstContact: !recentThread, agent });
 
   const threadBlock = recentThread
     ? `Recent message thread (oldest → newest, both sides):\n${recentThread}`
@@ -2748,10 +2845,13 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
   const portalLine = portalAcct?.handle
     ? `Portal account: HAS ONE (handle "${portalAcct.handle}" — never pitch signing up; their share link is https://sambarentals.com/?a=${portalAcct.handle} and their story/stats already carry their identity).`
     : `Portal account: none on record — the AGENT ACCOUNTS pitch applies when relevant.`;
+  const inPlay = relevantRentalSlugs(rentals, { thread: recentThread, inbound, brief: agent.conversation_history?.brief });
+  const detailsBlock = buildRentalDetails(rentals, inPlay);
   const systemRest = `This conversation's context:
 Agent name: ${agent.name || 'unknown'}
 Agency: ${agent.agency || 'independent'}
 ${portalLine}
+${memoryBlock(agent)}${detailsBlock}
 ${viewingsBlock}${threadBlock}
 ${briefBlock}
 Today's date is ${new Date().toISOString().slice(0, 10)} (Bali/WITA) — resolve "next week", "end of the month" etc. against it.
@@ -2885,6 +2985,9 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
         body: JSON.stringify(deepWellFormed({
           model: replyModel,
           max_tokens: REPLY_MAX_TOKENS,
+          // Adaptive thinking: Sonnet 5 runs it by default, Opus 4.8 only when
+          // asked. Structured output still constrains the visible turn.
+          thinking: { type: 'adaptive' },
           system,
           messages,
           // Constrain the turn to the contract object — no preamble, no
@@ -3656,3 +3759,6 @@ export default {
     return res.toResponse();
   },
 };
+
+// Pure helpers, exported for dev/maya-context.test.mjs.
+export { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel };

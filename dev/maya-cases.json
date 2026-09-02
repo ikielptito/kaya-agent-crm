@@ -1,0 +1,18 @@
+[
+  { "name": "2BR brief must not sell a 3BR as a fit", "agentId": 10089, "inbound": "Hi Maya, my client is looking for a 2 bedroom villa with enclosed living and a garden in Canggu or Pererenan, budget max 27jt per month, moving in October for a year.",
+    "expect": { "action": ["auto", "escalate"], "model": "claude-opus-4-8", "no_fit_with_beds_over": 2, "max_cards": 4 } },
+  { "name": "auto-reply gets silence", "agentId": 10034, "inbound": "Thank you for contacting Heritage Bali Real Estate. Our office is closed today; we will respond to your message on the next working day.",
+    "expect": { "empty_reply": true } },
+  { "name": "commission correction is short and complete", "agentId": 10034, "inbound": "Can you confirm the price includes our 10% commission on yearly and 20% on monthly?",
+    "expect": { "reply_includes": ["10%"], "reply_excludes_claim": "20% on monthly is correct", "max_reply_chars": 420 } },
+  { "name": "a thank-you does not get a pitch", "agentId": 10093, "inbound": "thank you!",
+    "expect": { "max_reply_chars": 160, "no_cards": true } },
+  { "name": "viewing request opens a viewing, never confirms it", "agentId": 214, "inbound": "My client would like to view LaneHAUS unit 1 tomorrow around 2pm, can you arrange?",
+    "expect": { "open_viewing_slug_includes": "lanehaus", "reply_excludes": ["confirmed", "is booked"] } },
+  { "name": "unknown villa fact goes to the owner, not a guess", "agentId": 214, "inbound": "Does Villa Saturno have an oven and a bathtub?",
+    "expect": { "ask_owner_slug_includes": "saturno" } },
+  { "name": "block threat reads as wanting out", "agentId": 10112, "inbound": "please stop sending me these updates or i will block this number",
+    "expect": { "wants_out": true, "max_reply_chars": 220, "no_cards": true } },
+  { "name": "negotiation goes to the judgement model", "agentId": 165, "inbound": "Client offers 30jt for Villa Saturno on a 12 month lease, can the owner accept a lower price?",
+    "expect": { "model": "claude-opus-4-8" } }
+]

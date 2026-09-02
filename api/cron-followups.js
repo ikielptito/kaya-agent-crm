@@ -184,6 +184,10 @@ export default async function handler(req, res) {
         { SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
         { kbContext, preview: req.query.review === 'preview' }
       );
+      // A staged review nobody hears about is a review that never happened.
+      if (req.query.review === 'run' && out.thread_count > 0) {
+        try { await sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, buildReviewPushPayload(out)); } catch { /* best-effort */ }
+      }
       return res.status(200).json({ maya_review: out });
     } catch (e) {
       return res.status(500).json({ error: 'review failed: ' + e.message });
@@ -1052,26 +1056,10 @@ export default async function handler(req, res) {
     // Once a week Maya grades her own replies and STAGES proposed lessons +
     // questions for Ikiel to approve in chat.html. Nothing is applied here —
     // applying is a manual one-tap in the console. Best-effort; never blocks.
+    // The weekly self-review has its own cron entry (Sunday 02:00 UTC →
+    // ?review=run). It used to ride inside this daily pass, and the two
+    // mornings the daily fell over (30–31 Aug 2026) it silently did not run.
     let weeklyReview = null;
-    if (!previewMode && now.getUTCDay() === 0) {
-      try {
-        const kbContext = await buildReviewKbContext(SUPABASE_URL, sbHeaders);
-        const staged = await runReview(
-          { SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
-          { kbContext }
-        );
-        weeklyReview = { staged: true, week_of: staged.week_of, threads: staged.thread_count,
-          lessons: staged.lessons?.length || 0, questions: staged.questions?.length || 0,
-          grade: staged.scoreboard?.grade };
-        // Notify Ikiel in the chat app (push -> deep-link to the review panel) so
-        // a staged review never sits unseen. Skip empty weeks. Best-effort.
-        if (staged.thread_count > 0) {
-          const push = await sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, buildReviewPushPayload(staged));
-          weeklyReview.notified = push.sent || 0;
-        }
-      } catch (e) { weeklyReview = { error: e.message }; }
-    }
-
     // Safety-net: catch any numbers agents shared in the last few days that
     // weren't auto-captured live, and add them to the CRM. Best-effort; the
     // action dedupes so it can't create twins. (Full-history backfill is the

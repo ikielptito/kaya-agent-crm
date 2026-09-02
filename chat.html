@@ -3339,9 +3339,33 @@ async function loadReview() {
     reviewState.decisions = {};
     reviewState.answers = {};
     renderReview(d);
+    renderPendingFacts(d.facts_pending || []);
   } catch (e) {
     body.innerHTML = `<div class="an-loading">Couldn't load review: ${esc(e.message)}</div>`;
   }
+}
+
+// Owner answers to relayed questions, staged as facts. Approve writes the
+// line into the listing so Maya reads it from the data next time.
+function renderPendingFacts(facts) {
+  const body = document.getElementById('rvBody');
+  if (!body) return;
+  const old = document.getElementById('rvFacts'); if (old) old.remove();
+  if (!facts.length) return;
+  const rows = facts.map(f => `<div class="rv-item" id="fact-${f.id}" style="padding:10px 0;border-top:1px solid var(--border)">
+      <div style="font-weight:600">${esc(f.property_name || f.rental_slug || '')}</div>
+      <div style="font-size:.85rem;opacity:.8">Q: ${esc(f.question || '')}<br>A: ${esc(f.answer || '')}</div>
+      <div style="font-size:.85rem;margin-top:4px">Will be saved as: <b>${esc(f.kb_fact || '')}</b> <span style="opacity:.6">(${esc(f.contact_name || 'the villa contact')})</span></div>
+      <div style="margin-top:6px;display:flex;gap:6px"><button class="btn" onclick="decideFact(${f.id},true)">Save to listing</button><button class="btn" onclick="decideFact(${f.id},false)">Drop</button></div>
+    </div>`).join('');
+  body.insertAdjacentHTML('beforeend', `<div id="rvFacts" style="margin-top:18px"><h3 style="margin:0 0 6px">Facts owners answered · ${facts.length} waiting</h3><div style="font-size:.8rem;opacity:.7;margin-bottom:6px">Each one came back through a relay. Saving writes it into the listing; Maya, the cards and the portal then agree.</div>${rows}</div>`);
+}
+async function decideFact(relayId, approve) {
+  try {
+    const out = await api('resolve_fact', { relayId, approve });
+    if (out && out.ok === false) throw new Error(out.error || 'failed');
+    const el = document.getElementById('fact-' + relayId); if (el) el.remove();
+  } catch (e) { alert('Could not save: ' + e.message); }
 }
 
 function renderReview(d) {

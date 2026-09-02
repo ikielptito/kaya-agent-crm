@@ -1984,7 +1984,12 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       };
       const [pending, log] = await Promise.all([get('maya_review_pending'), get('maya_review_log')]);
       const playbook = await getPlaybook(env);
+      // Owner answers waiting to be written into their listing (relay.js
+      // stages them; until now nothing in the console listed them).
+      const { listPendingFacts } = await import('../lib/relay.js');
+      const facts_pending = await listPendingFacts({ SUPABASE_URL, sbHeaders: headers }).catch(() => []);
       return res.status(200).json({
+        facts_pending: Array.isArray(facts_pending) ? facts_pending : [],
         pending: (pending && !pending.decided) ? pending : null,
         last_decided: (pending && pending.decided) ? { week_of: pending.week_of, decided_at: pending.decided_at } : null,
         playbook: { version: playbook.version, updated_at: playbook.updated_at,
@@ -2047,6 +2052,41 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       upcoming.sort((a, b) => a.at.localeCompare(b.at));
 
       return res.status(200).json({ now: nowD.toISOString(), mode, upcoming, past: Array.isArray(runLog) ? runLog : [] });
+
+    } else if (action === 'resolve_fact') {
+      // Approve writes the owner's answer into the listing's extended_info —
+      // the field Maya, the cards and the portal all read — reject drops it.
+      const { resolveFact } = await import('../lib/relay.js');
+      const out = await resolveFact({ SUPABASE_URL, sbHeaders: headers }, Number(payload?.relayId), !!payload?.approve);
+      return res.status(out.ok ? 200 : 400).json(out);
+
+    } else if (action === 'agent_memory') {
+      // View (or force-rebuild) what Maya remembers about one agent.
+      const { refreshAgentMemory } = await import('../lib/agent-memory.js');
+      const id = Number(payload?.agentId);
+      if (!id) return res.status(400).json({ error: 'agentId required' });
+      const ag = (await (await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${id}&select=id,name,conversation_history`, { headers })).json())?.[0];
+      if (!ag) return res.status(404).json({ error: 'agent not found' });
+      let refreshed = null;
+      if (payload?.refresh) refreshed = await refreshAgentMemory({ SUPABASE_URL, sbHeaders: headers }, process.env.ANTHROPIC_API_KEY, ag, { force: true });
+      return res.status(200).json({ agent: { id: ag.id, name: ag.name }, memory: ag.conversation_history?.memory || null, refreshed: !!refreshed });
+
+    } else if (action === 'backfill_agent_memory') {
+      // One-off: build memory for the most-talked-to agents so the long
+      // threads gain it today rather than after their next fifteen messages.
+      const { refreshAgentMemory, memoryDue } = await import('../lib/agent-memory.js');
+      const limit = Math.min(Number(payload?.limit) || 30, 120);
+      const rows = await (await fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,conversation_history&is_test=eq.false&wa_num=not.is.null&last_inbound_at=not.is.null&order=last_inbound_at.desc&limit=400`, { headers })).json();
+      const cands = (Array.isArray(rows) ? rows : [])
+        .filter(a => memoryDue(a, { force: !!payload?.force }) && Number(a.conversation_history?.total_messages || 0) >= 40)
+        .sort((x, y) => Number(y.conversation_history?.total_messages || 0) - Number(x.conversation_history?.total_messages || 0))
+        .slice(0, limit);
+      const done = [];
+      for (const ag of cands) {
+        try { const m = await refreshAgentMemory({ SUPABASE_URL, sbHeaders: headers }, process.env.ANTHROPIC_API_KEY, ag, { force: !!payload?.force }); if (m) done.push({ id: ag.id, name: ag.name, from_messages: m.from_messages }); }
+        catch (e) { done.push({ id: ag.id, error: e.message }); }
+      }
+      return res.status(200).json({ candidates: cands.length, built: done.filter(d => !d.error).length, done });
 
     } else if (action === 'run_maya_review') {
       // Manual re-run of the weekly self-review (same path the Sunday cron uses):

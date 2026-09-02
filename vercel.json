@@ -1,15 +1,33 @@
 {
   "functions": {
-    "api/supabase.js": { "maxDuration": 300 },
-    "api/whatsapp-webhook.js": { "maxDuration": 300 },
-    "api/cron-followups.js": { "maxDuration": 300 },
-    "api/campaigns.js": { "maxDuration": 300 },
-    "api/statements.js": { "maxDuration": 300 }
+    "api/supabase.js": {
+      "maxDuration": 300
+    },
+    "api/whatsapp-webhook.js": {
+      "maxDuration": 300
+    },
+    "api/cron-followups.js": {
+      "maxDuration": 300
+    },
+    "api/campaigns.js": {
+      "maxDuration": 300
+    },
+    "api/statements.js": {
+      "maxDuration": 300
+    }
   },
   "routes": [
-    { "src": "^/(lib|dev)(/.*)?$", "status": 404 },
-    { "src": "^/(SCHEMA\\.sql|PERSONA_SPEC\\.md|README\\.md)$", "status": 404 },
-    { "handle": "filesystem" }
+    {
+      "src": "^/(lib|dev)(/.*)?$",
+      "status": 404
+    },
+    {
+      "src": "^/(SCHEMA\\.sql|PERSONA_SPEC\\.md|README\\.md)$",
+      "status": 404
+    },
+    {
+      "handle": "filesystem"
+    }
   ],
   "crons": [
     {
@@ -31,6 +49,10 @@
     {
       "path": "/api/statements?cron=1",
       "schedule": "30 0 * * *"
+    },
+    {
+      "path": "/api/cron-followups?review=run",
+      "schedule": "0 2 * * 0"
     }
   ]
 }
