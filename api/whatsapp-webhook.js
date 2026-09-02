@@ -797,7 +797,11 @@ const OPUS_MODEL = 'claude-opus-4-8';
 // target. It replaces the old 800, which Maya hit on 22 Aug 2026 when she
 // narrated her property-matching reasoning before the JSON: the output was cut
 // mid-object, the no-JSON fallback shipped the whole monologue as the draft.
-const REPLY_MAX_TOKENS = 4000;
+// With adaptive thinking on (3 Sep 2026) the thinking tokens count against
+// this cap: at 4000 an Opus turn on a client brief thought its whole budget
+// away and returned no text at all. 16000 is headroom; effort bounds the
+// thinking so a chat reply does not become an essay.
+const REPLY_MAX_TOKENS = 16000;
 
 // Burst settle: how long an inbound waits before the supersede check, so two
 // messages that land seconds apart (or a run of photos, or a button tap plus
@@ -2992,7 +2996,7 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
           messages,
           // Constrain the turn to the contract object — no preamble, no
           // reasoning narration, no code fences (see MAYA_REPLY_SCHEMA).
-          output_config: { format: MAYA_REPLY_FORMAT },
+          output_config: { format: MAYA_REPLY_FORMAT, effort: replyModel === OPUS_MODEL ? 'high' : 'medium' },
         }))
       });
       llmCalls++;
