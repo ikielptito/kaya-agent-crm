@@ -1362,6 +1362,16 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const history = (await histRes.json())?.[0]?.value || [];
       return res.status(200).json({ now: fresh.snapshot, alerts: fresh.alerts, history: history.slice(0, 14) });
 
+    } else if (action === 'carousel_media_check') {
+      // Builds the six digest cards exactly as Monday's send would and pushes
+      // their images to Meta as media — proving the id path works before the
+      // real run. Uploads only (media expires in 30 days); sends nothing.
+      const { listingCarouselCards, uploadCardMedia } = await import('../lib/wa-carousel.js');
+      const cards = await listingCarouselCards();
+      if (!cards) return res.status(200).json({ ok: false, reason: 'could not build a full carousel' });
+      const up = await uploadCardMedia(cards, { token: process.env.META_WA_TOKEN, phoneId: process.env.META_WA_PHONE_ID });
+      return res.status(200).json({ ok: up.failed === 0, ...up, cards: cards.map(c => ({ name: c.name, imageId: c.imageId || null })) });
+
     } else if (action === 'analytics') {
       // Powers the console's Analytics view: the agent-level funnel
       // (enrolled → messaged → read → replied → clicked → enquired), per-format

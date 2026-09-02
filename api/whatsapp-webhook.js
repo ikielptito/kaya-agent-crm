@@ -1024,6 +1024,36 @@ export async function nodeHandler(req, res) {
           // the cap ever taking effect. Days, not hours, and escalating: each
           // strike buys a longer rest, so a chronically throttled number leaves
           // the broadcast pool on its own.
+          // Two more of Meta's "don't bother" answers, previously ignored, so
+          // the same number was re-sent every wave and failed every wave:
+          //   130472 — the recipient is in a Meta marketing experiment: no
+          //            business they never messaged can reach them with a
+          //            marketing template while it runs (2–4 sends/week lost).
+          //   131050 — the recipient tapped "stop marketing messages" on
+          //            WhatsApp itself. That is an opt-out we never recorded.
+          // Both go in the same marketing_caps blob every broadcast loop
+          // already honours — a long rest for the experiment, a year for the
+          // opt-out — without touching utility sends (relays, reports).
+          const capCode = errInfo && st.recipient_id
+            ? (/\b130472\b/.test(errInfo) ? '130472' : /\b131050\b/.test(errInfo) ? '131050' : null) : null;
+          if (capCode) {
+            try {
+              const num = String(st.recipient_id).replace(/\D/g, '');
+              const capRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.marketing_caps&select=value`, { headers: sh });
+              const caps = (await capRes.json())?.[0]?.value || {};
+              const prev = caps[num] || { count: 0 };
+              const restDays = capCode === '131050' ? 365 : 30;
+              const until = new Date(Date.now() + restDays * 86400e3).toISOString();
+              // Never shorten a rest another code already set.
+              if (!prev.until || Date.parse(prev.until) < Date.parse(until)) {
+                caps[num] = { ...prev, until, count: prev.count || 0, last: new Date().toISOString(), reason: capCode };
+                await fetch(`${SUPABASE_URL}/rest/v1/settings`, {
+                  method: 'POST', headers: { ...sh, Prefer: 'resolution=merge-duplicates,return=minimal' },
+                  body: JSON.stringify({ key: 'marketing_caps', value: caps })
+                }).catch(() => {});
+              }
+            } catch (_) {}
+          }
           if (errInfo && /\b131049\b/.test(errInfo) && st.recipient_id) {
             try {
               const num = String(st.recipient_id).replace(/\D/g, '');

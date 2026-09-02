@@ -18,7 +18,7 @@ import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '..
 import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
-import { topAvailableVillas, buildCarouselComponents, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
+import { topAvailableVillas, buildCarouselComponents, uploadCardMedia, CAROUSEL_CARD_COUNT } from '../lib/wa-carousel.js';
 import { reconcileAllRentals, pullAgentAnalytics, syncOwners } from '../lib/rental-sync.js';
 import { buildAndSendOwnerReport } from '../lib/daily-report.js';
 import { runReview, buildReviewKbContext } from '../lib/maya-review.js';
@@ -1819,6 +1819,11 @@ export async function runAvailabilityNotifications(ctx) {
     try {
       carouselCards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT);
     } catch (_) { carouselCards = null; }
+    // Six images to Meta once, not six fetches by Meta per recipient.
+    if (carouselCards && !previewMode) {
+      const up = await uploadCardMedia(carouselCards, { token: waToken, phoneId: waPhoneId });
+      summary.carousel_media = `${up.uploaded} uploaded, ${up.failed} kept as link` + (up.errors.length ? ` (${up.errors.join('; ')})` : '');
+    }
     summary.carousel = carouselCards ? `ready (${carouselCards.length} villas)` : 'fallback to text';
   }
 
@@ -2125,7 +2130,7 @@ export async function runAvailabilityNotifications(ctx) {
 // Off by default: runs only when settings.samba_availability
 // .intro_sweep_daily_cap is set to a positive number.
 export async function runIntroSweep(ctx) {
-  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results, previewMode } = ctx;
   const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
 
   const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
@@ -2171,6 +2176,10 @@ export async function runIntroSweep(ctx) {
   let cards;
   try { cards = await topAvailableVillas(digest.properties, CAROUSEL_CARD_COUNT); } catch (_) { cards = null; }
   if (!cards) { summary.skipped_reason = 'carousel unavailable (portal or covers short)'; return summary; }
+  if (!previewMode) {
+    const up = await uploadCardMedia(cards, { token: waToken, phoneId: waPhoneId });
+    summary.carousel_media = `${up.uploaded} uploaded, ${up.failed} kept as link`;
+  }
 
   // Never-touched = no availability-category wa_messages row AND no
   // last_availability_alert_at stamp. Belt-and-braces on purpose: old
