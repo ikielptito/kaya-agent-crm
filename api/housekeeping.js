@@ -53,6 +53,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ from, to, today, tasks, names, unassigned });
     }
 
+    // The stays the schedule is derived from, for the same window — so a
+    // calendar can draw the guest on top of the cleans that serve them.
+    if (action === 'hk_stays') {
+      const { fetchStays } = await import('../lib/housekeeping.js');
+      const stays = await fetchStays({ from: payload.from, to: payload.to });
+      if (!stays) return res.status(502).json({ error: 'the portal calendar is unreachable' });
+      return res.status(200).json(stays);
+    }
+
     if (action === 'hk_generate') {
       return res.status(200).json(await generateTasks(db));
     }
