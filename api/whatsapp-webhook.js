@@ -791,6 +791,16 @@ const HAIKU_MODEL = 'claude-haiku-4-5';
 // complaint. Opus 4.8 (Ikiel's pick, 3 Sep 2026) at 2.5× Sonnet 5's rate, on
 // the turns where a wrong call costs a viewing. Off with MAYA_OPUS_ROUTING=0.
 const OPUS_MODEL = 'claude-opus-4-8';
+// The judgement model has its own daily ceiling, so a busy day of briefs
+// cannot run the bill up on the expensive path: past it, judgement turns
+// fall back to Sonnet 5 for the rest of the WITA day. Spend is tracked in
+// settings.daily_usage_opus alongside the overall counter.
+const OPUS_DAILY_USD = Number(process.env.MAYA_OPUS_DAILY_USD) > 0 ? Number(process.env.MAYA_OPUS_DAILY_USD) : 6;
+let _opusToday = { day: null, usd: 0 };
+export function setOpusSpentToday(usd, day = getTodayWitaDateStr()) { _opusToday = { day, usd: Number(usd) || 0 }; }
+function opusBudgetLeft() {
+  return _opusToday.day === getTodayWitaDateStr() ? Math.max(0, OPUS_DAILY_USD - _opusToday.usd) : OPUS_DAILY_USD;
+}
 
 // Output cap for one reply hop. With the response constrained to the JSON
 // contract below, a hop is just the object itself — 4000 is headroom, not a
@@ -928,7 +938,7 @@ function needsJudgement(text, agent) {
   return false;
 }
 function pickReplyModel(text, { hasImage = false, firstContact = false, agent = null } = {}) {
-  if (process.env.MAYA_OPUS_ROUTING !== '0' && needsJudgement(text, agent)) return OPUS_MODEL;
+  if (process.env.MAYA_OPUS_ROUTING !== '0' && needsJudgement(text, agent) && opusBudgetLeft() > 0.5) return OPUS_MODEL;
   if (process.env.MAYA_HAIKU_ROUTING !== '1') return SONNET_MODEL;
   const t = String(text || '').trim();
   const low = t.toLowerCase();
@@ -1799,6 +1809,18 @@ export async function nodeHandler(req, res) {
     if (!isTestContact) {
       // Daily cap with rollover of unused allowance (lib/spend.js).
       const allowance = await getSpendAllowance({ SUPABASE_URL, sbHeaders });
+      // Warn at 80% of today's ceiling, once per day, so the cap is never
+      // the first Ikiel hears of a busy day (it silences Maya for everyone).
+      if (!allowance.over && allowance.cap > 0 && allowance.spentToday >= 0.8 * allowance.cap) {
+        try {
+          const day = getTodayWitaDateStr();
+          const sr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.spend_warned_day&select=value`, { headers: sbHeaders });
+          if (((await sr.json())?.[0]?.value) !== day) {
+            await fetch(`${SUPABASE_URL}/rest/v1/settings`, { method: 'POST', headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ key: 'spend_warned_day', value: day }) });
+            await postToTelegram(`Maya spend: $${allowance.spentToday.toFixed(2)} of today's $${allowance.cap.toFixed(0)} ceiling used. She pauses for everyone at the cap — raise MAYA_DAILY_CAP_USD if today should keep going.`).catch(() => {});
+          }
+        } catch { /* best-effort */ }
+      }
       if (allowance.over) {
         // Over cap: park as a draft (no Claude call) AND page Ikiel — this used
         // to be silent, and a manual reply then wiped the only trace of it.
@@ -1845,6 +1867,7 @@ export async function nodeHandler(req, res) {
       ? aiResult.cost_usd
       : FALLBACK_COST_PER_REPLY_USD * (aiResult.llm_calls || 1);
     await incrementTodaySpend(SUPABASE_URL, sbHeaders, spendDelta);
+    if (aiResult.model === OPUS_MODEL && spendDelta > 0) await incrementTodaySpend(SUPABASE_URL, sbHeaders, spendDelta, 'daily_usage_opus').catch(() => {});
 
     // GENERATION FAILURE — the Claude call itself errored (credits, auth,
     // overload). Never let this dissolve into a silent empty draft (the
@@ -2118,9 +2141,9 @@ async function getTodaySpend(url, headers) {
   }
 }
 
-async function incrementTodaySpend(url, headers, costUsd) {
+async function incrementTodaySpend(url, headers, costUsd, key = 'daily_usage') {
   try {
-    const r = await fetch(`${url}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+    const r = await fetch(`${url}/rest/v1/settings?key=eq.${key}&select=value`, { headers });
     const row = (await r.json())?.[0];
     const usage = row?.value || {};
     const today = getTodayWitaDateStr();
@@ -2131,7 +2154,7 @@ async function incrementTodaySpend(url, headers, costUsd) {
     await fetch(`${url}/rest/v1/settings`, {
       method: 'POST',
       headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ key: 'daily_usage', value: usage })
+      body: JSON.stringify({ key, value: usage })
     });
   } catch (e) {
     console.warn('incrementTodaySpend failed:', e.message);
@@ -2648,6 +2671,12 @@ async function assembleAgentReplyContext(SUPABASE_URL, sbHeaders, agent) {
   const rentalSlugs = buildRentalSlugs(rentals);
   // Fetch the full recent thread (both inbound + outbound) so Maya has context of what she sent
   const recentThread = await fetchRecentThread(SUPABASE_URL, sbHeaders, agent.id);
+  // Today's spend on the judgement model, for the Opus ceiling.
+  try {
+    const ur = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.daily_usage_opus&select=value`, { headers: sbHeaders });
+    const usage = (await ur.json())?.[0]?.value || {};
+    setOpusSpentToday(usage[getTodayWitaDateStr()] || 0);
+  } catch { setOpusSpentToday(0); }
   // Long-term memory: rebuilt from the messages behind the window every ~15
   // messages. Awaited so this very reply already carries it; bounded so a slow
   // Haiku call can never hold a reply hostage.
@@ -2898,7 +2927,7 @@ ${CRM_SIGNALS_INSTRUCTIONS}
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "match_scan": [] | one entry per Samba rental when the agent has given client criteria, e.g. { "slug": "villa_saturno", "verdict": "fit", "why": "3BR villa, 35jt under 45jt ceiling, pool, Canggu; free 14 Sep" },
+  "match_scan": [] | the fits and near-misses (plus up to 5 closest "out") when the agent has given client criteria, e.g. { "slug": "villa_saturno", "verdict": "fit", "why": "3BR villa, 35jt under 45jt ceiling, pool, Canggu; free 14 Sep" },
   "action": "auto" | "escalate" | "need_availability",
   "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability",
   "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
@@ -2919,7 +2948,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
 NEGOTIATION — when an agent asks for a lower price:
 - If the property's "Notes for Maya" contain a NEGOTIATION rule with a floor, you are authorised to negotiate that villa yourself: open at the listed rate, move only when the agent pushes back with a concrete number or reason, concede in small steps (never jump to the floor), never go below the floor, and never reveal the floor. When a figure is agreed, restate it plainly in the reply ("Agreed: 270jt for the year, starting 1 Oct") and set notify_team to Ikiel with the agreed number and the agent's name so he can issue the paperwork. Use "auto" for these turns — that is the point of the pilot.
 - If there is no floor in the notes: Era-managed villa → say you'll take it to Ikiel and set notify_team to Ikiel; any other listed contact → relay the request with ask_owner and tell the agent you're asking the villa. Never invent a discount, and never imply the price is flexible when you have no floor.
-MATCH SCAN ("match_scan") — fill this FIRST, before the reply, whenever the agent's latest message or the thread contains a client brief (any of: budget, bedrooms, area, dates, property type, features). One entry for EVERY Samba rental in the portfolio, no skipping: "fit" = meets every hard criterion (property type, bedroom minimum, price at or BELOW the budget ceiling — cheaper is still a fit — and, if dates were given, free or freeing up by the start date); "near_miss" = exactly one hard criterion missed by a little (price up to ~15% over the ceiling, one bedroom short, right neighbourhood but not the named street, or frees up within ~2 weeks after the requested start); "out" = clearly fails, with the reason. Unknown features are NOT a miss. A price ABOVE the stated ceiling is NEVER a "fit", not even by a little — it is at most a "near_miss". Do not reclassify a near-miss as a "fit" in order to card it; if you catch yourself writing "over budget but…" about something you marked "fit", it is a near_miss. Every "fit" MUST then appear in your reply and (up to 4) in send_cards — if more than 4 fit, card the best 4 and name the rest in the text. send_cards is for FITS ONLY: never attach a card for a near-miss (over-budget, out-of-area, or one bedroom short) — mention those in the text, after the fits, clearly framed, so the cards the agent sees are all real matches. If a budget was given and NO property is in-budget, cards may show the closest near-miss(es) but the text must say plainly they are above budget. Near-misses come after the fits. Leave match_scan [] when there is no brief (greetings, commission questions, a single named property, KAYA sales talk).
+MATCH SCAN ("match_scan") — fill this FIRST, before the reply, whenever the agent's latest message or the thread contains a client brief (any of: budget, bedrooms, area, dates, property type, features). Consider EVERY Samba rental in the portfolio, but WRITE only the fits and near-misses plus at most 5 "out" entries for the closest rejects (the rest are implied; keep each "why" under 15 words): "fit" = meets every hard criterion (property type, bedroom minimum, price at or BELOW the budget ceiling — cheaper is still a fit — and, if dates were given, free or freeing up by the start date); "near_miss" = exactly one hard criterion missed by a little (price up to ~15% over the ceiling, one bedroom short, right neighbourhood but not the named street, or frees up within ~2 weeks after the requested start); "out" = clearly fails, with the reason. Unknown features are NOT a miss. A price ABOVE the stated ceiling is NEVER a "fit", not even by a little — it is at most a "near_miss". Do not reclassify a near-miss as a "fit" in order to card it; if you catch yourself writing "over budget but…" about something you marked "fit", it is a near_miss. Every "fit" MUST then appear in your reply and (up to 4) in send_cards — if more than 4 fit, card the best 4 and name the rest in the text. send_cards is for FITS ONLY: never attach a card for a near-miss (over-budget, out-of-area, or one bedroom short) — mention those in the text, after the fits, clearly framed, so the cards the agent sees are all real matches. If a budget was given and NO property is in-budget, cards may show the closest near-miss(es) but the text must say plainly they are above budget. Near-misses come after the fits. Leave match_scan [] when there is no brief (greetings, commission questions, a single named property, KAYA sales talk).
 Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
 ${isHybrid
   ? `Set "action" to "auto" for everything you can carry end to end with confidence from the portfolio data: factual questions (commission %, a property's price or availability, sending a brochure); scheduling turns where you collect a preferred time and offer the listed contact; and — this is the core of the job — a CLIENT BRIEF you can answer with at least one genuine fit.
@@ -2996,7 +3025,7 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
           messages,
           // Constrain the turn to the contract object — no preamble, no
           // reasoning narration, no code fences (see MAYA_REPLY_SCHEMA).
-          output_config: { format: MAYA_REPLY_FORMAT, effort: replyModel === OPUS_MODEL ? 'high' : 'medium' },
+          output_config: { format: MAYA_REPLY_FORMAT, effort: 'medium' },
         }))
       });
       llmCalls++;

@@ -1,7 +1,7 @@
 // The prompt Maya sees: short cards for the whole portfolio, full detail only
 // for the villas in play, the agent's memory ahead of the thread, and the
 // judgement model on the turns that need it.
-import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel } from '../api/whatsapp-webhook.js';
+import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel, setOpusSpentToday } from '../api/whatsapp-webhook.js';
 import { memoryDue, memoryBlock } from '../lib/agent-memory.js';
 
 let pass = 0, fail = 0;
@@ -38,6 +38,9 @@ t('negotiation → judgement', needsJudgement('can the owner go lower?', {}), tr
 t('thanks → not judgement', needsJudgement('thank you!', {}), false);
 t('default model is Sonnet 5', pickReplyModel('thanks', { agent: {} }), 'claude-sonnet-5');
 t('judgement model is Opus 4.8', pickReplyModel('budget 30jt, 2 bedrooms, pool, Canggu', { agent: {} }), 'claude-opus-4-8');
+setOpusSpentToday(99);
+t('past the Opus ceiling, judgement turns fall back to Sonnet', pickReplyModel('budget 30jt, 2 bedrooms, pool, Canggu', { agent: {} }), 'claude-sonnet-5');
+setOpusSpentToday(0);
 // memory
 t('short thread has no memory due', memoryDue({ conversation_history: { total_messages: 20 } }), false);
 t('long thread without memory is due', memoryDue({ conversation_history: { total_messages: 60 } }), true);
