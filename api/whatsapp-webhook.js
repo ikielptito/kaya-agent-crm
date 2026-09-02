@@ -1985,7 +1985,18 @@ export async function nodeHandler(req, res) {
         await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
         return res.status(200).end();
       }
-      const replyMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply, buttons);
+      // If this reply leans on a contact the agent already holds ("you have
+      // Vira's number from before"), send it as a reply to that card.
+      let quoteCard = null;
+      try {
+        const norm = (x) => String(x || '').toLowerCase().replace(/-/g, '_');
+        const ao = aiResult.ask_owner;
+        const aoProp = ao ? (digest?.properties || []).find(p => norm(p.slug) === norm(ao.slug)) : null;
+        const num = aiResult.send_contact?.phone || (ao ? (aoProp?.waNumber || ERA_WA_NUM) : null);
+        const prior = num ? await cardSentRecently(SUPABASE_URL, sbHeaders, agent.id, num) : null;
+        if (typeof prior === 'string') quoteCard = prior;
+      } catch { /* quoting is a nicety */ }
+      const replyMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, fromNum, aiResult.reply, buttons, quoteCard);
       const buttonsNote = buttons.length ? `\n[Buttons: ${buttons.join(' | ')}]` : '';
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, aiResult.reply + buttonsNote, replyMid, null, aiResult.model);
       // Mirror Maya's reply to Telegram so Ikiel sees the full conversation
@@ -2289,12 +2300,15 @@ async function archiveInboundDoc(supabaseUrl, supabaseKey, mediaId, filename, to
 // Sends a free-text WhatsApp message and returns Meta's wa_message_id (or null)
 // so the caller can log it — without the id, delivery/read status can never be
 // matched back to the row by the statuses webhook handler.
-async function sendText(phoneId, token, to, text) {
+// `quoteId`: an earlier message id to reply under — the way a person taps
+// "reply" on their own message. Used so "you have their card from earlier"
+// sits right beneath the card it means.
+async function sendText(phoneId, token, to, text, quoteId = null) {
   try {
     const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } })
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text }, ...(quoteId ? { context: { message_id: quoteId } } : {}) })
     });
     const d = await r.json().catch(() => ({}));
     return d?.messages?.[0]?.id || null;
@@ -2305,15 +2319,15 @@ async function sendText(phoneId, token, to, text) {
 // 'button' message). Falls back to a plain text send when there are no valid
 // buttons, the body exceeds Meta's 1024-char interactive limit, or Meta
 // rejects the interactive shape — the reply itself must never be lost.
-export async function sendTextWithButtons(phoneId, token, to, text, buttons) {
+export async function sendTextWithButtons(phoneId, token, to, text, buttons, quoteId = null) {
   const titles = (buttons || []).map(b => String(b).trim().slice(0, 20)).filter(Boolean).slice(0, 3);
-  if (!titles.length || text.length > 1024) return sendText(phoneId, token, to, text);
+  if (!titles.length || text.length > 1024) return sendText(phoneId, token, to, text, quoteId);
   try {
     const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        messaging_product: 'whatsapp', to, type: 'interactive',
+        messaging_product: 'whatsapp', to, type: 'interactive', ...(quoteId ? { context: { message_id: quoteId } } : {}),
         interactive: {
           type: 'button',
           body: { text },
@@ -2324,7 +2338,7 @@ export async function sendTextWithButtons(phoneId, token, to, text, buttons) {
     const d = await r.json().catch(() => ({}));
     if (r.ok && d.messages?.[0]?.id) return d.messages[0].id;
   } catch (e) { console.warn('button send failed:', e.message); }
-  return sendText(phoneId, token, to, text);
+  return sendText(phoneId, token, to, text, quoteId);
 }
 
 // Native WhatsApp contact card — the agent taps to save/chat. Returns the
@@ -2338,9 +2352,10 @@ async function cardSentRecently(url, headers, agentId, phoneDigits, days = 14) {
   if (!num || !agentId) return false;
   try {
     const since = new Date(Date.now() - days * 86400e3).toISOString();
-    const r = await fetch(`${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.outbound&timestamp=gte.${since}&content=like.${encodeURIComponent(`[Contact card:%+${num}]`)}&select=id&limit=1`, { headers });
+    const r = await fetch(`${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.outbound&timestamp=gte.${since}&content=like.${encodeURIComponent(`[Contact card:%+${num}]`)}&select=wa_message_id&order=timestamp.desc&limit=1`, { headers });
     const rows = await r.json();
-    return Array.isArray(rows) && rows.length > 0;
+    // Truthy when a card went out; the id itself lets a later reply quote it.
+    return Array.isArray(rows) && rows.length > 0 ? (rows[0].wa_message_id || true) : false;
   } catch { return false; }
 }
 
