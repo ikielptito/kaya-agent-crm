@@ -2559,7 +2559,11 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
       }
       const cards = fresh.length ? await resolveListingCards(fresh, 4) : [];
       for (const card of cards) {
-        const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, toNum, card);
+        // The card's link carries this agent's credit: a client who opens a
+        // forwarded card lands on the portal with ?aid=<agent>, so their views
+        // and enquiries count for the agent who shared it — no account needed.
+        const credited = { ...card, url: `${card.url}${card.url.includes('?') ? '&' : '?'}ref=maya&aid=${agent.id}` };
+        const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, toNum, credited);
         if (sent.waMessageId) {
           await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, cardMarker(card), sent.waMessageId, 'listing_card');
         } else {
@@ -2919,7 +2923,7 @@ If they said yes to samba_intro: send a concise overview of the SAMBA RENTAL ran
   const portalAcct = agent.campaign_engagement?.portal_account;
   const portalLine = portalAcct?.handle
     ? `Portal account: HAS ONE (handle "${portalAcct.handle}" — never pitch signing up; their share link is https://sambarentals.com/?a=${portalAcct.handle} and their story/stats already carry their identity).`
-    : `Portal account: none on record — the AGENT ACCOUNTS pitch applies when relevant.`;
+    : `Portal account: none on record. THEIR PERSONAL LINK (works without any account): https://sambarentals.com/?aid=${agent.id} — for one villa, https://sambarentals.com/?property=<portal-slug>&aid=${agent.id} (portal slugs use hyphens: villa-saturno). Every client view and enquiry through it is credited to this agent, and the listing cards you send already carry that credit. WHEN TO GIVE IT: when they ask for photos, a link, "something to send my client", or right after a viewing is arranged — hand them the villa link in one line ("send your client this — it's your link, so the enquiry comes back credited to you"). THE ACCOUNT OFFER: the FIRST time you give the link (check the thread — never twice in a fortnight, never to someone cooling or cold), add ONE sentence: signing in with Google on that page shows live stats on their shares and makes a one-tap Instagram story. Never lead with the account; the link is the gift, the account is the footnote.`;
   const inPlay = relevantRentalSlugs(rentals, { thread: recentThread, inbound, brief: agent.conversation_history?.brief });
   const detailsBlock = buildRentalDetails(rentals, inPlay);
   const systemRest = `This conversation's context:

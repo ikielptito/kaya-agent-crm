@@ -693,6 +693,14 @@ export default async function handler(req, res) {
       } catch (e) { accountInvites = { error: e.message }; }
     }
 
+    // ── MONTHLY "YOUR LINKS WORKED" NOTE (28th, agents with credited views) ──
+    let agentStats = null;
+    if (!previewMode) {
+      try { agentStats = await runAgentStatsNote({ now, sbHeaders, supabaseUrl: SUPABASE_URL, agents, templatesMap, waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID }); }
+      catch (e) { agentStats = { error: e.message }; }
+    }
+    results.push({ kind: 'agent_stats', ...(agentStats || {}) });
+
     // ── VIEWINGS-FEATURE ANNOUNCEMENT SWEEP (engaged agents, one-time) ──
     let viewingsAnnounce = null;
     if (!previewMode) {
@@ -2293,6 +2301,8 @@ export async function runIntroSweep(ctx) {
 // .account_invite_daily_cap is a positive number AND the template is approved.
 const ACCOUNT_INVITE_TEMPLATE = 'samba_account_invite_v1';
 const ACCOUNT_INVITE_CATEGORY = 'account_invite';
+const AGENT_STATS_TEMPLATE = 'samba_agent_stats_v1';   // submitted 3 Sep 2026
+const AGENT_STATS_CATEGORY = 'agent_stats';
 
 // ── AUTO-RESPONDER DETECTION ────────────────────────────────────────────
 // An agent whose "replies" are an out-of-office robot looks permanently
@@ -2531,6 +2541,62 @@ export async function runViewingsAnnounceSweep(ctx) {
   return summary;
 }
 
+// ── The monthly "your links worked" note ──────────────────────────────────
+// The best advertisement for an account is attribution already working. On
+// the 28th (WITA) every agent whose personal links brought client views this
+// month hears the number — views and enquiries credited to them — with the
+// account as a one-line footnote. Per-agent portal counters are cumulative,
+// so the month's figure is the delta against the snapshot taken last time
+// (settings.agent_stats_snapshot). Gated on the template being approved.
+export async function runAgentStatsNote(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId } = ctx;
+  const summary = { enabled: false, sent: 0, eligible: 0, errors: [] };
+  const wita = new Date(now.getTime() + 8 * 3600e3);
+  if (wita.getUTCDate() !== 28) { summary.skipped_reason = 'not the 28th'; return summary; }
+  if (!templatesMap[AGENT_STATS_TEMPLATE]) { summary.skipped_reason = `${AGENT_STATS_TEMPLATE} not approved yet`; return summary; }
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
+  const stats = (await loadSetting(supabaseUrl, sbHeaders, 'agent_portal_stats'))?.agents || {};
+  const snap = (await loadSetting(supabaseUrl, sbHeaders, 'agent_stats_snapshot')) || {};
+  const month = wita.toISOString().slice(0, 7);
+  if (snap.month === month) { summary.skipped_reason = 'already sent this month'; return summary; }
+  summary.enabled = true;
+  const prev = snap.agents || {};
+  const queue = [];
+  for (const a of agents) {
+    const st = stats[String(a.id)]; if (!st) continue;
+    const views = Math.max(0, (st.clicks || 0) - (prev[String(a.id)]?.clicks || 0));
+    const enq = Math.max(0, (st.enquiries || 0) - (prev[String(a.id)]?.enquiries || 0));
+    if (views < 3 && enq < 1) continue;
+    if (isMarketingCapped(a, config) || !passesSambaBaseGate(a, config)) continue;
+    queue.push({ a, views, enq });
+  }
+  summary.eligible = queue.length;
+  for (const { a, views, enq } of queue.slice(0, 40)) {
+    try {
+      const r = await fetch(`${GRAPH}/${waPhoneId}/messages`, {
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: a.wa_num, type: 'template',
+          template: { name: AGENT_STATS_TEMPLATE, language: { code: 'en' },
+            components: [{ type: 'body', parameters: [
+              { type: 'text', text: firstNameOf(a.name) }, { type: 'text', text: String(views) }, { type: 'text', text: String(enq) }] }] } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { summary.errors.push(`agent ${a.id}: ${d?.error?.message || 'HTTP ' + r.status}`); continue; }
+      await fetch(`${supabaseUrl}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({
+        agent_id: a.id, wa_num: a.wa_num, direction: 'outbound', source: 'cron', category: AGENT_STATS_CATEGORY, template_name: AGENT_STATS_TEMPLATE,
+        content: `Hi ${firstNameOf(a.name)}, the listing links you shared brought ${views} client views and ${enq} enquiries this month, all credited to you.`,
+        wa_message_id: d.messages?.[0]?.id || null, status: 'sent', timestamp: now.toISOString() }) });
+      summary.sent++;
+    } catch (e) { summary.errors.push(`agent ${a.id}: ${e.message}`); }
+  }
+  // Snapshot every agent's counters, so next month's delta is clean.
+  const agentsSnap = {}; for (const [id, st] of Object.entries(stats)) agentsSnap[id] = { clicks: st.clicks || 0, enquiries: st.enquiries || 0 };
+  await fetch(`${supabaseUrl}/rest/v1/settings`, { method: 'POST', headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ key: 'agent_stats_snapshot', value: { month, at: now.toISOString(), agents: agentsSnap } }) }).catch(() => {});
+  return summary;
+}
+
 export async function runAccountInviteSweep(ctx) {
   const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
   const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
@@ -2567,13 +2633,15 @@ export async function runAccountInviteSweep(ctx) {
   // imports that predate the welcome flow and were queued for nothing
   // (broadcast-only limbo, the Yoga case; 27 Aug 2026). One invite each,
   // same pacing, same stamps.
-  const isDormant = (a) => /^(dormant|cold)$/i.test(String(a.engagement_tier || '').trim())
-    || (!a.last_inbound_at && !(a.campaign_engagement?.samba?.status === 'enrolled'));
-  // Agents who have ever written to us go first — likelier to answer, and a
-  // nudge to a known contact can't read as spam.
-  const hasTalked = (a) => (a.last_inbound_at ? 0 : 1);
+  // Retargeted 3 Sep 2026: the dormant list converted at 2% (84 invites,
+  // 2 signups) and drew Meta's marketing throttle. The invite now goes only
+  // to agents who have written to us in the last 30 days and hold no
+  // account — people for whom the link is already worth something.
+  const warmCut = new Date(now.getTime() - 30 * 86400e3).toISOString();
+  const isWarm = (a) => a.last_inbound_at && a.last_inbound_at >= warmCut && !a.campaign_engagement?.portal_account;
+  const hasTalked = () => 0;
   const queue = agents
-    .filter(isDormant)
+    .filter(isWarm)
     .filter(a => !isMarketingCapped(a, config) && passesSambaBaseGate(a, config))
     .filter(a => !a.campaign_engagement?.account_invite && !invitedSet.has(a.id))
     // Skip anyone already messaged today (the broadcast runs before us).
