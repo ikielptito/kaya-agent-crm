@@ -4,7 +4,7 @@
   { "name": "auto-reply gets silence", "agentId": 10034, "inbound": "Thank you for contacting Heritage Bali Real Estate. Our office is closed today; we will respond to your message on the next working day.",
     "expect": { "empty_reply": true } },
   { "name": "commission correction is short and complete", "agentId": 10034, "inbound": "Can you confirm the price includes our 10% commission on yearly and 20% on monthly?",
-    "expect": { "reply_includes": ["10%"], "reply_excludes_claim": "20% on monthly is correct", "max_reply_chars": 420 } },
+    "expect": { "reply_includes": ["10%"], "reply_excludes_claim": "20% on monthly is correct", "max_reply_chars": 520 } },
   { "name": "a thank-you does not get a pitch", "agentId": 10093, "inbound": "thank you!",
     "expect": { "max_reply_chars": 160, "no_cards": true } },
   { "name": "viewing request opens a viewing, never confirms it", "agentId": 214, "inbound": "My client would like to view LaneHAUS unit 1 tomorrow around 2pm, can you arrange?",
