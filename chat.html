@@ -3358,7 +3358,7 @@ function renderPendingFacts(facts) {
       <div style="font-size:.85rem;margin-top:4px">Will be saved as: <b>${esc(f.kb_fact || '')}</b> <span style="opacity:.6">(${esc(f.contact_name || 'the villa contact')})</span></div>
       <div style="margin-top:6px;display:flex;gap:6px"><button class="btn" onclick="decideFact(${f.id},true)">Save to listing</button><button class="btn" onclick="decideFact(${f.id},false)">Drop</button></div>
     </div>`).join('');
-  body.insertAdjacentHTML('beforeend', `<div id="rvFacts" style="margin-top:18px"><h3 style="margin:0 0 6px">Facts owners answered · ${facts.length} waiting</h3><div style="font-size:.8rem;opacity:.7;margin-bottom:6px">Each one came back through a relay. Saving writes it into the listing; Maya, the cards and the portal then agree.</div>${rows}</div>`);
+  body.insertAdjacentHTML('afterbegin', `<div id="rvFacts" style="margin-bottom:18px"><h3 style="margin:0 0 6px">Facts owners answered · ${facts.length} waiting</h3><div style="font-size:.8rem;opacity:.7;margin-bottom:6px">Each one came back through a relay. Saving writes it into the listing; Maya, the cards and the portal then agree.</div>${rows}</div>`);
 }
 async function decideFact(relayId, approve) {
   try {

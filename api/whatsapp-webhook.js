@@ -2329,6 +2329,21 @@ export async function sendTextWithButtons(phoneId, token, to, text, buttons) {
 
 // Native WhatsApp contact card — the agent taps to save/chat. Returns the
 // message id or null.
+// Was this contact's card already sent to this agent recently? A card is a
+// one-time hand-over, not a signature: re-sending it with every relay reads
+// like a bot (Ikiel, 3 Sep 2026). Two weeks is long enough that a returning
+// agent gets it fresh.
+async function cardSentRecently(url, headers, agentId, phoneDigits, days = 14) {
+  const num = String(phoneDigits || '').replace(/\D/g, '');
+  if (!num || !agentId) return false;
+  try {
+    const since = new Date(Date.now() - days * 86400e3).toISOString();
+    const r = await fetch(`${url}/rest/v1/wa_messages?agent_id=eq.${agentId}&direction=eq.outbound&timestamp=gte.${since}&content=like.${encodeURIComponent(`[Contact card:%+${num}]`)}&select=id&limit=1`, { headers });
+    const rows = await r.json();
+    return Array.isArray(rows) && rows.length > 0;
+  } catch { return false; }
+}
+
 async function sendContactCard(phoneId, token, to, name, phoneDigits) {
   try {
     const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
@@ -2541,7 +2556,8 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
   // Native contact card for viewing handoffs ("who do I contact?") —
   // tappable, saves straight to the agent's phone.
   const contact = actions.send_contact;
-  if (contact && contact.phone && contact.phone.length >= 9 && contact.phone.length <= 15) {
+  if (contact && contact.phone && contact.phone.length >= 9 && contact.phone.length <= 15
+      && !(await cardSentRecently(SUPABASE_URL, sbHeaders, agent.id, contact.phone))) {
     const contactMid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, toNum, contact.name, contact.phone);
     if (contactMid) {
       await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, `[Contact card: ${contact.name} — +${contact.phone}]`, contactMid);
@@ -2602,7 +2618,7 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
         // must never be left holding nothing but a promise. Skipped when the
         // reply already carried this same card.
         const already = String(contact?.phone || '').replace(/\D/g, '');
-        if (contactWa && contactWa !== already) {
+        if (contactWa && contactWa !== already && !(await cardSentRecently(SUPABASE_URL, sbHeaders, agent.id, contactWa))) {
           const cardName = contactName || (prop?.name ? `${prop.name} contact` : 'Villa contact');
           const cmid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, toNum, cardName, contactWa).catch(() => null);
           if (cmid) await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, `[Contact card: ${cardName} — +${contactWa}]`, cmid);
@@ -2858,7 +2874,7 @@ If an agent asks HOW viewings work (the process, invites, reminders), explain br
 
 ASKING THE VILLA CONTACT ("ask_owner") — how you answer what isn't in your data:
 When an agent asks a CHECKABLE FACT about a specific Samba villa that is not in the data above — a bathtub, an oven, a bathtub vs shower, air-con in every room, a generator, whether the pet policy stretches to a dog, stroller access, a workspace, water pressure, staff, parking for two cars — do not stop at the contact card. Set "ask_owner": { "slug": "<that property's slug>", "question": "<the question in one clear sentence>" }. The system asks that listing's "enquire with" contact on WhatsApp, waits for their answer, and delivers it back to the agent for you — even days later, and even if either side's chat window has closed in the meantime.
-- Tell the agent plainly what you're doing, in the same reply, AND that they have the contact directly just in case — the system attaches that contact's card automatically whenever you set ask_owner, so say so: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you; I'm also sending you their contact in case it's quicker to ask directly." Example of the old form: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
+- Tell the agent plainly what you're doing, in the same reply. The FIRST time in a fortnight, the system also attaches that contact's card, so mention it once, lightly; if you already handed over this contact earlier in the thread, do NOT offer it again — a human would not — just say you're asking the villa and will come back. First-time wording: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you; I'm also sending you their contact in case it's quicker to ask directly." Example of the old form: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
 - Also send the contact card as you normally would (the agent may want to arrange the viewing directly). Relaying the question and handing over the card are not alternatives — do both.
 - The question you write goes to the contact VERBATIM, so make it a clean single question about the property. Never mention the agent's name, their agency, or their client. The contact is told only that "an agent asked" — you are the one brokering this.
 - ONE relay per reply, and only for something the contact can actually decide or confirm. Do NOT relay: discounts on an Era-managed villa (notify Ikiel) or on a villa whose notes give you a negotiation floor (negotiate yourself), live availability (use need_availability), anything already answered in your data, or vague curiosity with no agent waiting on it.
@@ -2974,7 +2990,7 @@ Any time your reply pitches, recommends, or answers about one or more SPECIFIC S
 - EXCEPTION: when the agent explicitly asks to DOWNLOAD photos (to share with a client), give the property's photos_url (Google Drive) in text; when they ask for the location/pin, give maps_url. Those direct links are still the right answer for download/location requests — send them alongside the card.
 - "Can I see X" / "what does X look like" / "send a photo of X" → put X's slug in send_cards; the card includes the photo. If a property group has several units (e.g. Tropicana), pick the specific unit(s) you are recommending.
 Set "send_cards" to [] only when no specific Samba property is being shared (greetings, commission questions, KAYA sales talk, etc).
-CONTACT CARD ("send_contact"): when the agent asks WHO to contact for a viewing, visit, or booking of a Samba rental, set send_contact with the EXACT name and number from that property's "enquire with" line in the live availability data (never a number from conversation history). The system sends a native, tappable WhatsApp contact card the agent can save. Still mention the name briefly in your text reply ("I'm sending you Era's contact card -- she arranges the viewings for this villa."). Leave null otherwise.
+CONTACT CARD ("send_contact"): when the agent asks WHO to contact for a viewing, visit, or booking of a Samba rental, set send_contact with the EXACT name and number from that property's "enquire with" line in the live availability data (never a number from conversation history). A card is handed over once: if the thread shows you already sent this person's card in the last two weeks, leave send_contact null and refer to it in words ("you have Vira's number from before"). The system sends a native, tappable WhatsApp contact card the agent can save. Still mention the name briefly in your text reply ("I'm sending you Era's contact card -- she arranges the viewings for this villa."). Leave null otherwise.
 VOLUME PUSHBACK → PREFERENCE BUTTONS: when an agent complains about message volume ("too many messages", "jangan tiap hari", "less please") but hasn't fully opted out, apologise in one warm line and offer exactly these reply_buttons: ["Weekly summary", "Monthly only", "Pause updates"]. When they tap or type one, set contact_frequency via crm_updates ('weekly' | 'monthly' | 'paused' — see CONTACT FREQUENCY) and confirm in one line. This beats losing them to a block.
 QUICK-REPLY BUTTONS ("reply_buttons"): when there is an obvious next step, offer up to 3 tap options so the agent doesn't have to type — e.g. after recommending villas: ["More options", "Download photos", "Book a viewing"]; after an availability answer: ["Check other dates", "Send the listing"]. Each label max 20 characters, plain words, no emojis. When the agent taps one, you receive that label as their next message — so only offer buttons you can actually act on. Leave [] on closers ("thanks, bye"), escalations, and when no clear next step exists.
 TEAM ALERTS ("notify_team") — a real promise, not a figure of speech:

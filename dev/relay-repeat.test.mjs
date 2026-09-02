@@ -80,6 +80,7 @@ t('the chase gives up after three unanswered rounds, not eight', CHASE_MAX, 3);
   t('handback carries the marker', h.startsWith(HANDBACK_PREFIX), true);
   t('handback names contact and number', h.includes('Vira directly on +628123456'), true);
   t('placeholder contact becomes "the villa contact"', handbackText('Villa Rice', 'there', '628123456').includes('the villa contact directly'), true);
+  t('agent who already holds the card is not sent it again', handbackText('Villa Rice', 'Vira', '628123456', { haveCard: true }).includes('you have their card from earlier'), true);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
