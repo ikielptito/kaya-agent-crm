@@ -21,6 +21,7 @@ import {
   getSettingValue, saveSettingValue,
 } from '../lib/campaigns.js';
 import { getSpendAllowance } from '../lib/spend.js';
+import { sbRows } from '../lib/sb-rows.js';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
 const EST_TEMPLATE_COST_USD = 0.04;   // Meta marketing template, Indonesia (rough)
@@ -55,9 +56,9 @@ export default async function handler(req, res) {
       const since30 = new Date(Date.now() - 30 * 86400e3).toISOString();
       const [campaigns, msgs14, out30, in30, agents, saCfg, caps, cronLog, spend, conv30] = await Promise.all([
         sb('campaigns?select=*&archived_at=is.null&order=created_at.desc&limit=100'),
-        sb(`wa_messages?select=campaign_id,timestamp&direction=eq.outbound&campaign_id=not.is.null&timestamp=gte.${since14}&limit=20000`),
-        sb(`wa_messages?select=agent_id,status&direction=eq.outbound&timestamp=gte.${since30}&limit=20000`),
-        sb(`wa_messages?select=agent_id&direction=eq.inbound&timestamp=gte.${since30}&limit=20000`),
+        sbRows(SUPABASE_URL, sbHeaders, `wa_messages?select=campaign_id,timestamp&direction=eq.outbound&campaign_id=not.is.null&timestamp=gte.${since14}&order=id.asc`),
+        sbRows(SUPABASE_URL, sbHeaders, `wa_messages?select=agent_id,status&direction=eq.outbound&timestamp=gte.${since30}&order=id.asc`),
+        sbRows(SUPABASE_URL, sbHeaders, `wa_messages?select=agent_id&direction=eq.inbound&timestamp=gte.${since30}&order=id.asc`),
         sb('agents?select=id,samba_alerts_opt_out,dead_number,is_test,engagement_tier,contact_frequency,campaign_engagement&wa_num=not.is.null'),
         getSettingValue(db, 'samba_availability'),
         getSettingValue(db, 'marketing_caps'),
@@ -193,7 +194,7 @@ export default async function handler(req, res) {
           // after their sends began, which zeroed reply attribution.
           const [ags, inbs] = await Promise.all([
             sb(`agents?id=in.(${chunk.join(',')})&select=id,name,agency,engagement_tier,last_inbound_at,campaign_engagement`),
-            sb(`wa_messages?agent_id=in.(${chunk.join(',')})&direction=eq.inbound&timestamp=gte.${since90}&select=agent_id,timestamp&limit=10000`),
+            sbRows(SUPABASE_URL, sbHeaders, `wa_messages?agent_id=in.(${chunk.join(',')})&direction=eq.inbound&timestamp=gte.${since90}&select=agent_id,timestamp&order=id.asc`),
           ]);
           for (const a of (ags || [])) agentsMap[a.id] = a;
           for (const m of (inbs || [])) {

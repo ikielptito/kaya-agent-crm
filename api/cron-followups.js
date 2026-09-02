@@ -33,6 +33,7 @@ import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
 import { resolveCampaign, isCampaignPaused, isColdImportAgent, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
 import { reportToken } from '../lib/tokens.js';
+import { sbRows } from '../lib/sb-rows.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
 // initiating contact ("only respond to inbound"), which directly contradicts
@@ -2677,12 +2678,7 @@ export async function runAccountInviteSweep(ctx) {
 async function loadCategorySet(url, headers, categories) {
   try {
     const params = categories.map(c => encodeURIComponent(c)).join(',');
-    const r = await fetch(
-      `${url}/rest/v1/wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&limit=10000`,
-      { headers }
-    );
-    if (!r.ok) return new Set();
-    const rows = await r.json();
+    const rows = await sbRows(url, headers, `wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&order=id.asc`);
     return new Set((rows || []).map(x => x.agent_id));
   } catch (e) {
     return new Set();
@@ -2716,12 +2712,7 @@ function versionOfName(name) {
 async function loadIntroducedSet(url, headers) {
   try {
     const params = AVAILABILITY_CATEGORIES.map(c => encodeURIComponent(c)).join(',');
-    const r = await fetch(
-      `${url}/rest/v1/wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&limit=10000`,
-      { headers }
-    );
-    if (!r.ok) return new Set();
-    const rows = await r.json();
+    const rows = await sbRows(url, headers, `wa_messages?select=agent_id&category=in.(${params})&agent_id=not.is.null&order=id.asc`);
     return new Set((rows || []).map(x => x.agent_id));
   } catch (e) {
     return new Set();

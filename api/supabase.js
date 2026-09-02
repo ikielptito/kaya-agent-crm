@@ -22,6 +22,7 @@ import { getSpendAllowance } from '../lib/spend.js';
 import { announceListingLive, noteNewArrivals } from '../lib/listing-live.js';
 import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 import { resolveCampaign, bump as bumpCampaign, logEvent as logCampaignEvent } from '../lib/campaigns.js';
+import { sbRows } from '../lib/sb-rows.js';
 
 // JSON Schema for the console/catch-up reply contract (suggest_reply action),
 // enforced via output_config.format so the model can only emit the object.
@@ -1381,12 +1382,12 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       // Previous window of the same length — every headline rate gets a delta.
       const sincePrev = new Date(Date.now() - 2 * days * 86400000).toISOString();
       const [outRows, inRows, agRows, statsRow, outPrevRows, inPrevRows] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.outbound&select=agent_id,status,category,template_name,timestamp&limit=20000`, { headers }).then(r => r.json()),
-        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${since}&direction=eq.inbound&select=agent_id,timestamp&limit=20000`, { headers }).then(r => r.json()),
+        sbRows(SUPABASE_URL, headers, `wa_messages?timestamp=gte.${since}&direction=eq.outbound&select=agent_id,status,category,template_name,timestamp&order=id.asc`),
+        sbRows(SUPABASE_URL, headers, `wa_messages?timestamp=gte.${since}&direction=eq.inbound&select=agent_id,timestamp&order=id.asc`),
         fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,engagement_tier,samba_alerts_opt_out,contact_frequency,last_inbound_at,is_test,campaign_engagement`, { headers }).then(r => r.json()),
         fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.agent_portal_stats&select=value`, { headers }).then(r => r.json()),
-        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.outbound&select=agent_id,status&limit=20000`, { headers }).then(r => r.json()),
-        fetch(`${SUPABASE_URL}/rest/v1/wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.inbound&select=agent_id&limit=20000`, { headers }).then(r => r.json()),
+        sbRows(SUPABASE_URL, headers, `wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.outbound&select=agent_id,status&order=id.asc`),
+        sbRows(SUPABASE_URL, headers, `wa_messages?timestamp=gte.${sincePrev}&timestamp=lt.${since}&direction=eq.inbound&select=agent_id&order=id.asc`),
       ]);
       const out = Array.isArray(outRows) ? outRows : [];
       const inb = Array.isArray(inRows) ? inRows : [];
