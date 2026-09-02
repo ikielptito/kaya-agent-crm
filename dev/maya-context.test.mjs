@@ -41,7 +41,8 @@ t('judgement model is Opus 4.8', pickReplyModel('budget 30jt, 2 bedrooms, pool, 
 // memory
 t('short thread has no memory due', memoryDue({ conversation_history: { total_messages: 20 } }), false);
 t('long thread without memory is due', memoryDue({ conversation_history: { total_messages: 60 } }), true);
-t('fresh memory is not due', memoryDue({ conversation_history: { total_messages: 60, memory: { text: 'x', at_total: 50 } } }), false);
+t('fresh memory is not due', memoryDue({ conversation_history: { total_messages: 60, memory: { text: 'x', at_total: 50, at: new Date().toISOString() } } }), false);
+t('month-old memory is due', memoryDue({ conversation_history: { total_messages: 60, memory: { text: 'x', at_total: 55, at: '2026-07-01T00:00:00Z' } } }), true);
 t('stale memory is due', memoryDue({ conversation_history: { total_messages: 66, memory: { text: 'x', at_total: 50 } } }), true);
 t('memory block renders', memoryBlock({ conversation_history: { memory: { text: 'Paul brings families.' } } }).includes('Paul brings families.'), true);
 t('no memory → empty block', memoryBlock({}), '');
