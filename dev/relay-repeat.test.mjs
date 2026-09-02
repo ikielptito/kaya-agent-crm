@@ -11,7 +11,7 @@
 //    the delivery of the open question.
 // 3. The chase: re-messaging a contact who never replied to the last round,
 //    up to eight times.
-import { openRelay, detectDeliveredRelay } from '../lib/relay.js';
+import { openRelay, detectDeliveredRelay, handbackText, HANDBACK_PREFIX } from '../lib/relay.js';
 
 let pass = 0, fail = 0;
 const t = (name, got, expect) => {
@@ -74,5 +74,12 @@ const tigaRelay = [{ id: 88, question: "[Listing info] I'm trying to complete a 
 import { CHASE_MAX } from '../lib/listing-info.js';
 t('the chase gives up after three unanswered rounds, not eight', CHASE_MAX, 3);
 
+// The hand-back names the contact and the number, and carries its marker.
+{
+  const h = handbackText('Villa Rice', 'Vira', '+62 812-3456');
+  t('handback carries the marker', h.startsWith(HANDBACK_PREFIX), true);
+  t('handback names contact and number', h.includes('Vira directly on +628123456'), true);
+  t('placeholder contact becomes "the villa contact"', handbackText('Villa Rice', 'there', '628123456').includes('the villa contact directly'), true);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -2596,6 +2596,17 @@ export async function executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHON
         propertyName: prop?.name || ao.slug, contactName, contactWa, ownerId,
       });
       if (r.ok) {
+        // The contact card rides with every relayed question (Ikiel, 3 Sep
+        // 2026): "I'll try to reach the villa — here is their contact just in
+        // case." Only 24% of relayed questions ever came back, so the agent
+        // must never be left holding nothing but a promise. Skipped when the
+        // reply already carried this same card.
+        const already = String(contact?.phone || '').replace(/\D/g, '');
+        if (contactWa && contactWa !== already) {
+          const cardName = contactName || (prop?.name ? `${prop.name} contact` : 'Villa contact');
+          const cmid = await sendContactCard(WA_PHONE_ID, WA_TOKEN, toNum, cardName, contactWa).catch(() => null);
+          if (cmid) await logOutbound(SUPABASE_URL, sbHeaders, agent.id, toNum, `[Contact card: ${cardName} — +${contactWa}]`, cmid);
+        }
         await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
           method: 'POST', headers: sbHeaders,
           body: JSON.stringify({
@@ -2847,7 +2858,7 @@ If an agent asks HOW viewings work (the process, invites, reminders), explain br
 
 ASKING THE VILLA CONTACT ("ask_owner") — how you answer what isn't in your data:
 When an agent asks a CHECKABLE FACT about a specific Samba villa that is not in the data above — a bathtub, an oven, a bathtub vs shower, air-con in every room, a generator, whether the pet policy stretches to a dog, stroller access, a workspace, water pressure, staff, parking for two cars — do not stop at the contact card. Set "ask_owner": { "slug": "<that property's slug>", "question": "<the question in one clear sentence>" }. The system asks that listing's "enquire with" contact on WhatsApp, waits for their answer, and delivers it back to the agent for you — even days later, and even if either side's chat window has closed in the meantime.
-- Tell the agent plainly what you're doing, in the same reply: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
+- Tell the agent plainly what you're doing, in the same reply, AND that they have the contact directly just in case — the system attaches that contact's card automatically whenever you set ask_owner, so say so: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you; I'm also sending you their contact in case it's quicker to ask directly." Example of the old form: "I don't have that on file for Villa Saturno — I'm asking the villa now and I'll come straight back to you." Then STOP. Never guess the answer, and never invent a timeframe like "within the hour".
 - Also send the contact card as you normally would (the agent may want to arrange the viewing directly). Relaying the question and handing over the card are not alternatives — do both.
 - The question you write goes to the contact VERBATIM, so make it a clean single question about the property. Never mention the agent's name, their agency, or their client. The contact is told only that "an agent asked" — you are the one brokering this.
 - ONE relay per reply, and only for something the contact can actually decide or confirm. Do NOT relay: discounts on an Era-managed villa (notify Ikiel) or on a villa whose notes give you a negotiation floor (negotiate yourself), live availability (use need_availability), anything already answered in your data, or vague curiosity with no agent waiting on it.
