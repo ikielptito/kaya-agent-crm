@@ -1346,8 +1346,14 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       // On-demand delivery health: the same snapshot the nightly pass logs,
       // computed fresh, plus the stored history for trend. Read-only — no
       // Telegram, no LLM, no writes (preview mode).
-      const { runDeliveryHealth } = await import('../lib/delivery-health.js');
+      const { runDeliveryHealth, buildTrend } = await import('../lib/delivery-health.js');
       const db = { SUPABASE_URL, sbHeaders: headers };
+      // {trend: <days>} → weekly buckets instead of the 24h snapshot: the
+      // view that catches a slow slide rather than a bad night.
+      if (payload?.trend) {
+        const days = Math.min(Math.max(Number(payload.trend) || 70, 7), 120);
+        return res.status(200).json({ days, weeks: await buildTrend(db, { days }) });
+      }
       const fresh = await runDeliveryHealth(db, {
         waToken: process.env.META_WA_TOKEN, phoneId: process.env.META_WA_PHONE_ID,
         wabaId: process.env.META_WABA_ID, preview: true,
