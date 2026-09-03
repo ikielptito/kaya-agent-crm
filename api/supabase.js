@@ -636,14 +636,14 @@ export default async function handler(req, res) {
       const { name } = payload || {};
       const TOKEN = process.env.META_WA_TOKEN, WABA_ID = process.env.META_WABA_ID;
       if (!TOKEN || !WABA_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
-      const tr = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates?fields=name,status,language,category&limit=200`, {
+      const tr = await fetch(`https://graph.facebook.com/v24.0/${WABA_ID}/message_templates?fields=name,status,language,category${payload?.full ? ',components' : ''}&limit=200`, {
         headers: { Authorization: 'Bearer ' + TOKEN },
       });
       const td = await tr.json().catch(() => ({}));
       if (!tr.ok) return res.status(tr.status).json({ error: td?.error?.message || 'fetch failed' });
       let data = td.data || [];
       if (name) data = data.filter(t => (t.name || '').includes(name));
-      return res.status(200).json({ ok: true, templates: data.map(t => ({ name: t.name, language: t.language, status: t.status, category: t.category })) });
+      return res.status(200).json({ ok: true, templates: data.map(t => ({ name: t.name, language: t.language, status: t.status, category: t.category, ...(payload?.full ? { components: t.components } : {}) })) });
 
     } else if (action === 'delete_wa_template') {
       const { name } = payload || {};
