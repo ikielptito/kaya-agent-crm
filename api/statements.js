@@ -325,6 +325,29 @@ export default async function handler(req, res) {
     if (action === 'statement_groups') {
       return res.status(200).json({ groups: await listGroups(db, { activeOnly: false }) });
     }
+    // Create (or rename/re-slug) a property group. A group without a sheet is
+    // a maintenance-and-reports-only property — Ikiel's own units, co-owned —
+    // and is skipped by the statement sync rather than failing it.
+    if (action === 'statement_group_upsert') {
+      const key = String(payload.key || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+      const name = String(payload.name || '').trim();
+      if (!key || !name) return res.status(400).json({ error: 'key and name required' });
+      const row = {
+        key, name,
+        sheet_file_id: String(payload.sheet_file_id || ''),
+        listing_slugs: Array.isArray(payload.listing_slugs) ? payload.listing_slugs.map(String) : [],
+        owner_wa_nums: Array.isArray(payload.owner_wa_nums) ? payload.owner_wa_nums.map(n => String(n).replace(/\D/g, '')).filter(Boolean) : [],
+        owner_names: payload.owner_names ? String(payload.owner_names) : null,
+        notify: payload.notify !== false,
+        active: payload.active !== false,
+        updated_at: new Date().toISOString(),
+      };
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/statement_groups?on_conflict=key`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(row),
+      });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 300) });
+      return res.status(200).json({ ok: true, group: (await r.json())[0] || row });
+    }
     if (action === 'statement_group_patch') {
       const allowed = {};
       const f = payload.fields || {};

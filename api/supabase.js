@@ -574,6 +574,17 @@ export default async function handler(req, res) {
       if (!cr.ok) return res.status(cr.status).json({ error: cd?.error?.message || 'template create failed', details: cd?.error || null });
       return res.status(200).json({ ok: true, id: cd.id || null, status: cd.status || null, category: cd.category || null, name: tplBody.name, language: tplBody.language });
 
+    } else if (action === 'portal_co_owner') {
+      // Name a co-owner on a Samba-managed unit (portal sign-in + reports).
+      // payload: { slug, email?, name?, wa? }
+      const secret = process.env.LISTING_SYNC_SECRET;
+      if (!secret) return res.status(500).json({ error: 'LISTING_SYNC_SECRET not configured' });
+      const pr = await fetch('https://sambarentals.com/api/portal?action=co-owner', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ slug: payload?.slug, email: payload?.email, name: payload?.name, wa: payload?.wa }),
+      });
+      return res.status(pr.status).json(await pr.json().catch(() => ({})));
+
     } else if (action === 'create_portal_listing') {
       // Create/update a listing on the portal from the console (service-authed
       // intake, same path Maya's owner intake uses). Lands as pending_review in
