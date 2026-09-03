@@ -3397,6 +3397,7 @@ ${String(owner.notes).trim()}
 
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
+1b. For MANAGED-villa owners: answer questions about their monthly statements — payouts, what has been paid and what is still owed, the management fee, every expense line, the bookings and nights behind a month, amendments, carried-forward deficits. NEVER from memory: request the statements first (action "statements"). Then answer from that data exactly as it reads — cite the month, the line, the amount. You may add lines up (e.g. total laundry across months) but never recompute a payout or predict one. Escalate only a genuine dispute ("that expense is wrong", "I was never paid this") that the data cannot settle.
 2. Help them LIST a new villa or UPDATE one by gathering the details in conversation, then submitting (action "intake"). New/updated listings go to Ikiel for review before they appear publicly — always say so.
 3. General help. Ikiel oversees everything and steps in when needed.
 
@@ -3433,7 +3434,7 @@ PARTNERSHIP FUNDAMENTALS (true for EVERY owner, prospect or listed — answer th
 - Samba takes NO commission and NO booking fees. The agent's 10% referral fee is built into the listed price the owner sets. The only Samba cost is the flat IDR 150,000/month listing fee (free forever for founding villas).
 - NO exclusivity: owners keep Airbnb, Booking.com and direct bookings. Availability auto-syncs from their existing channel calendar (iCal) so double-bookings are avoided.
 - Bookings & money (MARKETPLACE listings — the default): an agent brings the tenant, and the owner deals with the tenant DIRECTLY — viewing, contract, deposit and rent are agreed between owner and tenant on the owner's own terms. For these listings Samba never holds or forwards money, so there is no "payout from Samba": the owner is paid directly by their tenant.
-- MANAGED villas (Samba Realty FULL MANAGEMENT — a separate, invite-only service for a handful of properties): here Samba/Era DO collect the bookings and pay the owner a monthly payout. Those owners receive a monthly statement from you (bookings, expenses, management fee, net payout) with a secure sambarentals.com/st/ link when Ikiel publishes it. The statement's "management fee" line is SAMBA REALTY'S fee (a percentage of gross rental income, 15–20% depending on the property) — it is NOT Airbnb/Booking.com's platform cut; if an owner asks what the fee is, say it's Samba's management fee per their agreement. If an owner mentions their monthly statement, payout, or expenses report, that is this program — the statement is authoritative: restate what it says, never recompute or promise amounts, and for any dispute, missing payment, or "the numbers look wrong" set action "escalate" (Ikiel personally handles payouts). Never pitch full management to marketplace owners; if one asks about it, escalate.
+- MANAGED villas (Samba Realty FULL MANAGEMENT — a separate, invite-only service for a handful of properties): here Samba/Era DO collect the bookings and pay the owner a monthly payout. Those owners receive a monthly statement from you (bookings, expenses, management fee, net payout) with a secure sambarentals.com/st/ link when Ikiel publishes it. The statement's "management fee" line is SAMBA REALTY'S fee (a percentage of gross rental income, 15–20% depending on the property) — it is NOT Airbnb/Booking.com's platform cut; if an owner asks what the fee is, say it's Samba's management fee per their agreement. If an owner mentions their monthly statement, payout, or expenses report, that is this program — use action "statements" to load the real figures, then answer from them. The statement is authoritative: restate what it says, never recompute or promise future amounts. Escalate (Ikiel personally handles payouts) only for a genuine dispute, a payment they say they never received, or anything the loaded data does not answer. Never pitch full management to marketplace owners; if one asks about it, escalate.
 - Deposit, cancellation and refund policies are the owner's own — we don't impose any.
 - The full owner pitch — how it works, pricing, FAQ — lives at https://sambarentals.com/home. Include that link once whenever you explain how the partnership works or an owner wants the bigger picture; don't repeat it in every message.
 - VIEWINGS: when an agent wants to view their villa, the listed contact receives a WhatsApp request with one-tap buttons (Confirm ✓ / Different time / Can't this time). On confirmation both sides get a calendar invite link and a reminder on the morning of the visit, and the owner can see every viewing in their portal under the Viewings tab. If an owner asks how viewings work, explain this briefly and share https://sambarentals.com/viewings once.
@@ -3443,14 +3444,14 @@ RULES (continued):
 ${onboardingBlock}
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3478,6 +3479,20 @@ Use "report" to fetch real numbers before answering a performance question (set 
         return { action: 'escalate', reply: '', error: parseErr, llm_calls: llmCalls, cost_usd: costUsd };
       }
 
+      if (parsed.action === 'statements' && hop < MAX - 1) {
+        // Only ever PUBLISHED statements, matched by the number they are
+        // writing from and by their portal listings. See ownerStatementsContext.
+        let block = '(statements unavailable right now)';
+        try {
+          if (db?.SUPABASE_URL) {
+            const { ownerStatementsContext } = await import('../lib/statements.js');
+            block = (await ownerStatementsContext(db, { waNum: owner.wa_num, slugs: listingSlugs })).text;
+          }
+        } catch (e) { block = `(statements unavailable: ${e.message})`; }
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Their published statements (most recent first):\n${block}\n\nNow answer the owner from this data only — cite the month and the exact amounts, in plain friendly WhatsApp language (JSON, action "auto"). If what they asked is not in this data, say so and offer to have Ikiel confirm (action "escalate" with a helpful reply).` });
+        continue;
+      }
       if (parsed.action === 'report' && parsed.report_slug && hop < MAX - 1) {
         const summary = await fetchOwnerReportSummary(parsed.report_slug, secret);
         messages.push({ role: 'assistant', content: raw });

@@ -322,6 +322,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, message_id: d.messages?.[0]?.id || null });
     }
 
+    // What Maya is shown when an owner asks about money — for checking her
+    // knowledge against a real owner without messaging anyone.
+    if (action === 'owner_statements_preview') {
+      const { ownerStatementsContext } = await import('../lib/statements.js');
+      return res.status(200).json(await ownerStatementsContext(db, {
+        waNum: payload.wa_num, slugs: payload.slugs || [], months: payload.months || 6,
+      }));
+    }
+
     if (action === 'statement_groups') {
       return res.status(200).json({ groups: await listGroups(db, { activeOnly: false }) });
     }
