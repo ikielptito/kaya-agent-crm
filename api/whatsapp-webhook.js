@@ -1544,6 +1544,24 @@ export async function nodeHandler(req, res) {
     // Owner mode for numbers with no agent row — or an agent row that turned
     // out to be an owner (crm action convert_to_owner sets role 'owner').
     if (owner && (!agent || agent.campaign_engagement?.role === 'owner')) {
+      // Owners who are also registered reporters (Ikiel, Oli on the units
+      // they co-own) file maintenance the same way the cleaners do: a photo
+      // and a line, and it lands in the review pile. Only a message the
+      // intake is confident about is claimed; everything else is owner talk.
+      try {
+        const { isReporter } = await import('../lib/maintenance.js');
+        const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
+        if (await isReporter(relayDb, fromNum)) {
+          const took = await handleStaffMaintenance({ db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN });
+          if (took) {
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({ agent_id: null, owner_id: owner.id, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_owner', media_type: mediaType || null, media_id: mediaId || null }),
+            }).catch(() => {});
+            return res.status(200).end();
+          }
+        }
+      } catch (e) { /* never let reporting break owner messaging */ }
       try {
         await handleOwnerConversation({
           SUPABASE_URL, sbHeaders, owner, fromNum,
