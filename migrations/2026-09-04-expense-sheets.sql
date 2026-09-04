@@ -8,8 +8,8 @@
 -- Tropicana B "DOUBLE EIGHT": one tab per month). On sync, a month whose
 -- report tab has no expense block takes its expenses from here; a group
 -- with no report sheet at all (expenses_only) gets a statement per month
--- with zero bookings, where payout = −expenses + money received, i.e. what
--- the co-owners owe Samba.
+-- whose bookings are only the direct rent Era collected ("Received payment
+-- from …"), so payout = direct rent − expenses, Era's own "Total Balance".
 -- ═══════════════════════════════════════════════════════════════════════
 alter table statement_groups add column if not exists expense_sheet_file_id text;
 alter table statement_groups add column if not exists expenses_only boolean not null default false;
