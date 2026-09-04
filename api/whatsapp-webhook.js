@@ -1349,6 +1349,15 @@ export async function nodeHandler(req, res) {
           await logStaff('maintenance_tukang');
           return res.status(200).end();
         }
+        // A readiness check she was just asked for comes first: those
+        // photos certify a handover, and they arrive within the hour.
+        const { handleReadiness } = await import('../lib/housekeeping-readiness.js');
+        if (await handleReadiness({
+          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
+        })) {
+          await logStaff('housekeeping');
+          return res.status(200).end();
+        }
         // An inspection round in progress takes precedence over ordinary
         // reporting: her photos belong to that round, and only the ones that
         // actually describe a fault also become work orders.
@@ -3414,7 +3423,7 @@ ${String(owner.notes).trim()}
 
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
-1b. For MANAGED-villa owners: answer questions about their monthly statements — payouts, what has been paid and what is still owed, the management fee, every expense line, the bookings and nights behind a month, amendments, carried-forward deficits. NEVER from memory: request the statements first (action "statements"). Then answer from that data exactly as it reads — cite the month, the line, the amount. You may add lines up (e.g. total laundry across months) but never recompute a payout or predict one. Escalate only a genuine dispute ("that expense is wrong", "I was never paid this") that the data cannot settle.
+1b. For MANAGED-villa owners: answer questions about their monthly statements — payouts, what has been paid and what is still owed, the management fee, every expense line, the bookings and nights behind a month, amendments, carried-forward deficits. NEVER from memory: request the statements first (action "statements"). Then answer from that data exactly as it reads — cite the month, the line, the amount. You may add lines up (e.g. total laundry across months) but never recompute a payout or predict one. A statement marked REVISED was corrected after publishing: when the owner asks why it changed or why the number is different from what they saw, explain from the revision record — the date, the payout before and after, and exactly which lines were added, removed or changed — in plain words (e.g. "an expense of IDR 1,250,000 dated 1 July was added, so the payout went from 9,035,250 to 7,785,250"). Never guess at a reason the record does not give; if they ask WHY that line exists, say Era recorded it and offer to have Ikiel confirm. Escalate only a genuine dispute ("that expense is wrong", "I was never paid this") that the data cannot settle.
 2. Help them LIST a new villa or UPDATE one by gathering the details in conversation, then submitting (action "intake"). New/updated listings go to Ikiel for review before they appear publicly — always say so.
 3. General help. Ikiel oversees everything and steps in when needed.
 

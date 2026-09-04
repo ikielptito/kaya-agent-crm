@@ -38,7 +38,7 @@ import {
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, statementUnitNights, runOwnerStatementSweep, periodLabel,
   amendStart, amendFinalize, amendCancel, hasOpenRevision, renotifyStatement,
-  sheetDiff, amendFromSheet, dismissDiscrepancy,
+  sheetDiff, amendFromSheet, dismissDiscrepancy, setRevisionChanges,
 } from '../lib/statements.js';
 import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
 
@@ -189,6 +189,7 @@ export default async function handler(req, res) {
     if (action === 'statement_sheet_diff') return res.status(200).json(await sheetDiff(db, id));
     if (action === 'statement_amend_from_sheet') return res.status(200).json(await amendFromSheet(db, id, { notifyOwner: !!payload.notify_owner, actor: payload.actor || 'admin' }));
     if (action === 'statement_dismiss_discrepancy') return res.status(200).json(await dismissDiscrepancy(db, id));
+    if (action === 'statement_revision_changes') return res.status(200).json(await setRevisionChanges(db, id, payload.changes || []));
 
     // Amendments — transparent corrections to published statements.
     if (action === 'statement_amend_start') {
