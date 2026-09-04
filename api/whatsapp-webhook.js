@@ -1429,6 +1429,23 @@ export async function nodeHandler(req, res) {
       return res.status(200).end();
     }
 
+    // ── PRODUCT FEEDBACK (Oli shaping the payroll feature) ──────────
+    // A screenshot or a change request from a designated number goes to
+    // Ikiel's Telegram with the picture, and is acknowledged. Ordinary
+    // questions from the same person fall through to the owner handling.
+    try {
+      const { handleProductFeedback } = await import('../lib/product-feedback.js');
+      const took = await handleProductFeedback({
+        db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN },
+        fromNum, text, mediaType, mediaId, caption: extracted.caption || null, waMessageId,
+        fetchImage: async (id) => {
+          const m = await fetchWaMediaBase64(id, WA_TOKEN).catch(() => null);   // { mime, data } or null
+          return m?.data ? { base64: m.data, contentType: m.mime || 'image/jpeg' } : null;
+        },
+      });
+      if (took) return res.status(200).end();
+    } catch (e) { /* never let feedback capture break the line */ }
+
     // VOICE NOTES — transcribe (Groq/OpenAI/Gemini, whichever key is configured)
     // so Maya answers the actual question and the inbox shows what was said.
     // No key or a failed transcription keeps the graceful "could you send that
