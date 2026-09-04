@@ -98,8 +98,15 @@ export default async function handler(req, res) {
       // tracks_payments may predate the migration; select=* tolerates that.
       const gRows = (await sb('statement_groups?select=*')) || [];
       const noSettle = new Set(gRows.filter(g => g.tracks_payments === false).map(g => g.key));
+      // Expenses-only groups (co-owned units with no rent through Samba):
+      // a negative payout there is money the co-owners owe Samba, not a
+      // payout owed to anyone, so they never enter the outstanding banner.
+      const expOnly = new Set(gRows.filter(g => g.expenses_only === true).map(g => g.key));
       for (const r of rows) {
-        if (r.statement_groups) r.statement_groups.tracks_payments = !noSettle.has(r.group_key);
+        if (r.statement_groups) {
+          r.statement_groups.tracks_payments = !noSettle.has(r.group_key);
+          r.statement_groups.expenses_only = expOnly.has(r.group_key);
+        }
       }
       // Outstanding = published/partial statements still owing a POSITIVE
       // balance. Deficit months (negative payout) are not owed to anyone —
@@ -107,7 +114,7 @@ export default async function handler(req, res) {
       // Groups that don't track settlement (LaneHAUS — privately arranged
       // between Ikiel and Guy) never count as money owed.
       const outstanding = rows.filter(s => (s.status === 'published' || s.status === 'partial')
-        && !noSettle.has(s.group_key)
+        && !noSettle.has(s.group_key) && !expOnly.has(s.group_key)
         && ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)) > 0);
       return res.status(200).json({
         statements: rows,
@@ -373,6 +380,9 @@ export default async function handler(req, res) {
       if (typeof f.charges_commission === 'boolean') allowed.charges_commission = f.charges_commission;
       if (typeof f.tracks_payments === 'boolean') allowed.tracks_payments = f.tracks_payments;
       if (f.sheet_file_id) allowed.sheet_file_id = String(f.sheet_file_id);
+      // Era's running expense ledger for the property (lib/expense-sheet-parser.js).
+      if (f.expense_sheet_file_id !== undefined) allowed.expense_sheet_file_id = String(f.expense_sheet_file_id || '') || null;
+      if (typeof f.expenses_only === 'boolean') allowed.expenses_only = f.expenses_only;
       if (f.payout_account !== undefined) {
         // International accounts carry country-specific fields (US routing,
         // UK sort code, IBAN, AU BSB, SWIFT…). Provided fields MERGE onto the
