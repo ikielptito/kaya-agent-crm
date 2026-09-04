@@ -4,7 +4,7 @@
 // tenant asleep in it, or leaves a unit uncleaned between tenancies, and
 // nobody finds out until someone complains. So the rules are pure functions
 // and every rule is pinned here.
-import { planTasks, DEFAULTS } from '../lib/housekeeping.js';
+import { planTasks, projectRounds, DEFAULTS } from '../lib/housekeeping.js';
 
 let pass = 0, fail = 0;
 const t = (name, got, expect) => {
@@ -210,6 +210,67 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
   t('every villa gets its regular cleans regardless of occupancy',
     [...new Set(p.filter(x => x.kind === 'regular').map(x => x.slug))].sort(),
     ['haus-1', 'tropicana-b4', 'villa-saturno']);
+}
+
+// ── The quarterly deep clean ─────────────────────────────────────────
+// Walls, oven, exterior windows, grout, pool furniture: the things a
+// regular clean never reaches and a guest notices on day one. It wants an
+// empty villa when it can have one.
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-06-10' } });
+  t('a deep clean comes 90 days after the last one', datesOf(p, 'deep_clean'), ['2026-09-08']);
+}
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-04-01' } });
+  t('an overdue deep clean is due today, not lost', datesOf(p, 'deep_clean'), [TODAY]);
+}
+{
+  // Due on the 8th, guest in until the 12th: it waits for the villa to empty.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-20', '2026-09-12')])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-06-10' } });
+  t('a deep clean waits for the villa to be empty', datesOf(p, 'deep_clean'), ['2026-09-13']);
+}
+{
+  // Due on the 8th, checkout on the 12th: the 12th has the turnover, so it
+  // lands on the 13th and never on top of the same visit.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-20', '2026-09-12'), stay('2026-09-13', '2026-09-30', 1)])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-06-10' } });
+  const dc = datesOf(p, 'deep_clean')[0];
+  t('a deep clean never shares a day with another visit', datesOf(p, 'turnover').concat(datesOf(p, 'pre_arrival')).includes(dc), false);
+}
+{
+  // A tenant there for months: it happens on the due date anyway, and Era
+  // can move it. Waiting for a vacancy that is not coming is the same as
+  // never cleaning.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-01', '2026-12-31')])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-06-10' } });
+  t('a long tenancy does not postpone the deep clean for ever', datesOf(p, 'deep_clean'), ['2026-09-08']);
+}
+{
+  // Never done before: the first pass spreads villas across the coming six
+  // weeks (only those landing inside the horizon are minted as tasks).
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', []), unit('haus-2', []), unit('villa-saturno', []), unit('tropicana-b4', [])], careDays: NO_CLEANS });
+  const dates = datesOf(p, 'deep_clean');
+  t('first-run deep cleans are staggered, not all today', new Set(dates).size, dates.length);
+}
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, cfg: { deep_clean_every_days: 0 } });
+  t('deep cleans can be switched off', datesOf(p, 'deep_clean'), []);
+}
+
+// ── The rounds ahead ─────────────────────────────────────────────────
+{
+  const r = projectRounds({ today: TODAY, months: 6, units: [unit('haus-1', [])],
+    lastInspection: { 'haus-1': '2026-08-25' }, lastDeepClean: { 'haus-1': '2026-08-01' } });
+  t('six months of inspections', r.filter(x => x.kind === 'inspection').map(x => x.date).slice(0, 3), ['2026-09-08', '2026-09-22', '2026-10-06']);
+  t('two deep cleans in six months', r.filter(x => x.kind === 'deep_clean').map(x => x.date), ['2026-10-30', '2027-01-28']);
+}
+{
+  const r = projectRounds({ today: TODAY, months: 3, units: [unit('haus-1', [stay('2026-10-20', '2026-11-10')])],
+    lastInspection: { 'haus-1': '2026-08-25' }, lastDeepClean: { 'haus-1': '2026-08-01' } });
+  t('a projected deep clean also avoids a known stay', r.find(x => x.kind === 'deep_clean').date, '2026-11-10');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

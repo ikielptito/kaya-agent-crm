@@ -8,10 +8,20 @@
 //   hk_status {id, status}            done / skipped by hand
 //   hk_inspections {slug?, limit?}    inspection rounds and what they found
 //   hk_sweep_preview {}               dry run of the messaging sweep
+//   hk_readiness {from?, to?}         handover checks: photos, verdicts, flags
+//   hk_readiness_photos {id}          signed URLs for one check's photos
+//   hk_standard {slug}                the villa's kit, consumables and photo spots
+//   hk_standard_save {slug, ...}      Era's audit; missing kit → maintenance items
+//   hk_rounds {months?}               inspections and deep cleans projected ahead
+//   hk_stats {days?}                  per-housekeeper counts for the last N days
+//   hk_calendar {months?}             everything for a calendar feed
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
-import { generateTasks, catalogNames } from '../lib/housekeeping.js';
-import { runHousekeepingSweep } from '../lib/housekeeping-sweep.js';
+import { generateTasks, catalogNames, fetchStays, projectRounds, roundAnchors } from '../lib/housekeeping.js';
+import { runHousekeepingSweep, KIND_EN } from '../lib/housekeeping-sweep.js';
+import { standardFor, readinessForWindow, housekeeperStats } from '../lib/housekeeping-readiness.js';
+
+const KINDS = ['turnover', 'regular', 'pre_arrival', 'inspection', 'deep_clean'];
 
 const PATCHABLE = new Set(['assigned_staff_id', 'task_date', 'notes', 'status', 'next_followup_at']);
 
@@ -70,7 +80,7 @@ export default async function handler(req, res) {
     if (action === 'hk_create') {
       const slug = String(payload.slug || '');
       const task_date = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.task_date)) ? payload.task_date : null;
-      const kind = ['turnover', 'regular', 'pre_arrival', 'inspection'].includes(payload.kind) ? payload.kind : null;
+      const kind = KINDS.includes(payload.kind) ? payload.kind : null;
       if (!slug || !task_date || !kind) return res.status(400).json({ error: 'villa, day and kind are required' });
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
       if (task_date < today) return res.status(400).json({ error: 'that day has already passed' });
@@ -216,6 +226,126 @@ export default async function handler(req, res) {
           repairs,
         },
       });
+    }
+
+    // ── Readiness ─────────────────────────────────────────────────
+    if (action === 'hk_readiness') {
+      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.from)) ? payload.from : new Date(Date.parse(today) - 30 * 86400e3).toISOString().slice(0, 10);
+      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.to)) ? payload.to : today;
+      return res.status(200).json({ from, to, checks: await readinessForWindow(db, { from, to }) });
+    }
+    if (action === 'hk_readiness_photos') {
+      const row = (await sbGet(`housekeeping_readiness?id=eq.${id}&select=id,photos,checks,flags&limit=1`))?.[0];
+      if (!row) return res.status(404).json({ error: 'no such check' });
+      const { signPhotoUrl } = await import('../lib/maintenance.js');
+      const urls = [];
+      for (const p of (row.photos || []).slice(0, 12)) {
+        const u = await signPhotoUrl(db, p).catch(() => null);
+        if (u) urls.push(u);
+      }
+      return res.status(200).json({ id: row.id, photo_urls: urls, checks: row.checks, flags: row.flags });
+    }
+
+    // ── The villa's standard ──────────────────────────────────────
+    if (action === 'hk_standard') {
+      const slug = String(payload.slug || '');
+      if (!slug) return res.status(400).json({ error: 'slug required' });
+      return res.status(200).json({ standard: await standardFor(db, slug) });
+    }
+    if (action === 'hk_standard_save') {
+      const slug = String(payload.slug || '');
+      if (!slug) return res.status(400).json({ error: 'slug required' });
+      const kit = (Array.isArray(payload.kit) ? payload.kit : []).map(k => ({
+        key: String(k.key || '').slice(0, 40), label: String(k.label || '').slice(0, 120),
+        present: k.present === true ? true : k.present === false ? false : null,
+        note: k.note ? String(k.note).slice(0, 200) : null,
+      })).filter(k => k.key);
+      const consumables = (Array.isArray(payload.consumables) ? payload.consumables : []).map(c => ({
+        key: String(c.key || '').slice(0, 40), label: String(c.label || '').slice(0, 120), par: Number(c.par) || 1,
+      })).filter(c => c.key);
+      const audited = kit.some(k => k.present != null);
+      const row = {
+        slug, kit, consumables,
+        notes: payload.notes ? String(payload.notes).slice(0, 500) : null,
+        ...(audited ? { audited_at: new Date().toISOString(), audited_by: payload.actor || 'admin' } : {}),
+        updated_at: new Date().toISOString(),
+      };
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/unit_standards?on_conflict=slug`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=representation' },
+        body: JSON.stringify(row),
+      });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+
+      // Every missing item becomes a maintenance item for the owner, once.
+      // A villa with no statement group (some Tropicanas) has no owner to
+      // ask, so the gap stays on the standard and is reported back as such.
+      const missing = kit.filter(k => k.present === false);
+      const filed = [], unowned = [];
+      if (missing.length) {
+        const groups = (await sbGet('statement_groups?active=is.true&select=key,listing_slugs')) || [];
+        const group = groups.find(g => (g.listing_slugs || []).includes(slug));
+        if (!group) unowned.push(...missing.map(k => k.label));
+        else {
+          const { createItem, appendThread } = await import('../lib/maintenance.js');
+          const open = (await sbGet(`maintenance_items?slug=eq.${encodeURIComponent(slug)}&status=neq.done&status=neq.declined&select=id,title`)) || [];
+          for (const k of missing) {
+            const title = `Provide: ${k.label}`;
+            if (open.some(i => i.title === title)) continue;
+            const item = await createItem(db, {
+              group_key: group.key, slug, title,
+              description: `Missing from the villa's minimum kit${k.note ? `: ${k.note}` : ''}. Guests compare against neighbouring units; this is a standard Samba item.`,
+              urgency: 'normal', reported_by_name: payload.actor || 'Kit audit',
+            });
+            if (item?.id) { filed.push(title); await appendThread(db, item.id, { who: 'Kit audit', text: 'Raised from the villa standard on the Schedule page' }).catch(() => {}); }
+          }
+        }
+      }
+      return res.status(200).json({ ok: true, standard: await standardFor(db, slug), filed, unowned });
+    }
+
+    // ── Rounds ahead and the calendar ─────────────────────────────
+    if (action === 'hk_rounds' || action === 'hk_calendar') {
+      const months = Math.min(12, Math.max(1, parseInt(payload.months, 10) || 6));
+      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+      const end = new Date(Date.parse(today) + Math.round(months * 30.4) * 86400e3).toISOString().slice(0, 10);
+      const [feed, anchors, cfg, names] = await Promise.all([
+        fetchStays({ from: new Date(Date.parse(today) - 7 * 86400e3).toISOString().slice(0, 10), to: end }),
+        roundAnchors(db),
+        (await import('../lib/campaigns.js')).getSettingValue(db, 'housekeeping'),
+        catalogNames(db).catch(() => ({})),
+      ]);
+      const units = feed?.units || [];
+      const rounds = projectRounds({ units, today, cfg: cfg || {}, months, ...anchors });
+      // Real tasks inside the horizon replace the projection for those days.
+      const tasks = await sbGet(
+        `housekeeping_tasks?task_date=gte.${today}&task_date=lte.${end}&status=neq.skipped`
+        + `&select=id,slug,task_date,kind,status,same_day,guest_in_date,staff:assigned_staff_id(name)&order=task_date.asc&limit=1000`);
+      const horizonMax = tasks.reduce((m, t) => t.task_date > m ? t.task_date : m, today);
+      const projected = rounds.filter(r => r.date > horizonMax);
+      if (action === 'hk_rounds') return res.status(200).json({ today, months, names, tasks: tasks.filter(t => ['inspection', 'deep_clean'].includes(t.kind)), projected });
+      // Calendar: everything, so one subscription shows the whole operation.
+      const events = [];
+      for (const t of tasks) events.push({
+        uid: `hk-task-${t.id}`, date: t.task_date, slug: t.slug, kind: t.kind,
+        title: `${names[t.slug] || t.slug}: ${KIND_EN[t.kind] || t.kind}${t.staff?.name ? ` (${t.staff.name})` : ''}`,
+        status: t.status,
+      });
+      for (const r of projected) events.push({
+        uid: `hk-proj-${r.slug}-${r.kind}-${r.date}`, date: r.date, slug: r.slug, kind: r.kind,
+        title: `${names[r.slug] || r.slug}: ${KIND_EN[r.kind] || r.kind} (planned)`, status: 'projected',
+      });
+      for (const u of units) for (const s of (u.stays || [])) {
+        if (s.status === 'cancelled') continue;
+        if (s.check_in >= today && s.check_in <= end) events.push({ uid: `hk-in-${u.slug}-${s.check_in}`, date: s.check_in, slug: u.slug, kind: 'guest_in', title: `${names[u.slug] || u.slug}: guest arrives (${s.nights || '?'} nights)`, status: 'guest' });
+        if (s.check_out >= today && s.check_out <= end) events.push({ uid: `hk-out-${u.slug}-${s.check_out}`, date: s.check_out, slug: u.slug, kind: 'guest_out', title: `${names[u.slug] || u.slug}: guest leaves`, status: 'guest' });
+      }
+      events.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+      return res.status(200).json({ today, months, events });
+    }
+
+    if (action === 'hk_stats') {
+      return res.status(200).json({ days: parseInt(payload.days, 10) || 30, people: await housekeeperStats(db, { days: parseInt(payload.days, 10) || 30 }) });
     }
 
     if (action === 'hk_sweep_preview') {
