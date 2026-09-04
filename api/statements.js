@@ -71,7 +71,13 @@ export default async function handler(req, res) {
     }
     try {
       const out = await syncAllGroups(db, {});
-      return res.status(200).json({ ok: true, groups: out });
+      // Era's payroll sheet rides the same daily pass (lib/payroll.js).
+      let payroll = null;
+      try {
+        const { syncPayroll } = await import('../lib/payroll.js');
+        payroll = await syncPayroll(db, {});
+      } catch (e) { payroll = { error: e.message }; }
+      return res.status(200).json({ ok: true, groups: out, payroll });
     } catch (e) {
       return res.status(500).json({ error: e.message });
     }
