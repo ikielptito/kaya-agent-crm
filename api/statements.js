@@ -37,7 +37,7 @@ import {
   publishStatement, unpublishStatement, refreshSnapshot, markPaid, saveProofUpload, signProofUrl,
   recordPayment, deletePayment, markPaymentReturned, listPayments, exportData,
   publicStatement, statementUnitNights, runOwnerStatementSweep, periodLabel,
-  amendStart, amendFinalize, amendCancel, hasOpenRevision,
+  amendStart, amendFinalize, amendCancel, hasOpenRevision, renotifyStatement,
 } from '../lib/statements.js';
 import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
 
@@ -183,6 +183,7 @@ export default async function handler(req, res) {
       }));
     }
     if (action === 'statement_unpublish') return res.status(200).json(await unpublishStatement(db, id));
+    if (action === 'statement_renotify') return res.status(200).json(await renotifyStatement(db, id));
 
     // Amendments — transparent corrections to published statements.
     if (action === 'statement_amend_start') {
