@@ -801,6 +801,46 @@ export default async function handler(req, res) {
         publicUrl: SUPABASE_URL + '/storage/v1/object/public/brochures/' + path
       });
 
+    } else if (action === 'team_question_open') {
+      // Put a structured question to a team member (Era) and make sure it
+      // reaches her: direct text when her 24h window is open, otherwise the
+      // approved maya_team_alert template with the questions queued behind it
+      // (her "OK" flushes them, exactly like any team alert). Answers are then
+      // read by lib/team-questions.js and land on Telegram when complete.
+      const { openTeamQuestion } = await import('../lib/team-questions.js');
+      const { to, topic, briefing, questions, intro } = payload || {};
+      const num = String(to === 'era' ? (process.env.ERA_WA_NUM || '6281246357778') : (to || '')).replace(/\D/g, '');
+      if (!num || !topic || !Array.isArray(questions) || !questions.length) return res.status(400).json({ error: 'to, topic, questions[] required' });
+      const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
+      if (!TOKEN || !PHONE_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
+      const db = { SUPABASE_URL, sbHeaders: headers };
+      const obj = await openTeamQuestion(db, { num, topic, briefing, questions });
+      const body = `${String(intro || 'Hi Era! Maya here with a few questions about the sheets:').trim()}\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n\n')}`;
+      const send = async (payloadObj) => {
+        const rr = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
+          method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messaging_product: 'whatsapp', to: num, ...payloadObj }),
+        });
+        const d = await rr.json().catch(() => ({}));
+        return rr.ok ? (d.messages?.[0]?.id || true) : null;
+      };
+      const log = async (content, mid, status) => fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers,
+        body: JSON.stringify({ agent_id: null, wa_num: num, direction: 'outbound', content, wa_message_id: typeof mid === 'string' ? mid : null, timestamp: new Date().toISOString(), source: 'console', category: 'team_question', status }),
+      }).catch(() => {});
+      let mid = await send({ type: 'text', text: { body } });
+      if (mid) { await log(body, mid, 'sent'); return res.status(200).json({ ok: true, delivered: 'text', question: obj }); }
+      // Window closed: queue the text as a team alert and open the window.
+      const qr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.team_alerts&select=value`, { headers });
+      const q = ((await qr.json().catch(() => []))?.[0]?.value) || {};
+      const list = Array.isArray(q[num]) ? q[num] : [];
+      list.push({ summary: body.slice(0, 500), agent_name: topic, agent_num: null, share_contact: false, ts: new Date().toISOString() });
+      q[num] = list.slice(-10);
+      await fetch(`${SUPABASE_URL}/rest/v1/settings`, { method: 'POST', headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ key: 'team_alerts', value: q }) });
+      mid = await send({ type: 'template', template: { name: 'maya_team_alert', language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: String(topic).slice(0, 120) }] }] } });
+      await log(`[Team alert template: ${topic}] · questions queued until Era replies:\n${body}`, mid, mid ? 'sent' : 'failed');
+      return res.status(mid ? 200 : 502).json({ ok: !!mid, delivered: mid ? 'template+queued' : 'failed', question: obj });
+
     } else if (action === 'set_settings') {
       r = await fetch(SUPABASE_URL + '/rest/v1/settings', {
         method: 'POST',
