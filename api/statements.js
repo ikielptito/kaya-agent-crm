@@ -74,8 +74,8 @@ export default async function handler(req, res) {
       // Era's payroll sheet rides the same daily pass (lib/payroll.js).
       let payroll = null;
       try {
-        const { syncPayroll } = await import('../lib/payroll.js');
-        payroll = await syncPayroll(db, {});
+        const { syncAllPayroll } = await import('../lib/payroll.js');
+        payroll = await syncAllPayroll(db, {});
       } catch (e) { payroll = { error: e.message }; }
       return res.status(200).json({ ok: true, groups: out, payroll });
     } catch (e) {
