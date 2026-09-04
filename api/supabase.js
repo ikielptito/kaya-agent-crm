@@ -808,14 +808,16 @@ export default async function handler(req, res) {
       // (her "OK" flushes them, exactly like any team alert). Answers are then
       // read by lib/team-questions.js and land on Telegram when complete.
       const { openTeamQuestion } = await import('../lib/team-questions.js');
-      const { to, topic, briefing, questions, intro } = payload || {};
+      const { to, topic, briefing, questions, intro, note } = payload || {};
       const num = String(to === 'era' ? (process.env.ERA_WA_NUM || '6281246357778') : (to || '')).replace(/\D/g, '');
-      if (!num || !topic || !Array.isArray(questions) || !questions.length) return res.status(400).json({ error: 'to, topic, questions[] required' });
+      // A plain note (no question object) closes a loop: "resolved, thanks".
+      const noteOnly = !!note && !(Array.isArray(questions) && questions.length);
+      if (!num || (!noteOnly && (!topic || !Array.isArray(questions) || !questions.length))) return res.status(400).json({ error: 'to, topic, questions[] required (or note)' });
       const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!TOKEN || !PHONE_ID) return res.status(500).json({ error: 'WhatsApp env vars not configured' });
       const db = { SUPABASE_URL, sbHeaders: headers };
-      const obj = await openTeamQuestion(db, { num, topic, briefing, questions });
-      const body = `${String(intro || 'Hi Era! Maya here with a few questions about the sheets:').trim()}\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n\n')}`;
+      const obj = noteOnly ? null : await openTeamQuestion(db, { num, topic, briefing, questions });
+      const body = noteOnly ? String(note).trim() : `${String(intro || 'Hi Era! Maya here with a few questions about the sheets:').trim()}\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n\n')}`;
       const send = async (payloadObj) => {
         const rr = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
           method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
@@ -834,10 +836,10 @@ export default async function handler(req, res) {
       const qr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.team_alerts&select=value`, { headers });
       const q = ((await qr.json().catch(() => []))?.[0]?.value) || {};
       const list = Array.isArray(q[num]) ? q[num] : [];
-      list.push({ summary: body.slice(0, 500), agent_name: topic, agent_num: null, share_contact: false, ts: new Date().toISOString() });
+      list.push({ summary: body.slice(0, 500), agent_name: topic || 'Maya', agent_num: null, share_contact: false, ts: new Date().toISOString() });
       q[num] = list.slice(-10);
       await fetch(`${SUPABASE_URL}/rest/v1/settings`, { method: 'POST', headers: { ...headers, Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ key: 'team_alerts', value: q }) });
-      mid = await send({ type: 'template', template: { name: 'maya_team_alert', language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: String(topic).slice(0, 120) }] }] } });
+      mid = await send({ type: 'template', template: { name: 'maya_team_alert', language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: String(topic || 'a note from Maya').slice(0, 120) }] }] } });
       await log(`[Team alert template: ${topic}] · questions queued until Era replies:\n${body}`, mid, mid ? 'sent' : 'failed');
       return res.status(mid ? 200 : 502).json({ ok: !!mid, delivered: mid ? 'template+queued' : 'failed', question: obj });
 
