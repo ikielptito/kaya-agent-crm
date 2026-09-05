@@ -198,7 +198,7 @@
   /* The staff console (Era's key): the toolbar, the automation switch and the
      agent/owner segments are not hers — the server refuses them anyway, this
      just keeps the page honest about what it can do. */
-  body.staff-console .list-head-top .refresh-btn:not(#refreshBtn) { display: none; }
+  body.staff-console .list-head-top .refresh-btn:not(#refreshBtn):not(#notifBtn) { display: none; }
   body.staff-console .mode-bar { display: none; }
   body.staff-console #segAll, body.staff-console #segAgents, body.staff-console #segOwners { display: none; }
   .pill-needs  { background: #ffe0e0; color: #b42318; }
@@ -1109,6 +1109,7 @@ async function registerServiceWorker() {
     state.swReg = await navigator.serviceWorker.register('/sw.js');
     navigator.serviceWorker.addEventListener('message', e => {
       if (e.data?.type === 'open-agent' && e.data.agentId) openConv(Number(e.data.agentId));
+      else if (e.data?.type === 'open-staff' && e.data.staffId) openStaffConv(Number(e.data.staffId));
       else if (e.data?.type === 'open-review') openReview();
     });
     refreshNotifButton();
@@ -1188,6 +1189,8 @@ function urlB64ToUint8Array(b64) {
 function handleDeepLink() {
   const m = location.hash.match(/agent=(\d+)/);
   if (m) { openConv(Number(m[1])); history.replaceState(null, '', location.pathname); }
+  const sm = location.hash.match(/staff=(\d+)/);
+  if (sm) { openStaffConv(Number(sm[1])); history.replaceState(null, '', location.pathname); }
   // Opened from the weekly-review push notification.
   if (new URLSearchParams(location.search).get('review') === '1') {
     openReview();

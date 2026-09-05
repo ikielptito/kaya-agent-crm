@@ -188,6 +188,10 @@ export default async function handler(req, res) {
   const staffOnly = scope === 'staff';
   if (staffOnly && !staffActionAllowed(action)) return res.status(403).json({ error: 'Not available on the staff console' });
   const staffDb = { SUPABASE_URL, sbHeaders: headers };
+  // Which device list this key's push actions touch. Staff subscriptions
+  // (Era's phone) live apart from Ikiel's so the webhook's agent/owner push
+  // fan-out, which only reads push_subscriptions, can never reach her.
+  const pushKey = staffOnly ? 'push_subscriptions_staff' : 'push_subscriptions';
 
   try {
     let r;
@@ -1402,7 +1406,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const priv = process.env.VAPID_PRIVATE_KEY || '';
       let count = 0;
       try {
-        const r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${pushKey}&select=value`, { headers });
         const row = await r.json();
         count = Array.isArray(row?.[0]?.value) ? row[0].value.length : 0;
       } catch (_) {}
@@ -1420,12 +1424,12 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:ikielptito@gmail.com', pub, priv);
       let list = [];
       try {
-        const r = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${pushKey}&select=value`, { headers });
         const row = await r.json();
         list = Array.isArray(row?.[0]?.value) ? row[0].value : [];
       } catch (_) {}
       if (!list.length) return res.status(400).json({ error: 'No subscriptions saved yet — tap the bell to subscribe this device first' });
-      const payload = JSON.stringify({ title: 'Maya', body: 'Test notification ✅', url: '/chat.html', badge_count: 1 });
+      const payload = JSON.stringify({ title: staffOnly ? 'Maya · Team' : 'Maya', body: 'Test notification ✅', url: '/chat.html', badge_count: 1 });
       const results = await Promise.all(list.map(async s => {
         try { await webpush.sendNotification(s, payload); return { ok: true }; }
         catch (e) { return { ok: false, status: e.statusCode, error: (e.body || e.message || '').toString().slice(0, 200) }; }
@@ -1439,7 +1443,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       // list to fan out push notifications on inbound agent messages.
       const sub = payload?.subscription;
       if (!sub?.endpoint) return res.status(400).json({ error: 'subscription with endpoint required' });
-      const cur = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+      const cur = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${pushKey}&select=value`, { headers });
       const curRow = await cur.json();
       const list = Array.isArray(curRow?.[0]?.value) ? curRow[0].value : [];
       const next = list.filter(s => s.endpoint !== sub.endpoint);
@@ -1447,7 +1451,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       await fetch(SUPABASE_URL + '/rest/v1/settings', {
         method: 'POST',
         headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify({ key: 'push_subscriptions', value: next })
+        body: JSON.stringify({ key: pushKey, value: next })
       });
       return res.status(200).json({ success: true, count: next.length });
 
@@ -2243,14 +2247,14 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
     } else if (action === 'remove_push_subscription') {
       const endpoint = payload?.endpoint;
       if (!endpoint) return res.status(400).json({ error: 'endpoint required' });
-      const cur = await fetch(SUPABASE_URL + '/rest/v1/settings?key=eq.push_subscriptions&select=value', { headers });
+      const cur = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${pushKey}&select=value`, { headers });
       const curRow = await cur.json();
       const list = Array.isArray(curRow?.[0]?.value) ? curRow[0].value : [];
       const next = list.filter(s => s.endpoint !== endpoint);
       await fetch(SUPABASE_URL + '/rest/v1/settings', {
         method: 'POST',
         headers: { ...headers, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify({ key: 'push_subscriptions', value: next })
+        body: JSON.stringify({ key: pushKey, value: next })
       });
       return res.status(200).json({ success: true, count: next.length });
 

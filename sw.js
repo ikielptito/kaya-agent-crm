@@ -46,9 +46,9 @@ self.addEventListener('push', event => {
     body: data.body || '',
     icon: '/maya-icon.svg',
     badge: '/maya-icon.svg',
-    tag: data.tag || ('maya-' + (data.agentId || 'msg')),
+    tag: data.tag || ('maya-' + (data.staffId ? 'staff-' + data.staffId : (data.agentId || 'msg'))),
     renotify: true,
-    data: { url: data.url || '/chat.html', agentId: data.agentId || null, review: !!data.review },
+    data: { url: data.url || '/chat.html', agentId: data.agentId || null, staffId: data.staffId || null, review: !!data.review },
   };
 
   event.waitUntil((async () => {
@@ -65,14 +65,14 @@ self.addEventListener('notificationclick', event => {
   const d = event.notification.data || {};
   const isReview = !!d.review;
   const target = d.url || '/chat.html';
-  const agentId = d.agentId;
-  const url = isReview ? target : (agentId ? `${target}#agent=${agentId}` : target);
+  const agentId = d.agentId, staffId = d.staffId;
+  const url = isReview ? target : staffId ? `${target}#staff=${staffId}` : (agentId ? `${target}#agent=${agentId}` : target);
 
   event.waitUntil((async () => {
     const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const c of all) {
       if (c.url.includes('/chat.html') && 'focus' in c) {
-        c.postMessage(isReview ? { type: 'open-review' } : { type: 'open-agent', agentId });
+        c.postMessage(isReview ? { type: 'open-review' } : staffId ? { type: 'open-staff', staffId } : { type: 'open-agent', agentId });
         return c.focus();
       }
     }

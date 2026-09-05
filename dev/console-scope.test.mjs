@@ -43,8 +43,8 @@ t('no CONSOLE_SECRET: open, full', consoleScope(req()), 'full');
 process.env.CONSOLE_SECRET = 'primary-key-000000000000';
 
 // The staff allowlist on /api/supabase.
-for (const a of ['console_scope', 'get_staff', 'get_messages', 'get_number_messages', 'upload_file', 'sign_upload']) t(`staff may: ${a}`, staffActionAllowed(a), true);
-for (const a of ['get_agents', 'get_owners', 'get_owner_messages', 'owner_send', 'set_settings', 'get_settings', 'assistant', 'execute_broadcast', 'save_push_subscription', 'suggest_reply', 'translate', 'get_maya_review', 'patch_agent', '']) t(`staff may not: ${a || '(empty)'}`, staffActionAllowed(a), false);
+for (const a of ['console_scope', 'get_staff', 'get_messages', 'get_number_messages', 'upload_file', 'sign_upload', 'push_status', 'send_test_push', 'save_push_subscription', 'remove_push_subscription']) t(`staff may: ${a}`, staffActionAllowed(a), true);
+for (const a of ['get_agents', 'get_owners', 'get_owner_messages', 'owner_send', 'set_settings', 'get_settings', 'assistant', 'execute_broadcast', 'suggest_reply', 'translate', 'get_maya_review', 'patch_agent', '']) t(`staff may not: ${a || '(empty)'}`, staffActionAllowed(a), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

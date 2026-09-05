@@ -309,11 +309,15 @@ function ensureVapid() {
   return true;
 }
 
-async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agentId, badgeCount }) {
+// `listKey` picks the device list: push_subscriptions (Ikiel's phones, the
+// agent/owner inbox) or push_subscriptions_staff (Era's staff console). The
+// two never mix — a staff message is not sent to Ikiel's list from here and
+// nothing about agents or owners is ever sent to Era's.
+async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agentId, staffId, badgeCount, listKey = 'push_subscriptions' }) {
   if (!ensureVapid()) return;
   let list = [];
   try {
-    const r = await fetch(`${supabaseUrl}/rest/v1/settings?key=eq.push_subscriptions&select=value`, { headers: sbHeaders });
+    const r = await fetch(`${supabaseUrl}/rest/v1/settings?key=eq.${listKey}&select=value`, { headers: sbHeaders });
     const row = (await r.json())?.[0];
     list = Array.isArray(row?.value) ? row.value : [];
   } catch (_) { return; }
@@ -321,7 +325,7 @@ async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agen
 
   // agentId ?? null (not `|| null`): agent id 0 is a real contact ("Oniriq") —
   // `0 || null` would drop it, breaking deep-link-to-thread on the push.
-  const json = JSON.stringify({ title, body, agentId: agentId ?? null, url: '/chat.html', badge_count: badgeCount });
+  const json = JSON.stringify({ title, body, agentId: agentId ?? null, staffId: staffId ?? null, url: '/chat.html', badge_count: badgeCount });
   const dead = [];
   await Promise.all(list.map(async sub => {
     try {
@@ -336,7 +340,7 @@ async function sendPushNotifications(supabaseUrl, sbHeaders, { title, body, agen
     fetch(`${supabaseUrl}/rest/v1/settings`, {
       method: 'POST',
       headers: { ...sbHeaders, 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ key: 'push_subscriptions', value: alive })
+      body: JSON.stringify({ key: listKey, value: alive })
     }).catch(() => {});
   }
 }
@@ -1368,6 +1372,14 @@ export async function nodeHandler(req, res) {
       const { staffByWa } = await import('../lib/staff.js');
       const person = await staffByWa(relayDb, fromNum);
       if (person && person.active) {
+        // Era's staff console hears every staff message, whichever handler
+        // claims it below — a tukang's "besok pagi" is hers to see even when
+        // Maya books it herself. Fire-and-forget, staff device list only.
+        sendPushNotifications(SUPABASE_URL, sbHeaders, {
+          title: `${person.name || '+' + fromNum} · ${(person.roles || []).map(r => r === 'tukang' ? 'Tukang' : r.charAt(0).toUpperCase() + r.slice(1)).join(' · ') || 'Staff'}`,
+          body: (extracted.dbContent || text || 'New message').slice(0, 160),
+          staffId: person.id, badgeCount: 1, listKey: 'push_subscriptions_staff',
+        }).catch(() => {});
         const logStaff = (category) => fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
           method: 'POST', headers: sbHeaders,
           body: JSON.stringify({
