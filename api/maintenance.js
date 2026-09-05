@@ -58,11 +58,20 @@ export default async function handler(req, res) {
         group_key: payload.group_key, status: payload.status, open_only: !!payload.open_only,
       });
       const counts = items.reduce((a, i) => { a[i.status] = (a[i.status] || 0) + 1; return a; }, {});
+      // Owners Maya cannot message yet (no portal account claimed): the
+      // page says so on their tickets, instead of a publish that silently
+      // goes nowhere.
+      let unclaimed_groups = [];
+      try {
+        const { claimedGroupKeys } = await import('../lib/onboarded.js');
+        const claimed = await claimedGroupKeys();
+        unclaimed_groups = [...new Set(items.map(i => i.group_key).filter(k => k && !claimed.has(k)))];
+      } catch { /* the list still renders */ }
       // What actually needs a human: Era's review pile and work still open.
       const needsReview = items.filter(i => i.status === 'new').length;
       const awaitingOwner = items.filter(i => i.status === 'pending_approval').length;
       const openWork = items.filter(i => ['approved', 'scheduled'].includes(i.status)).length;
-      return res.status(200).json({ items, counts, needsReview, awaitingOwner, openWork });
+      return res.status(200).json({ unclaimed_groups, items, counts, needsReview, awaitingOwner, openWork });
     }
 
     if (action === 'maint_detail') {
@@ -79,6 +88,10 @@ export default async function handler(req, res) {
 
     if (action === 'maint_patch')    return res.status(200).json(await patchItem(db, id, payload.fields || {}));
     if (action === 'maint_delete')   return res.status(200).json(await deleteItem(db, id));
+    if (action === 'maint_heads_up') {
+      const { headsUpItem } = await import('../lib/maintenance.js');
+      return res.status(200).json(await headsUpItem(db, id, { actor: payload.actor || 'admin' }));
+    }
     // A remark on a ticket's thread without changing its state.
     if (action === 'maint_note') {
       const { appendThread } = await import('../lib/maintenance.js');
