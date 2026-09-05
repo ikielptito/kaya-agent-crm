@@ -305,6 +305,11 @@
     padding: 2px 7px; border-radius: 7px; margin-right: 6px; vertical-align: 1px;
     background: rgba(0,0,0,.08); color: var(--wa-ink-2); }
   .src-tag.you { background: #dcefe2; color: #1e6b46; }
+  /* Template buttons, drawn under the bubble text the way WhatsApp shows
+     quick replies: a divider, then one full-width chip per button. */
+  .tpl-btns { display: flex; flex-direction: column; gap: 4px; margin: 8px -4px -2px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.07); }
+  .tpl-btn { display: block; text-align: center; font-size: 13px; font-weight: 600; color: #1d7bd8; background: rgba(255,255,255,.55); border-radius: 8px; padding: 6px 8px; text-decoration: none; }
+  .tpl-btn.url::before { content: '↗ '; }
   .src-tag.maya { background: #e5efe8; color: #2a6a3a; }
   /* Maya typing indicator — shown while an auto/hybrid reply is being generated */
   .bubble.typing { display: inline-flex; align-items: center; gap: 8px; color: var(--wa-ink-2); font-size: 13px; }
@@ -1809,6 +1814,35 @@ function whoOf(m) {
   return { kind: 'number', id: num, name: '+' + num, sub: 'No record', init: '#' };
 }
 
+// WhatsApp's own inline formatting on already-escaped text: *bold*,
+// _italic_, ~strike~ — so "*Era:* …" reads the way it does on her phone.
+function waFormat(text) {
+  return esc(text)
+    .replace(/(^|[\s(>])\*([^*\n]+?)\*(?=$|[\s.,!?:;)<])/g, '$1<b>$2</b>')
+    .replace(/(^|[\s(>])_([^_\n]+?)_(?=$|[\s.,!?:;)<])/g, '$1<i>$2</i>')
+    .replace(/(^|[\s(>])~([^~\n]+?)~(?=$|[\s.,!?:;)<])/g, '$1<s>$2</s>')
+    .replace(/\n/g, '<br>');
+}
+// Split "[buttons: A | B]" / "[button: text → url]" off the end of a message.
+function parseButtonsMarker(content) {
+  const s = String(content || '');
+  const m = s.match(/\n?\[buttons: ([^\]]+)\]\s*$/);
+  if (m) return { text: s.slice(0, m.index), buttons: m[1].split(' | ').map(t => ({ type: 'quick_reply', text: t.trim() })).filter(b => b.text) };
+  const u = s.match(/\n?\[button: ([^\]→]+?) → ([^\]]*)\]\s*$/);
+  if (u) return { text: s.slice(0, u.index), buttons: [{ type: 'url', text: u[1].trim(), url: u[2].trim() }] };
+  return { text: s, buttons: [] };
+}
+function renderTplButtons(buttons) {
+  if (!buttons || !buttons.length) return '';
+  return '<div class="tpl-btns">' + buttons.map(b => b.type === 'url' && /^https?:\/\//.test(b.url || '')
+    ? `<a class="tpl-btn url" href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.text)}</a>`
+    : `<span class="tpl-btn">${esc(b.text)}</span>`).join('') + '</div>';
+}
+// A list-row snippet: the message without its buttons marker.
+function snippetText(content) {
+  return parseButtonsMarker(content).text.replace(/\s+/g, ' ').trim();
+}
+
 // Who a human-sent (source 'manual') message is from, as this console should
 // label it. Sends to staff are signed and logged as category human:<name>;
 // the person holding this console sees their own as "You", the other person
@@ -1860,7 +1894,7 @@ function staffRow(s) {
   const m = state.numMap[num];
   const time = m ? timeAgo(new Date(m.timestamp)) : '';
   const by = !m ? '' : m.direction === 'inbound' ? '' : (m.source === 'manual' ? humanLabel(m) + ': ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
-  const snip = m ? by + String(m.content || '').replace(/^\*(Era|Ikiel):\*\s*/, '').slice(0, 70) : staffVillas(s);
+  const snip = m ? by + snippetText(m.content).replace(/^\*(Era|Ikiel):\*\s*/, '').slice(0, 70) : staffVillas(s);
   const unread = staffUnread(s);
   const st = m && m.status === 'failed' ? '<span class="pill pill-paused">Failed</span>' : '';
   return `<div class="conv ${sid === state.activeId ? 'active' : ''}" onclick="openStaffConv(${s.id})">
@@ -1944,7 +1978,7 @@ function feedRow(m) {
   const w = whoOf(m);
   const open = w.kind === 'agent' ? `openConv(${w.id})` : w.kind === 'owner' ? `openOwnerConv(${w.id})` : w.kind === 'staff' ? `openStaffConv(${w.id})` : `openNumberConv('${w.id}')`;
   const card = parseCardMarker(m.content);
-  const text = card ? (card.type === 'carousel' ? 'Property carousel' : 'Property listing') : String(m.content || '');
+  const text = card ? (card.type === 'carousel' ? 'Property carousel' : 'Property listing') : snippetText(m.content);
   const by = m.direction === 'inbound' ? '' : (m.source === 'manual' ? humanLabel(m) + ': ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
   const st = m.status === 'failed' ? '<span class="pill pill-paused">Failed</span>' : '';
   return `<div class="conv" onclick="${open}">
@@ -2507,7 +2541,10 @@ function renderBubble(m) {
   } else if (ccm) {
     inner = renderContactCard(ccm[1]) + (caption.trim() ? esc(caption).replace(/\n/g, '<br>') : '');
   } else {
-    inner = media + esc(bodyText).replace(/\n/g, '<br>');
+    // Template sends carry their buttons as a trailing marker (see
+    // lib/template-render.js); draw them as chips like WhatsApp does.
+    const tpl = parseButtonsMarker(bodyText);
+    inner = media + waFormat(tpl.text) + renderTplButtons(tpl.buttons);
     if (!media && !bodyText.trim()) {
       inner = `<span class="bubble-missing">Media message — not saved (sent before media support)</span>`;
     }

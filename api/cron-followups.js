@@ -1256,10 +1256,18 @@ async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
     const map = {};
     (data.data || []).filter(t => t.status === 'APPROVED').forEach(t => {
       const bodyComponent = (t.components || []).find(c => c.type === 'BODY');
+      // Buttons too: the staff sweeps log the rendered message (body with
+      // the placeholders filled, plus the quick replies) so the inbox shows
+      // what the housekeeper saw — see lib/template-render.js.
+      const buttons = ((t.components || []).find(c => c.type === 'BUTTONS')?.buttons || []).map(b => ({
+        type: b.type === 'URL' ? 'url' : b.type === 'QUICK_REPLY' ? 'quick_reply' : String(b.type || '').toLowerCase(),
+        text: b.text || '', url: b.url || null,
+      }));
       map[t.name] = {
         name: t.name,
         language: t.language,
         body: bodyComponent?.text || '',
+        buttons,
         placeholderCount: ((bodyComponent?.text || '').match(/\{\{(\d+)\}\}/g) || []).length
       };
     });
