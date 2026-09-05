@@ -266,6 +266,20 @@ export default async function handler(req, res) {
       }
       return res.status(200).end();
 
+    } else if (action === 'detach_agent_messages') {
+      // A number that is really an owner picked up an agent card along the
+      // way: move its message history onto the owner record so the agent
+      // card can be deleted without orphaning anything.
+      const { id, owner_id } = payload || {};
+      if (id == null || owner_id == null) return res.status(400).json({ error: 'id and owner_id required' });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${parseInt(id, 10)}`, {
+        method: 'PATCH', headers: { ...headers, Prefer: 'return=representation' },
+        body: JSON.stringify({ agent_id: null, owner_id: parseInt(owner_id, 10) }),
+      });
+      const moved = r.ok ? (await r.json().catch(() => [])).length : 0;
+      if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+      return res.status(200).json({ ok: true, moved });
+
     } else if (action === 'delete_agent') {
       const { id } = payload || {};
       if (id == null) return res.status(400).json({ error: 'id required' });
