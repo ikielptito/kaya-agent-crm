@@ -21,7 +21,8 @@
 
 import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
 import { executeReplySideEffects, sendTextWithButtons } from './whatsapp-webhook.js';
-import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
+import { consoleScope, setConsoleCors } from '../lib/auth.js';
+import { staffLineNumbers } from '../lib/staff.js';
 
 const GRAPH = 'https://graph.facebook.com/v24.0';
 
@@ -34,7 +35,8 @@ export default async function handler(req, res) {
     return await handleFetchMedia(req, res, req.query.fetch_media, process.env.META_WA_TOKEN);
   }
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!consoleAuthorized(req)) return res.status(401).json({ error: 'Console key required' });
+  const scope = consoleScope(req);
+  if (!scope) return res.status(401).json({ error: 'Console key required' });
 
   const TOKEN = process.env.META_WA_TOKEN;
   const PHONE_ID = process.env.META_WA_PHONE_ID;
@@ -50,6 +52,39 @@ export default async function handler(req, res) {
   } : null;
 
   const body = req.body || {};
+  // The staff console (Era) sends plain messages and attachments to roster
+  // numbers only — never templates, cards, recalls or edits, and never with
+  // an agent, owner, campaign or draft-action attached. The number check is
+  // against the server's roster, so a forged body cannot reach an agent.
+  const act = body.action || (body.imageUrl ? 'image' : body.videoUrl ? 'video' : body.docUrl ? 'document' : body.message ? 'text' : '');
+  const plainSend = ['text', 'image', 'video', 'document'].includes(act);
+  if (scope === 'staff') {
+    if (!plainSend && act !== 'fetch_media') return res.status(403).json({ error: 'Not available on the staff console' });
+    if (plainSend) {
+      const num = String(body.waNum || '').replace(/\D/g, '');
+      const allowed = sbHeaders ? await staffLineNumbers({ SUPABASE_URL, sbHeaders }) : new Set();
+      if (!num || !allowed.has(num)) return res.status(403).json({ error: 'Not a staff number' });
+      ['agentId', 'ownerId', 'campaignId', 'actions', 'approved', 'useTemplate', 'templateName', 'templateParams'].forEach(k => { delete body[k]; });
+      body.waNum = num; body.source = 'manual';
+    }
+  }
+  // A human writing to STAFF signs the message. The housekeepers and the
+  // tukang talk to Maya all day; when Era or Ikiel steps into that thread the
+  // person on the other end must see it is them and not the bot — Maya's
+  // takeover with agents stays seamless by design (PERSONA_SPEC 5.4), this
+  // is staff only. Logged as category human:<name> so the inbox tags it too.
+  if (plainSend && body.source === 'manual' && sbHeaders) {
+    const num = String(body.waNum || '').replace(/\D/g, '');
+    const roster = scope === 'staff' ? null : await staffLineNumbers({ SUPABASE_URL, sbHeaders }).catch(() => new Set());
+    if (scope === 'staff' || roster.has(num)) {
+      const name = scope === 'staff' ? 'Era' : 'Ikiel';
+      const tag = `*${name}:*`;
+      if (act === 'text') body.message = `${tag} ${String(body.message || '').trim()}`;
+      else body.caption = body.caption ? `${tag} ${body.caption}` : tag;
+      body.humanSender = name.toLowerCase();
+    }
+  }
+
   // Determine action — explicit action wins, otherwise infer from legacy shape
   let action = body.action;
   if (!action) {
@@ -90,6 +125,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
     source,             // 'manual' when a human sends from the chat inbox; defaults to 'api'
     actions,            // side effects of an approved Maya draft ({ send_contact, notify_team, ask_owner, send_doc, reply_buttons }) — see executeReplySideEffects
     approved,           // true when the operator sent Maya's draft as-is (attribution: logged category 'draft_approved')
+    humanSender,        // 'era' | 'ikiel' when a person signed a message to staff (set by the handler, never by the page)
   } = body;
 
   if (!waNum) return res.status(400).json({ error: 'waNum is required' });
@@ -182,7 +218,7 @@ async function handleSend(req, res, body, TOKEN, PHONE_ID, SUPABASE_URL, sbHeade
         wa_message_id: waMessageId,
         timestamp: new Date().toISOString(),
         source: source === 'manual' ? 'manual' : 'api',
-        category: approved ? 'draft_approved' : null,
+        category: approved ? 'draft_approved' : (humanSender ? 'human:' + humanSender : null),
         campaign_id: campaignId || null,
         reply_to: replyTo || null,
         status: 'sent',

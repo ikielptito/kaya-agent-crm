@@ -20,7 +20,7 @@ import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
 import { announceListingLive, noteNewArrivals } from '../lib/listing-live.js';
-import { consoleAuthorized, consoleScope, staffActionAllowed, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
+import { consoleScope, staffActionAllowed, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
 import { listStaff, staffLineNumbers } from '../lib/staff.js';
 import { resolveCampaign, bump as bumpCampaign, logEvent as logCampaignEvent } from '../lib/campaigns.js';
 import { sbRows } from '../lib/sb-rows.js';

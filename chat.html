@@ -194,6 +194,13 @@
   .seg-badge { background: var(--wa-unread); color: #fff; border-radius: 10px; font-size: 10px; min-width: 16px; padding: 1px 4px; line-height: 1.3; }
   .people-seg button.on .seg-badge { background: rgba(255,255,255,.28); }
   .pill-owner { background: #e3efe8; color: #1d5c46; }
+  .pill-staff { background: #fdebd9; color: #9a4a0a; }
+  /* The staff console (Era's key): the toolbar, the automation switch and the
+     agent/owner segments are not hers — the server refuses them anyway, this
+     just keeps the page honest about what it can do. */
+  body.staff-console .list-head-top .refresh-btn:not(#refreshBtn) { display: none; }
+  body.staff-console .mode-bar { display: none; }
+  body.staff-console #segAll, body.staff-console #segAgents, body.staff-console #segOwners { display: none; }
   .pill-needs  { background: #ffe0e0; color: #b42318; }
   .pill-wait   { background: #e7f0ff; color: #1d4ed8; }
   .pill-paused { background: #ececec; color: #555; }
@@ -783,6 +790,7 @@
       <button id="segAll" onclick="setSeg('all')" title="Every message on the Maya line, newest first — including the team line and numbers with no agent or owner record">All</button>
       <button id="segAgents" onclick="setSeg('agents')">Agents</button>
       <button id="segOwners" onclick="setSeg('owners')">Owners<span class="seg-badge" id="ownerSegBadge" style="display:none">0</span></button>
+      <button id="segStaff" onclick="setSeg('staff')" title="The housekeepers, tukang and gardeners in the staff roster — Maya's threads with them, answerable from here">Staff<span class="seg-badge" id="staffSegBadge" style="display:none">0</span></button>
     </div>
     <div class="conv-list" id="convList">
       <div class="skel-row"><div class="skel-av"></div><div style="flex:1"><div class="skel-l1"></div><div class="skel-l2"></div></div></div>
@@ -898,6 +906,18 @@
 // side with the CONSOLE_SECRET env var; without it the gate is open.
 (function () {
   const KEY = 'maya_console_key';
+  // A sign-in link (chat.html?k=…) stores the key and scrubs it from the URL
+  // so it never sits in the address bar, history or a screenshot. This is
+  // how Era's phone gets its staff key: Maya sends her the link once.
+  try {
+    const u = new URL(location.href);
+    const k = u.searchParams.get('k');
+    if (k && k.trim()) {
+      localStorage.setItem(KEY, k.trim());
+      u.searchParams.delete('k');
+      history.replaceState(null, '', u.pathname + (u.search || '') + (u.hash || ''));
+    }
+  } catch (_) {}
   const orig = window.fetch.bind(window);
   const isApi = (u) => { try { const x = new URL(u, location.href); return x.origin === location.origin && x.pathname.startsWith('/api/'); } catch (_) { return false; } };
   async function ask() {
@@ -946,8 +966,12 @@ const MODE_HINTS = {
 const state = {
   agents: [],          // all agent records
   owners: [],          // villa owners/managers (owner-mode threads)
-  seg: ['owners', 'all'].includes(localStorage.getItem('maya_seg')) ? localStorage.getItem('maya_seg') : 'agents',
+  staff: [],           // the staff roster (housekeepers, tukang, gardeners)
+  scope: 'full',       // 'full' (Ikiel) or 'staff' (Era's trimmed console) — from the server
+  seg: ['owners', 'all', 'staff'].includes(localStorage.getItem('maya_seg')) ? localStorage.getItem('maya_seg') : 'agents',
   allMsgs: [],
+  numMap: {},          // digits -> latest message to/from that number (staff rows)
+  lastInboundNum: {},  // digits -> last seen inbound timestamp (staff new-msg detection)
   msgMap: {},          // agent_id -> { lastTimestamp, lastContent, direction }
   activeId: null,
   query: '',
@@ -1060,8 +1084,9 @@ async function init() {
   state.translations = loadXlateCache();
   setupThreadGestures();
   await registerServiceWorker();
-  await Promise.all([refreshAll(), loadMode()]);
-  refreshReviewBadge();
+  await loadScope();
+  if (state.scope === 'staff') { await refreshAll(); }
+  else { await Promise.all([refreshAll(), loadMode()]); refreshReviewBadge(); }
   startPolling();
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) { refreshAll(); loadMode(); if (state.activeId) refreshThread(); }
@@ -1174,15 +1199,38 @@ async function refreshAll(manual) {
   const btn = document.getElementById('refreshBtn');
   if (manual && btn) btn.classList.add('spin');
   try {
-    const [agents, allMsgs, owners] = await Promise.all([
-      api('get_agents'),
-      api('get_messages'),     // no agentId → recent across everyone
-      // Owners fetch fails soft (pre-migration deploys, table missing) so it
-      // can never take the agent inbox down with it.
-      api('get_owners').catch(() => null),
+    const staffOnly = state.scope === 'staff';
+    const [agents, allMsgs, owners, staff] = await Promise.all([
+      staffOnly ? null : api('get_agents'),
+      api('get_messages'),     // no agentId → recent across everyone (roster-only on the staff key)
+      // Owners and staff fetches fail soft (pre-migration deploys, table
+      // missing) so they can never take the agent inbox down with them.
+      staffOnly ? null : api('get_owners').catch(() => null),
+      api('get_staff').catch(() => null),
     ]);
     if (Array.isArray(agents)) state.agents = agents;
     if (Array.isArray(owners)) state.owners = owners;
+    if (Array.isArray(staff)) state.staff = staff;
+    if (Array.isArray(allMsgs)) {
+      // Latest message per number, for the Staff rows (the roster has no
+      // unread_count column — read state is kept on this device).
+      const numMap = {}, inboundNum = {}, newStaffNums = [];
+      allMsgs.forEach(m => {
+        if (m.deleted_at) return;
+        const k = String(m.wa_num || '').replace(/\D/g, ''); if (!k) return;
+        if (!numMap[k] || new Date(m.timestamp) > new Date(numMap[k].timestamp)) numMap[k] = m;
+        if (m.direction === 'inbound' && (!inboundNum[k] || new Date(m.timestamp) > new Date(inboundNum[k]))) inboundNum[k] = m.timestamp;
+      });
+      state.numMap = numMap;
+      if (state.primed) {
+        Object.keys(inboundNum).forEach(k => {
+          const prev = state.lastInboundNum[k];
+          if ((!prev || new Date(inboundNum[k]) > new Date(prev)) && staffByNum(k)) newStaffNums.push(k);
+        });
+      }
+      state.lastInboundNum = inboundNum;
+      if (newStaffNums.length && staffOnly) playPing();
+    }
     updateSegBadge();
     const newInboundAgents = [];
     if (Array.isArray(allMsgs)) {
@@ -1240,7 +1288,8 @@ async function refreshAll(manual) {
 // ── App-icon badge + arrival ping ─────────────────────────────────────
 function totalUnread() {
   return state.agents.reduce((n, a) => n + (a.unread_count || 0), 0)
-       + state.owners.reduce((n, o) => n + (o.unread_count || 0), 0);
+       + state.owners.reduce((n, o) => n + (o.unread_count || 0), 0)
+       + state.staff.filter(staffUnread).length;
 }
 function updateBadge() {
   const n = totalUnread();
@@ -1266,6 +1315,19 @@ function playPing() {
 }
 
 // ── Maya mode ─────────────────────────────────────────────────────────
+// Which console this key opens. The staff key (Era) gets one segment and no
+// toolbar; the server refuses everything else for it regardless.
+async function loadScope() {
+  try {
+    const d = await api('console_scope');
+    state.scope = d && d.scope === 'staff' ? 'staff' : 'full';
+  } catch (_) { state.scope = 'full'; }
+  if (state.scope === 'staff') {
+    document.body.classList.add('staff-console');
+    document.querySelector('.list-title').textContent = 'Maya · Team';
+    state.seg = 'staff';
+  }
+}
 async function loadMode() {
   try {
     const val = await api('get_settings', { key: 'automation' });
@@ -1680,15 +1742,22 @@ function timeAgo(d) {
 }
 
 function setSeg(seg) {
-  state.seg = ['owners', 'all'].includes(seg) ? seg : 'agents';
+  if (state.scope === 'staff') seg = 'staff';
+  state.seg = ['owners', 'all', 'staff'].includes(seg) ? seg : 'agents';
   try { localStorage.setItem('maya_seg', state.seg); } catch (_) {}
   renderList();
 }
 function updateSegBadge() {
-  const sa = document.getElementById('segAgents'), so = document.getElementById('segOwners'), sl = document.getElementById('segAll');
+  const sa = document.getElementById('segAgents'), so = document.getElementById('segOwners'), sl = document.getElementById('segAll'), ss = document.getElementById('segStaff');
   if (sl) sl.classList.toggle('on', state.seg === 'all');
   if (sa) sa.classList.toggle('on', state.seg === 'agents');
   if (so) so.classList.toggle('on', state.seg === 'owners');
+  if (ss) ss.classList.toggle('on', state.seg === 'staff');
+  const sb = document.getElementById('staffSegBadge');
+  if (sb) {
+    const n = state.staff.filter(staffUnread).length;
+    sb.textContent = n; sb.style.display = n ? '' : 'none';
+  }
   const b = document.getElementById('ownerSegBadge');
   if (b) {
     const n = state.owners.reduce((s, o) => s + (o.unread_count || 0), 0)
@@ -1732,15 +1801,148 @@ function whoOf(m) {
   if (a) return { kind: 'agent', id: a.id, name: a.name || a.agency || ('+' + num), sub: a.agency || '', init: initials(a.name, a.agency) };
   const o = (m.owner_id != null && state.owners.find(x => x.id === m.owner_id)) || state.owners.find(x => String(x.wa_num || '').replace(/\D/g, '') === num);
   if (o) return { kind: 'owner', id: o.id, name: o.name || ('+' + num), sub: 'Owner', init: initials(o.name, '') };
+  const s = staffByNum(num);
+  if (s) return { kind: 'staff', id: s.id, name: s.name || ('+' + num), sub: staffRoleLabel(s), init: initials(s.name, '') };
   return { kind: 'number', id: num, name: '+' + num, sub: 'No record', init: '#' };
+}
+
+// Who a human-sent (source 'manual') message is from, as this console should
+// label it. Sends to staff are signed and logged as category human:<name>;
+// the person holding this console sees their own as "You", the other person
+// by name. Unsigned manual rows are Ikiel's (agent threads, and everything
+// before 5 Sep 2026).
+function humanLabel(m) {
+  const me = state.scope === 'staff' ? 'era' : 'ikiel';
+  const who = /^human:(\w+)$/.exec(String(m.category || ''))?.[1] || 'ikiel';
+  return who === me ? 'You' : who.charAt(0).toUpperCase() + who.slice(1);
+}
+
+// ── Staff (the roster: housekeepers, tukang, gardeners — 's'+id namespace) ──
+function staffByNum(num) {
+  const n = String(num || '').replace(/\D/g, '');
+  return n ? state.staff.find(x => String(x.wa_num || '').replace(/\D/g, '') === n) : null;
+}
+function staffIdOf(activeId) {
+  return (typeof activeId === 'string' && activeId[0] === 's') ? +activeId.slice(1) : null;
+}
+function activeStaff() {
+  const sid = staffIdOf(state.activeId);
+  return sid == null ? null : state.staff.find(x => x.id === sid);
+}
+const STAFF_ROLE_LABEL = { manager: 'Manager', housekeeper: 'Housekeeper', pool: 'Pool', gardener: 'Gardener', tukang: 'Tukang' };
+function staffRoleLabel(s) {
+  const roles = (s.roles || []).map(r => STAFF_ROLE_LABEL[r] || r);
+  return roles.join(' · ') || 'Staff';
+}
+function prettySlug(slug) {
+  return String(slug || '').split('-').map(w => /^[a-z]\d+$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+function staffVillas(s) {
+  const slugs = s.slugs || [];
+  if (!slugs.length) return (s.trades || []).length ? (s.trades || []).join(', ') + ' · island-wide' : 'island-wide';
+  const names = slugs.map(prettySlug);
+  return names.length > 3 ? names.slice(0, 3).join(', ') + ` +${names.length - 3}` : names.join(', ');
+}
+// Read state for staff threads lives on this device (no unread_count column).
+function staffUnread(s) {
+  const num = String(s.wa_num || '').replace(/\D/g, '');
+  const m = state.numMap[num];
+  if (!m || m.direction !== 'inbound') return false;
+  const read = localStorage.getItem('maya_read_s' + s.id);
+  return !read || new Date(m.timestamp) > new Date(read);
+}
+function staffRow(s) {
+  const sid = 's' + s.id;
+  const num = String(s.wa_num || '').replace(/\D/g, '');
+  const m = state.numMap[num];
+  const time = m ? timeAgo(new Date(m.timestamp)) : '';
+  const by = !m ? '' : m.direction === 'inbound' ? '' : (m.source === 'manual' ? humanLabel(m) + ': ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
+  const snip = m ? by + String(m.content || '').replace(/^\*(Era|Ikiel):\*\s*/, '').slice(0, 70) : staffVillas(s);
+  const unread = staffUnread(s);
+  const st = m && m.status === 'failed' ? '<span class="pill pill-paused">Failed</span>' : '';
+  return `<div class="conv ${sid === state.activeId ? 'active' : ''}" onclick="openStaffConv(${s.id})">
+    <div class="avatar">${esc(initials(s.name, ''))}</div>
+    <div class="conv-mid">
+      <div class="conv-name">${esc(s.name || '+' + num)} <span style="font-weight:400;color:var(--wa-ink-2);font-size:12px">· ${esc(staffRoleLabel(s))}</span></div>
+      <div class="conv-snip">${esc(snip)}</div>
+    </div>
+    <div class="conv-right">
+      <span class="conv-time ${unread ? 'unread-time' : ''}">${time}</span>
+      <div class="conv-badges">${st}${unread ? '<span class="unread-pill">•</span>' : ''}</div>
+    </div>
+  </div>`;
+}
+function openStaffConv(id) {
+  const s = state.staff.find(x => x.id === id);
+  if (!s) return;
+  state.activeId = 's' + id;
+  document.getElementById('app').classList.add('show-thread');
+  document.getElementById('threadEmpty').style.display = 'none';
+  document.getElementById('threadView').style.display = 'flex';
+  // Same chrome switch as owner threads: no per-chat mode picker, archive,
+  // translate or in-thread search — none of those apply to a staff thread.
+  setAssistantChrome(true);
+  document.getElementById('thAvatar').style.background = '';
+  state.replyTarget = null; renderReplyChip();
+  state.search = { q: '', matches: [], idx: 0 };
+  document.getElementById('threadSearch').style.display = 'none';
+  document.getElementById('emojiPop').style.display = 'none';
+  document.getElementById('qrPop').style.display = 'none';
+  state.threadMsgs = []; state.msgIndex = {};
+  state.threadHtml = null;
+  state.threadLastRead = localStorage.getItem('maya_read_s' + id) || null;
+  state.translateOn = false; updateTranslateBtn();
+  state.draftCards = [];
+  const num = String(s.wa_num || '').replace(/\D/g, '');
+  document.getElementById('thAvatar').textContent = initials(s.name, '');
+  document.getElementById('thName').textContent = s.name || '+' + num;
+  document.getElementById('thSub').textContent = '+' + num + ' · ' + staffRoleLabel(s) + ' · ' + staffVillas(s);
+  document.getElementById('replyBox').value = localStorage.getItem('maya_draft_s' + id) || '';
+  autoGrow(document.getElementById('replyBox'));
+  renderStaffBanner(s);
+  document.getElementById('threadBody').innerHTML = '<div class="empty">Loading…</div>';
+  // Opening the thread reads it, on this device.
+  const m = state.numMap[num];
+  if (m) localStorage.setItem('maya_read_s' + id, m.timestamp);
+  renderList(); updateBadge();
+  refreshThread(true);
+}
+function renderStaffBanner(s) {
+  const num = String(s.wa_num || '').replace(/\D/g, '');
+  const li = state.lastInboundNum[num] ? new Date(state.lastInboundNum[num]).getTime() : 0;
+  let html = '';
+  if (!li || (Date.now() - li) > 24 * 3600 * 1000) {
+    html += `<div class="win-banner"><span>⏱ Outside the 24-hour window — a plain message may not deliver until they write to Maya again.</span></div>`;
+  }
+  html += `<div class="win-banner"><span>Staff · Maya runs housekeeping and repairs with them. Anything you send here goes out from Maya's line, in your words.</span></div>`;
+  document.getElementById('threadBanner').innerHTML = html;
+}
+async function sendStaff(s) {
+  const box = document.getElementById('replyBox');
+  const msg = box.value.trim();
+  if (!msg) return;
+  const btn = document.getElementById('sendBtn');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/whatsapp-send', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ waNum: String(s.wa_num || '').replace(/\D/g, ''), message: msg, source: 'manual' }),
+    });
+    const res = await r.json().catch(() => ({}));
+    if (!r.ok || !res.success) throw new Error(res.error || 'send failed');
+    box.value = ''; autoGrow(box);
+    localStorage.removeItem('maya_draft_s' + s.id);
+    refreshThread(true); refreshAll();
+  } catch (e) { toast('Failed: ' + e.message); }
+  finally { btn.disabled = false; }
 }
 
 function feedRow(m) {
   const w = whoOf(m);
-  const open = w.kind === 'agent' ? `openConv(${w.id})` : w.kind === 'owner' ? `openOwnerConv(${w.id})` : `openNumberConv('${w.id}')`;
+  const open = w.kind === 'agent' ? `openConv(${w.id})` : w.kind === 'owner' ? `openOwnerConv(${w.id})` : w.kind === 'staff' ? `openStaffConv(${w.id})` : `openNumberConv('${w.id}')`;
   const card = parseCardMarker(m.content);
   const text = card ? (card.type === 'carousel' ? 'Property carousel' : 'Property listing') : String(m.content || '');
-  const by = m.direction === 'inbound' ? '' : (m.source === 'manual' ? 'You: ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
+  const by = m.direction === 'inbound' ? '' : (m.source === 'manual' ? humanLabel(m) + ': ' : m.source === 'cron' ? 'Broadcast: ' : 'Maya: ');
   const st = m.status === 'failed' ? '<span class="pill pill-paused">Failed</span>' : '';
   return `<div class="conv" onclick="${open}">
     <div class="avatar">${esc(w.init)}</div>
@@ -1794,6 +1996,17 @@ function renderList() {
     const all = rows.concat(contactRows);
     el.innerHTML = all.length ? all.map(feedRow).join('')
       : `<div class="empty">${q ? 'Nothing matches “' + esc(q) + '”' : 'No messages yet.'}</div>`;
+    return;
+  }
+  if (state.seg === 'staff') {
+    const el = document.getElementById('convList');
+    const q = state.query.trim().toLowerCase();
+    const ts = (s) => { const m = state.numMap[String(s.wa_num || '').replace(/\D/g, '')]; return m ? new Date(m.timestamp).getTime() : 0; };
+    const rows = state.staff
+      .filter(s => !q || `${s.name || ''} ${s.wa_num || ''} ${(s.roles || []).join(' ')} ${(s.trades || []).join(' ')} ${(s.slugs || []).join(' ')}`.toLowerCase().includes(q))
+      .sort((a, b) => ts(b) - ts(a) || String(a.name || '').localeCompare(String(b.name || '')));
+    el.innerHTML = rows.length ? rows.map(staffRow).join('')
+      : `<div class="empty">${q ? 'No staff match “' + esc(q) + '”' : 'No staff yet.<br>Add the team in the Samba admin roster and they appear here.'}</div>`;
     return;
   }
   if (state.seg === 'owners') {
@@ -2099,7 +2312,8 @@ async function refreshThread(scroll) {
   const id = state.activeId;
   if (!id || id === ASSIST_ID) return;   // assistant thread renders locally
   const oid = ownerIdOf(id);
-  const num = numberOf(id);
+  const st = activeStaff();
+  const num = numberOf(id) ?? (st ? String(st.wa_num || '').replace(/\D/g, '') : null);
   let msgs;
   try {
     msgs = num != null
@@ -2298,7 +2512,7 @@ function renderBubble(m) {
   // Who sent an outbound message: Maya (autoresponder), you (manual from this
   // inbox, tagged from 6 Jul 2026), or the broadcast cron.
   const srcTag = isOut
-    ? (m.source === 'manual' ? '<span class="src-tag you">You</span>'
+    ? (m.source === 'manual' ? `<span class="src-tag you">${esc(humanLabel(m))}</span>`
       : m.source === 'cron' ? '<span class="src-tag auto">Auto</span>'
       : '<span class="src-tag maya">Maya · AI</span>')
     : '';
@@ -2464,6 +2678,14 @@ async function recallMsg(wid) {
 
 // ── Attachments ───────────────────────────────────────────────────────
 function toggleAttachSheet() {
+  if (activeStaff()) {
+    return openSheet(`
+    <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">${ic('camera')}</span> Take photo</button>
+    <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">${ic('image')}</span> Photo &amp; video</button>
+    <button class="sheet-item" onclick="pick('fileDoc')"><span class="ico">${ic('file')}</span> Document</button>
+    <button class="sheet-item" onclick="closeSheet();openEmoji()"><span class="ico">${ic('smile')}</span> Emoji</button>
+  `);
+  }
   openSheet(`
     <button class="sheet-item" onclick="pick('fileCamera')"><span class="ico">${ic('camera')}</span> Take photo</button>
     <button class="sheet-item" onclick="pick('fileImage')"><span class="ico">${ic('image')}</span> Photo &amp; video</button>
@@ -2482,7 +2704,8 @@ function fileToBase64(file) {
 async function onFilePicked(input) {
   const file = input.files && input.files[0]; input.value = '';
   if (!file) return;
-  const a = state.agents.find(x => x.id === state.activeId); if (!a) return;
+  const staffer = activeStaff();
+  const a = state.agents.find(x => x.id === state.activeId); if (!a && !staffer) return;
   const type = file.type || '';
   let kind = type.startsWith('image/') ? 'image' : type.startsWith('video/') ? 'video' : 'document';
   if (file.size > 100 * 1024 * 1024) {
@@ -2516,14 +2739,16 @@ async function onFilePicked(input) {
       if (!up.publicUrl) throw new Error(up.error || 'upload failed');
       publicUrl = up.publicUrl;
     }
-    const waNum = getWaNum(a);
+    const waNum = a ? getWaNum(a) : String(staffer.wa_num || '').replace(/\D/g, '');
+    const who = a ? { agentId: a.id } : {};
     const payload =
-        kind === 'image' ? { action: 'image', waNum, imageUrl: publicUrl, agentId: a.id, source: 'manual' }
-      : kind === 'video' ? { action: 'video', waNum, videoUrl: publicUrl, agentId: a.id, source: 'manual' }
-      : { action: 'document', waNum, docUrl: publicUrl, docFilename: file.name, agentId: a.id, source: 'manual' };
+        kind === 'image' ? { action: 'image', waNum, imageUrl: publicUrl, ...who, source: 'manual' }
+      : kind === 'video' ? { action: 'video', waNum, videoUrl: publicUrl, ...who, source: 'manual' }
+      : { action: 'document', waNum, docUrl: publicUrl, docFilename: file.name, ...who, source: 'manual' };
     const r = await fetch('/api/whatsapp-send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const res = await r.json(); if (!res.success) throw new Error(res.error || 'send failed');
-    pauseMayaAfterManual(a); refreshThread(true); refreshAll(); toast('Sent');
+    if (a) pauseMayaAfterManual(a);
+    refreshThread(true); refreshAll(); toast('Sent');
   } catch (e) { toast('Failed: ' + e.message); }
 }
 
@@ -2880,6 +3105,8 @@ async function send() {
   const id = state.activeId; if (!id) return;
   if (id === ASSIST_ID) return sendAssistant();
   if (numberOf(id) != null) return toast('Read-only thread — add this number as an agent or owner to reply.');
+  const staffer = activeStaff();
+  if (staffer) return sendStaff(staffer);
   const owner = activeOwner();
   if (owner) return sendOwner(owner);
   const a = state.agents.find(x => x.id === id); if (!a) return;
