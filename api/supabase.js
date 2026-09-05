@@ -453,6 +453,25 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, wa_message_id: mid });
 
     // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
+    } else if (action === 'owner_send_document') {
+      // A file to an owner (the owner guide, a record PDF) inside an open
+      // window, logged on their thread like any other send.
+      const { id, waNum, link, filename, caption } = payload || {};
+      const num = String(waNum || '').replace(/\D/g, '');
+      if (id == null || !num || !/^https:\/\//.test(String(link || ''))) return res.status(400).json({ error: 'id, waNum and an https link required' });
+      const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
+      const sr = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: num, type: 'document', document: { link, filename: String(filename || 'document.pdf').slice(0, 120), ...(caption ? { caption: String(caption).slice(0, 1000) } : {}) } }),
+      });
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) return res.status(502).json({ error: sd.error?.message || 'WhatsApp send failed' });
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: { ...headers, Prefer: 'return=minimal' },
+        body: JSON.stringify({ owner_id: parseInt(id, 10), wa_num: num, direction: 'outbound', content: `[Document — ${String(filename || 'document.pdf')}]${caption ? ' ' + String(caption).slice(0, 200) : ''}`, timestamp: new Date().toISOString(), source: 'api', status: 'sent', wa_message_id: sd.messages?.[0]?.id || null }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, wa_message_id: sd.messages?.[0]?.id || null });
+
     } else if (action === 'add_owner_prospect') {
       const { name, waNum, consentNote, lang, promoCode, cold, intel, facts } = payload || {};
       const num = normIndoMobile(waNum) || String(waNum || '').replace(/\D/g, '');
