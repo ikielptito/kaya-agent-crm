@@ -255,6 +255,28 @@ export default async function handler(req, res) {
       });
     }
 
+    // ── Owner-facing ──────────────────────────────────────────────
+    // The portal's Housekeeping tab. Scoped to the slugs the portal has
+    // already established the owner holds; no staff names or numbers.
+    if (action === 'hk_owner_records') {
+      const { ownerRecords } = await import('../lib/housekeeping-owner.js');
+      return res.status(200).json(await ownerRecords(db, { slugs: payload.slugs, from: payload.from, to: payload.to }));
+    }
+    if (action === 'hk_owner_record_photos') {
+      const { cleanSlugs } = await import('../lib/housekeeping-owner.js');
+      const mine = new Set(cleanSlugs(payload.slugs));
+      const table = payload.type === 'inspection' ? 'housekeeping_inspections' : 'housekeeping_readiness';
+      const row = (await sbGet(`${table}?id=eq.${id}&select=id,slug,photos&limit=1`))?.[0];
+      if (!row || !mine.has(row.slug)) return res.status(404).json({ error: 'no such record' });
+      const { signPhotoUrl } = await import('../lib/maintenance.js');
+      const photo_urls = [];
+      for (const p of (row.photos || []).slice(0, 40)) {
+        const u = await signPhotoUrl(db, p, 3600).catch(() => null);
+        if (u) photo_urls.push(u);
+      }
+      return res.status(200).json({ id: row.id, type: payload.type === 'inspection' ? 'inspection' : 'handover', photo_urls });
+    }
+
     // ── Readiness ─────────────────────────────────────────────────
     if (action === 'hk_readiness') {
       const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
