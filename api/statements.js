@@ -190,6 +190,10 @@ export default async function handler(req, res) {
     if (action === 'statement_amend_from_sheet') return res.status(200).json(await amendFromSheet(db, id, { notifyOwner: !!payload.notify_owner, actor: payload.actor || 'admin' }));
     if (action === 'statement_dismiss_discrepancy') return res.status(200).json(await dismissDiscrepancy(db, id));
     if (action === 'statement_revision_changes') return res.status(200).json(await setRevisionChanges(db, id, payload.changes || []));
+    if (action === 'statement_attachments') {
+      const { statementAttachments } = await import('../lib/statement-requests.js');
+      return res.status(200).json({ attachments: await statementAttachments(db, id) });
+    }
 
     // Amendments — transparent corrections to published statements.
     if (action === 'statement_amend_start') {

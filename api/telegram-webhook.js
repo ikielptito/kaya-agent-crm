@@ -174,6 +174,19 @@ async function handleCommand(cmd, argsStr) {
 // ── Callback (inline button tap) handler ───────────────────────────
 async function handleCallback(cb) {
   const data = cb.data || '';
+  // Era's statement-change requests: Approve / Reject.
+  if (/^stmt(ok|no):/.test(data)) {
+    const approve = data.startsWith('stmtok:');
+    const token = data.split(':')[1];
+    try {
+      const { resolveApproval } = await import('../lib/statement-requests.js');
+      const db = { SUPABASE_URL: process.env.SUPABASE_URL, sbHeaders: { apikey: process.env.SUPABASE_KEY, Authorization: 'Bearer ' + process.env.SUPABASE_KEY, 'Content-Type': 'application/json' } };
+      const wa = { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN };
+      const line = await resolveApproval(db, wa, token, approve);
+      await answerCallback(cb.id, line);
+    } catch (e) { await answerCallback(cb.id, `Failed: ${e.message}`); }
+    return;
+  }
   const [action, agentIdStr] = data.split(':');
   const agentId = parseInt(agentIdStr, 10);
   if (!agentId || !['pause', 'resume'].includes(action)) {

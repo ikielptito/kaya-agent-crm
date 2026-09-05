@@ -1287,6 +1287,24 @@ export async function nodeHandler(req, res) {
         }
       } catch (e) { /* never let a Q&A break team messaging */ }
 
+      // A change to a monthly statement, asked in words ("forgot to deduct
+      // the curtains from A5's August"): Maya reads it back, Era confirms,
+      // drafts change on the spot, published ones go to Ikiel's Telegram.
+      try {
+        const { handleStatementChangeRequest } = await import('../lib/statement-requests.js');
+        if (await handleStatementChangeRequest({
+          db: relayDb, wa: relayWa, fromNum, fromName: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', text, apiKey: ANTHROPIC_KEY,
+          mediaType, mediaId, caption: extracted.caption || null,
+          fetchImage: async (id) => { const m = await fetchWaMediaBase64(id, WA_TOKEN).catch(() => null); return m?.data ? { base64: m.data, contentType: m.mime || 'image/jpeg' } : null; },
+        })) {
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'statement_change' }),
+          }).catch(() => {});
+          return res.status(200).end();
+        }
+      } catch (e) { /* never let this break team messaging */ }
+
       // Maintenance: Era (and any cleaner in maintenance_reporters) files
       // issues by sending a photo + description, and answers Maya's nudges
       // here too. It only claims a message it is confident about, so her
