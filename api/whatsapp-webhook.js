@@ -1429,6 +1429,18 @@ export async function nodeHandler(req, res) {
           await logStaff('housekeeping');
           return res.status(200).end();
         }
+        // Two days after Maya's onboarding message, a plain sentence with
+        // no fault words is a question about the system, not a work order:
+        // "jika tidak ada oven" was once read by the model backstop below
+        // as a maintenance report. Keyword-shaped reports still go through.
+        {
+          const { looksLikeMaintenance } = await import('../lib/maintenance-intake.js');
+          if (!mediaId && !looksLikeMaintenance(text, false)
+              && await handleOnboardingFollowup({ db: relayDb, wa: relayWa, fromNum, text })) {
+            await logStaff('staff_help');
+            return res.status(200).end();
+          }
+        }
         if (person.can_report) {
           const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
           const took = await handleStaffMaintenance({

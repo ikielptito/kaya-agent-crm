@@ -391,6 +391,29 @@ export default async function handler(req, res) {
         again: !!payload.again, dryRun: !!payload.dry_run,
       }));
     }
+    // A one-off text from Maya to one staff member (a correction, a
+    // clarification). Logged as staff_help so the thread stays coherent.
+    if (action === 'hk_staff_message') {
+      const { listStaff } = await import('../lib/staff.js');
+      const text = String(payload.text || '').trim();
+      if (!text) return res.status(400).json({ error: 'text required' });
+      const people = await listStaff(db, { active_only: true });
+      const p = people.find(x => x.name === payload.name || String(x.wa_num || '').replace(/\D/g, '') === String(payload.wa || '').replace(/\D/g, ''));
+      if (!p) return res.status(404).json({ error: 'no such staff member' });
+      const to = String(p.wa_num).replace(/\D/g, '');
+      const r = await fetch(`https://graph.facebook.com/v24.0/${process.env.META_WA_PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + process.env.META_WA_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: 'WhatsApp refused', detail: d });
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ wa_num: to, direction: 'outbound', content: text, timestamp: new Date().toISOString(), source: 'console', category: 'staff_help', wa_message_id: d.messages?.[0]?.id || null, status: 'sent' }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, to: p.name });
+    }
     if (action === 'hk_onboard_status') {
       const { onboardingStatus } = await import('../lib/staff-onboarding.js');
       return res.status(200).json({ people: await onboardingStatus(db), template: (await approvedTemplates())['samba_hk_onboarding'] ? 'approved' : 'not approved' });
