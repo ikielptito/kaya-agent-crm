@@ -356,10 +356,15 @@ export default async function handler(req, res) {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) return res.status(502).json({ error: d.error?.message || 'WhatsApp send failed' });
-      // Logged so the owner's thread shows the first contact.
+      // Logged as the words she saw, on her owner record, so the thread in
+      // the chat console shows the first contact rather than a placeholder.
+      const ownerRow = (await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${to}&select=id&limit=1`, { headers: sbHeaders }).then(x => x.json()).catch(() => []))?.[0];
+      const shown = name === 'samba_owner_welcome_v1'
+        ? `Hi ${payload.welcome.first}, I'm Maya, the assistant at Samba Realty, who manage ${payload.welcome.villa} with Era and Ikiel.\n\nYour owner portal is ready. It shows, for your villa: the monthly statement and what is owed to you, a weekly report with the inspection photos, repairs waiting for your approval and the ones already done, and the bookings calendar.\n\nTap the button to open it. It signs you in with this WhatsApp number, no password needed, and the link works for 7 days.\n\nFrom now on I will also message you here when a repair needs your approval or a statement is ready. You can reply to me any time with questions about your villa.\n\n[Open my portal]`
+        : 'Here is your secure sign-in link for your Samba owner portal. [Open my portal]';
       await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
         method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
-        body: JSON.stringify({ wa_num: to, direction: 'outbound', content: name === 'samba_owner_welcome_v1' ? `[Owner welcome — ${payload.welcome.villa}: portal link]` : '[Owner portal sign-in link]', timestamp: new Date().toISOString(), wa_message_id: d.messages?.[0]?.id || null, source: 'console', category: 'owner_onboard', template_name: name, status: 'sent' }),
+        body: JSON.stringify({ wa_num: to, owner_id: ownerRow?.id ?? null, direction: 'outbound', content: shown, timestamp: new Date().toISOString(), wa_message_id: d.messages?.[0]?.id || null, source: 'console', category: 'owner_onboard', template_name: name, status: 'sent' }),
       }).catch(() => {});
       return res.status(200).json({ ok: true, message_id: d.messages?.[0]?.id || null, template: name });
     }
