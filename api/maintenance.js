@@ -64,8 +64,8 @@ export default async function handler(req, res) {
       let unclaimed_groups = [];
       try {
         const { claimedGroupKeys } = await import('../lib/onboarded.js');
-        const claimed = await claimedGroupKeys();
-        unclaimed_groups = [...new Set(items.map(i => i.group_key).filter(k => k && !claimed.has(k)))];
+        const claimed = await claimedGroupKeys(db);
+        unclaimed_groups = claimed.__open ? [] : [...new Set(items.map(i => i.group_key).filter(k => k && !claimed.has(k)))];
       } catch { /* the list still renders */ }
       // What actually needs a human: Era's review pile and work still open.
       const needsReview = items.filter(i => i.status === 'new').length;
