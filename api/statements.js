@@ -310,8 +310,10 @@ export default async function handler(req, res) {
     // deliver to US (+1) numbers — and some owners (Romina) are on US numbers.
     if (action === 'statement_wa_login_code') {
       const to = String(payload.wa_num || '').replace(/\D/g, '');
-      const tok = String(payload.token || '').replace(/[^a-f0-9]/gi, '');
-      if (!to || tok.length < 16) return res.status(400).json({ error: 'wa_num and token required' });
+      // Keep the dash: a management login's token is prefixed 'd8-' so the
+      // portal can route the tap to the cockpit instead of the owner portal.
+      const tok = String(payload.token || '').replace(/[^a-f0-9-]/gi, '');
+      if (!to || tok.replace(/-/g, '').length < 16) return res.status(400).json({ error: 'wa_num and token required' });
       // Only numbers registered on an active group may be messaged — this
       // endpoint must not be usable to spam arbitrary numbers from our WABA.
       // Normally only numbers already registered on a property may be
