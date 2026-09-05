@@ -1324,6 +1324,22 @@ export async function nodeHandler(req, res) {
         }
       } catch (e) { /* never let maintenance break team messaging */ }
 
+      // Era asking how the housekeeping system works, or why something is
+      // on the schedule: answered from the SOP and today's flags. Only for
+      // Era — Ikiel has the console assistant — and only for questions.
+      if (fromNum === ERA_WA_NUM && !mediaId) {
+        try {
+          const { answerStaffQuestion } = await import('../lib/staff-help.js');
+          if (await answerStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text, role: 'era', apiKey: ANTHROPIC_KEY })) {
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'staff_help' }),
+            }).catch(() => {});
+            return res.status(200).end();
+          }
+        } catch (e) { /* fall through to the human default */ }
+      }
+
       // Anything else from a team number is logged and left for a human. Era
       // is never an agent lead and never an owner — the portal's owner sync
       // can put her number on an owners row (Hostex overrides list her as
@@ -1416,6 +1432,16 @@ export async function nodeHandler(req, res) {
             if (forced) { await logStaff('maintenance_staff'); return res.status(200).end(); }
           }
         }
+        // A question about how the system works, or why a task matters.
+        // Last, so a task reply, a photo round or a fault report is never
+        // mistaken for one; answered from the SOP and her own day.
+        try {
+          const { handleStaffQuestion } = await import('../lib/staff-help.js');
+          if (!mediaId && await handleStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text })) {
+            await logStaff('staff_help');
+            return res.status(200).end();
+          }
+        } catch (e) { /* silence is the old behaviour; keep it as the floor */ }
         await logStaff('staff');
         return res.status(200).end();
       }

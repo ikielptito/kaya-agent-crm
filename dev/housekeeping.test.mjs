@@ -305,5 +305,14 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
   t('a projected deep clean also avoids a known stay', r.find(x => x.kind === 'deep_clean').date, '2026-11-10');
 }
 
+// ── What counts as a question for Maya to answer ────────────────────
+{
+  const { looksLikeStaffQuestion } = await import('../lib/staff-help.js');
+  const yes = ['kenapa harus foto oven?', 'Kenapa harus foto dalam oven', 'gimana cara kirim foto', 'apa itu deep clean', 'why do they need to photograph the sofa', 'boleh saya kerjakan besok pagi?', 'what does Needs a look mean'];
+  const no = ['sudah', 'Sudah selesai', 'besok saja', 'lampu teras mati', 'ok', '🙏', 'terima kasih', 'sabun mandi tinggal sedikit', 'selesai'];
+  t('questions are claimed', yes.map(looksLikeStaffQuestion), yes.map(() => true));
+  t('task replies, acks and reports are not', no.map(looksLikeStaffQuestion), no.map(() => false));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

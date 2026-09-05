@@ -348,6 +348,23 @@ export default async function handler(req, res) {
       return res.status(200).json({ days: parseInt(payload.days, 10) || 30, people: await housekeeperStats(db, { days: parseInt(payload.days, 10) || 30 }) });
     }
 
+    // Ask Maya a staff question without sending anything: what she would
+    // reply to a housekeeper (or Era) who asked this.
+    if (action === 'hk_help_preview') {
+      const { answerStaffQuestion, looksLikeStaffQuestion } = await import('../lib/staff-help.js');
+      const text = String(payload.text || '');
+      if (!looksLikeStaffQuestion(text)) return res.status(200).json({ claimed: false, why: 'does not read as a question' });
+      const role = payload.role === 'era' ? 'era' : 'housekeeper';
+      let person = null;
+      if (role === 'housekeeper') {
+        const { listStaff } = await import('../lib/staff.js');
+        const people = await listStaff(db, { active_only: true, role: 'housekeeper' });
+        person = people.find(p => p.name === payload.name) || people[0] || null;
+      }
+      const out = await answerStaffQuestion({ db, wa: null, fromNum: '0', text, role, person, dryRun: true });
+      return res.status(200).json({ claimed: !!out, as: role === 'era' ? 'Era' : person?.name || null, ...(out || {}) });
+    }
+
     if (action === 'hk_sweep_preview') {
       return res.status(200).json(await runHousekeepingSweep({
         SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN,
