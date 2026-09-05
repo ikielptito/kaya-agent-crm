@@ -20,7 +20,8 @@ import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
 import { getSpendAllowance } from '../lib/spend.js';
 import { announceListingLive, noteNewArrivals } from '../lib/listing-live.js';
-import { consoleAuthorized, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
+import { consoleAuthorized, consoleScope, staffActionAllowed, setConsoleCors, consoleAuthHeaders } from '../lib/auth.js';
+import { listStaff, staffLineNumbers } from '../lib/staff.js';
 import { resolveCampaign, bump as bumpCampaign, logEvent as logCampaignEvent } from '../lib/campaigns.js';
 import { sbRows } from '../lib/sb-rows.js';
 
@@ -179,13 +180,29 @@ export default async function handler(req, res) {
   }
 
   // Console gate — after the portal's own-secret sync path above, before any
-  // action that reads or sends.
-  if (!consoleAuthorized(req)) return res.status(401).json({ error: 'Console key required' });
+  // action that reads or sends. The staff key (Era's app) gets a short
+  // allowlist and roster-filtered reads; everything else answers 403 so the
+  // page can tell "not yours" from "logged out".
+  const scope = consoleScope(req);
+  if (!scope) return res.status(401).json({ error: 'Console key required' });
+  const staffOnly = scope === 'staff';
+  if (staffOnly && !staffActionAllowed(action)) return res.status(403).json({ error: 'Not available on the staff console' });
+  const staffDb = { SUPABASE_URL, sbHeaders: headers };
 
   try {
     let r;
 
-    if (action === 'get_agents') {
+    if (action === 'console_scope') {
+      // What the page should show. Era's app reads this once on load.
+      return res.status(200).json({ scope });
+
+    } else if (action === 'get_staff') {
+      // The roster, for the Staff segment of the inbox. Active people only —
+      // a deactivated housekeeper's old thread stays reachable under "All".
+      const staff = await listStaff(staffDb, { active_only: true });
+      return res.status(200).json(staff);
+
+    } else if (action === 'get_agents') {
       r = await fetch(SUPABASE_URL + '/rest/v1/agents?select=*&order=id', { headers });
       const data = await r.json();
       return res.status(r.status).json(data);
@@ -269,16 +286,26 @@ export default async function handler(req, res) {
 
     } else if (action === 'get_messages') {
       const { agentId } = payload || {};
-      const filter = agentId ? `?agent_id=eq.${agentId}&order=timestamp.desc&limit=100` : '?order=timestamp.desc&limit=500';
+      let filter = agentId ? `?agent_id=eq.${agentId}&order=timestamp.desc&limit=100` : '?order=timestamp.desc&limit=500';
+      if (staffOnly) {
+        // The staff console's feed is the roster's threads and nothing else:
+        // an agent id in the payload is ignored, the number list is the
+        // server's, and an empty roster returns nothing rather than everything.
+        const nums = [...await staffLineNumbers(staffDb)];
+        if (!nums.length) return res.status(200).json([]);
+        filter = `?wa_num=in.(${nums.join(',')})&order=timestamp.desc&limit=500`;
+      }
       r = await fetch(SUPABASE_URL + '/rest/v1/wa_messages' + filter, { headers });
       const data = await r.json();
       return res.status(r.status).json(data);
 
     } else if (action === 'get_number_messages') {
       // Every message to/from one number regardless of whether it has an
-      // agent or owner record — the team line (Era), orphans. Read-only use.
+      // agent or owner record — the team line (Era), orphans, and the staff
+      // roster (whose threads are answered from here).
       const num = String(payload?.waNum || '').replace(/\D/g, '');
       if (!num) return res.status(400).json({ error: 'waNum required' });
+      if (staffOnly && !(await staffLineNumbers(staffDb)).has(num)) return res.status(403).json({ error: 'Not a staff number' });
       r = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_num=eq.${num}&order=timestamp.desc&limit=200`, { headers });
       const data = await r.json();
       return res.status(r.status).json(data);
@@ -842,6 +869,20 @@ export default async function handler(req, res) {
       mid = await send({ type: 'template', template: { name: 'maya_team_alert', language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: String(topic || 'a note from Maya').slice(0, 120) }] }] } });
       await log(`[Team alert template: ${topic}] · questions queued until Era replies:\n${body}`, mid, mid ? 'sent' : 'failed');
       return res.status(mid ? 200 : 502).json({ ok: !!mid, delivered: mid ? 'template+queued' : 'failed', question: obj });
+
+    } else if (action === 'wa_media') {
+      // Console: fetch one inbound WhatsApp image by media id (base64), for
+      // looking at what an owner or agent actually sent.
+      const TOKEN = process.env.META_WA_TOKEN;
+      const id = String(payload?.id || '').replace(/\D/g, '');
+      if (!TOKEN || !id) return res.status(400).json({ error: 'id required' });
+      const metaRes = await fetch(`https://graph.facebook.com/v24.0/${id}`, { headers: { Authorization: `Bearer ${TOKEN}` } });
+      if (!metaRes.ok) return res.status(404).json({ error: 'media not found (Meta keeps media ~30 days)' });
+      const meta = await metaRes.json();
+      const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${TOKEN}` } });
+      if (!binRes.ok) return res.status(502).json({ error: 'download failed' });
+      const buf = Buffer.from(await binRes.arrayBuffer());
+      return res.status(200).json({ mime: meta.mime_type || 'application/octet-stream', size: buf.length, data: buf.toString('base64') });
 
     } else if (action === 'set_settings') {
       r = await fetch(SUPABASE_URL + '/rest/v1/settings', {

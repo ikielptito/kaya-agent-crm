@@ -1613,7 +1613,19 @@ export async function nodeHandler(req, res) {
     // on, so this whole branch is dormant until then.
     // Owner mode for numbers with no agent row — or an agent row that turned
     // out to be an owner (crm action convert_to_owner sets role 'owner').
-    if (owner && (!agent || agent.campaign_engagement?.role === 'owner')) {
+    // An owner whose number is on a managed statement group (Pedro, Romina…)
+    // is an owner first, whatever agent row their number picked up along the
+    // way — otherwise a payout question lands in the agent flow, which has
+    // no statements to answer from (Pedro, 4 Sep 2026: 18 hours unanswered).
+    let managedOwner = false;
+    if (owner && agent && agent.campaign_engagement?.role !== 'owner') {
+      try {
+        const gr = await fetch(`${SUPABASE_URL}/rest/v1/statement_groups?select=owner_wa_nums&active=eq.true`, { headers: sbHeaders });
+        const gs = gr.ok ? await gr.json() : [];
+        managedOwner = gs.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === fromNum));
+      } catch { managedOwner = false; }
+    }
+    if (owner && (!agent || agent.campaign_engagement?.role === 'owner' || managedOwner)) {
       // Owners who are also registered reporters (Ikiel, Oli on the units
       // they co-own) file maintenance the same way the cleaners do: a photo
       // and a line, and it lands in the review pile. Only a message the
