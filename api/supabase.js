@@ -453,6 +453,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, wa_message_id: mid });
 
     // ── Owner onboarding funnel (prospects Ikiel has spoken to) ──
+    } else if (action === 'owner_send_template') {
+      // An approved template to an owner whose window is shut (the guide,
+      // a welcome). Body params in order; an optional URL-button param.
+      // Logged on the owner's thread with the text as she saw it, so the
+      // console never shows a bare placeholder for a first contact.
+      const { id, waNum, name, params, buttonParam, shown } = payload || {};
+      const num = String(waNum || '').replace(/\D/g, '');
+      if (id == null || !num || !name) return res.status(400).json({ error: 'id, waNum and name required' });
+      const TOKEN = process.env.META_WA_TOKEN, PHONE_ID = process.env.META_WA_PHONE_ID;
+      const components = [];
+      if (Array.isArray(params) && params.length) components.push({ type: 'body', parameters: params.map(t => ({ type: 'text', text: String(t).replace(/[\r\n\t]+/g, ' ').slice(0, 120) })) });
+      if (buttonParam) components.push({ type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: String(buttonParam).slice(0, 200) }] });
+      const sr = await fetch(`https://graph.facebook.com/v24.0/${PHONE_ID}/messages`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to: num, type: 'template', template: { name: String(name), language: { code: payload.lang || 'en' }, components } }),
+      });
+      const sd = await sr.json().catch(() => ({}));
+      if (!sr.ok) return res.status(502).json({ error: sd.error?.message || 'WhatsApp send failed' });
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: { ...headers, Prefer: 'return=minimal' },
+        body: JSON.stringify({ owner_id: parseInt(id, 10), wa_num: num, direction: 'outbound', content: String(shown || `[Template — ${name}]`).slice(0, 4000), timestamp: new Date().toISOString(), source: 'api', status: 'sent', template_name: String(name), wa_message_id: sd.messages?.[0]?.id || null }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, wa_message_id: sd.messages?.[0]?.id || null });
+
     } else if (action === 'owner_send_document') {
       // A file to an owner (the owner guide, a record PDF) inside an open
       // window, logged on their thread like any other send.
