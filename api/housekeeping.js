@@ -193,6 +193,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     }
 
+    // Correct a round's findings by hand (a placeholder that slipped in, a
+    // typo before the owner's report goes out).
+    if (action === 'hk_inspection_patch') {
+      const findings = payload.findings == null ? null : String(payload.findings).slice(0, 1000);
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, {
+        method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify({ findings }),
+      });
+      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      return res.status(200).json({ ok: true, inspection: (await r.json())[0] || null });
+    }
     if (action === 'hk_inspections') {
       let q = 'housekeeping_inspections?select=*,staff:by_staff_id(id,name)&order=inspected_on.desc&limit='
         + (parseInt(payload.limit, 10) || 50);

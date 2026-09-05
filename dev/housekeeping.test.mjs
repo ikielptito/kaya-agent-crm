@@ -314,5 +314,11 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
   t('task replies, acks and reports are not', no.map(looksLikeStaffQuestion), no.map(() => false));
 }
 
+{
+  const { realText } = await import('../lib/housekeeping-intake.js');
+  t('the image placeholder is not a finding', realText('[Agent sent an image — say briefly that you could not open it and offer to have Ikiel review it.]'), '');
+  t('a real caption is', realText('jamur di plafon kamar mandi'), 'jamur di plafon kamar mandi');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
