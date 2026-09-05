@@ -1309,6 +1309,24 @@ export async function nodeHandler(req, res) {
         }
       } catch (e) { /* never let this break team messaging */ }
 
+      // Her answer to the backlog nudge — "#4 done, #7 fixed, #15 estimate
+      // 85,000" — is a set of updates to tickets that exist, and must never
+      // reach the report parser below, which once turned exactly such a
+      // reply into four new tickets under the wrong villa.
+      if (!mediaId) {
+        try {
+          const { handleBacklogReply, handleBacklogUndo } = await import('../lib/maintenance-backlog-reply.js');
+          if (await handleBacklogUndo({ db: relayDb, wa: relayWa, fromNum, text })
+              || await handleBacklogReply({ db: relayDb, wa: relayWa, fromNum, text, who: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', apiKey: ANTHROPIC_KEY })) {
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_status' }),
+            }).catch(() => {});
+            return res.status(200).end();
+          }
+        } catch (e) { /* fall through to the report parser */ }
+      }
+
       // Maintenance: Era (and any cleaner in maintenance_reporters) files
       // issues by sending a photo + description, and answers Maya's nudges
       // here too. It only claims a message it is confident about, so her

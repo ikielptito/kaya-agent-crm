@@ -47,6 +47,7 @@ export default async function handler(req, res) {
     'Content-Type': 'application/json', Prefer: 'return=minimal',
   };
   const db = { SUPABASE_URL, sbHeaders };
+  const sbGet = async (path) => { const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: sbHeaders }); return r.ok ? r.json() : null; };
 
   const { action, payload = {} } = req.body || {};
   const id = payload.id != null ? parseInt(payload.id, 10) : null;
@@ -78,6 +79,35 @@ export default async function handler(req, res) {
 
     if (action === 'maint_patch')    return res.status(200).json(await patchItem(db, id, payload.fields || {}));
     if (action === 'maint_delete')   return res.status(200).json(await deleteItem(db, id));
+    // A remark on a ticket's thread without changing its state.
+    if (action === 'maint_note') {
+      const { appendThread } = await import('../lib/maintenance.js');
+      await appendThread(db, id, { who: payload.who || 'admin', text: String(payload.text || '').slice(0, 500) });
+      return res.status(200).json({ ok: true });
+    }
+    // Move a ticket to another villa when it was filed under the wrong one.
+    // The owner group follows the villa; the thread records the move. If the
+    // old owner had already been asked, the caller is told so a human can
+    // send a word — the system does not un-send a message.
+    if (action === 'maint_move') {
+      const slug = String(payload.slug || '');
+      if (!slug) return res.status(400).json({ error: 'slug required' });
+      const groups = (await sbGet(`statement_groups?active=is.true&select=key,name,listing_slugs`)) || [];
+      const group = groups.find(g => (g.listing_slugs || []).includes(slug));
+      if (!group) return res.status(400).json({ error: `no owner group holds ${slug}; add it under Properties first` });
+      const item = (await sbGet(`maintenance_items?id=eq.${id}&select=*&limit=1`))?.[0];
+      if (!item) return res.status(404).json({ error: 'item not found' });
+      const { patchItem, appendThread } = await import('../lib/maintenance.js');
+      await patchItem(db, id, { group_key: group.key, slug, unit_label: payload.unit_label ? String(payload.unit_label).slice(0, 40) : null });
+      await appendThread(db, id, { who: payload.actor || 'admin', text: `Moved from ${item.slug || item.group_key} to ${slug}` });
+      return res.status(200).json({ ok: true, group: group.key, owner_was_notified: !!item.notified_at, was: item.slug || item.group_key });
+    }
+    // Dry run of Era's status reply: what Maya would apply, without applying.
+    if (action === 'maint_backlog_reply_preview') {
+      const { parseStatusReply } = await import('../lib/maintenance-backlog-reply.js');
+      const open = (await sbGet(`maintenance_items?status=in.(new,pending_approval,approved,scheduled)&select=*,statement_groups(key,name)&order=created_at.asc&limit=100`)) || [];
+      return res.status(200).json({ open: open.map(i => ({ id: i.id, status: i.status, title: i.title })), parsed: await parseStatusReply(String(payload.text || ''), open) });
+    }
     // What is waiting on Era, and the nudge that tells her: preview shows
     // the message without sending; force sends it now regardless of the hour.
     if (action === 'maint_backlog') {
