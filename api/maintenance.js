@@ -78,6 +78,19 @@ export default async function handler(req, res) {
 
     if (action === 'maint_patch')    return res.status(200).json(await patchItem(db, id, payload.fields || {}));
     if (action === 'maint_delete')   return res.status(200).json(await deleteItem(db, id));
+    // What is waiting on Era, and the nudge that tells her: preview shows
+    // the message without sending; force sends it now regardless of the hour.
+    if (action === 'maint_backlog') {
+      const { eraBacklog } = await import('../lib/maintenance-backlog.js');
+      return res.status(200).json({ backlog: await eraBacklog(db) });
+    }
+    if (action === 'maint_nudge_era') {
+      const { runEraBacklogNudge } = await import('../lib/maintenance-backlog.js');
+      return res.status(200).json(await runEraBacklogNudge({
+        db, wa: { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN },
+        force: !!payload.force, preview: !!payload.preview,
+      }));
+    }
     if (action === 'maint_publish')  return res.status(200).json(await publishItem(db, id, {
       requires_approval: payload.requires_approval,
       estimated_cost: payload.estimated_cost,

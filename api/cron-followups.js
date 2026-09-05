@@ -167,7 +167,15 @@ export default async function handler(req, res) {
           return await generateTasks({ SUPABASE_URL, sbHeaders });
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping });
+      // Era's maintenance backlog: one list, at fixed hours of the day,
+      // only when something is waiting on her. Same hourly beat.
+      const eraBacklog = await (async () => {
+        try {
+          const { runEraBacklogNudge } = await import('../lib/maintenance-backlog.js');
+          return await runEraBacklogNudge({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN } });
+        } catch (e) { return { error: e.message }; }
+      })();
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
