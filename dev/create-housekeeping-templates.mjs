@@ -90,6 +90,31 @@ Sambil jalan, coba juga: engsel, kunci dan gagang pintu · semua colokan, saklar
 Yang tidak berfungsi, tulis saja di sini. Kalau semua bagus, balas "semua bagus". Terima kasih.`,
     example: ['Villa Saturno'],
   },
+  {
+    // Onboarding (5 Sep 2026): Maya introduces the readiness system to each
+    // housekeeper herself, because the guide Era was asked to hand out
+    // competes with everything else on Era's day. A template because the
+    // window is shut; the buttons open it, and whatever they say next is
+    // answered by staff-help.
+    name: 'samba_hk_onboarding',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo {{1}}, saya Maya dari Samba 🙏
+
+Mulai minggu ini ada cara kerja baru supaya setiap villa benar-benar siap sebelum tamu masuk. Tiga hal yang berubah:
+
+1. Setelah selesai menyiapkan villa untuk tamu, saya akan minta 7 foto: sofa dengan sarungnya, dapur dan bagian dalam oven, kamar mandi dengan sabun terisi, kamar tidur, dinding, area kolam, dan kotak perlengkapan. Foto itu bukti kerja Anda yang baik, bukan kecurigaan.
+
+2. Kotak perlengkapan (sabun, sampo, tisu, kantong sampah, air) harus penuh saat tamu masuk. Kalau ada yang hampir habis, tulis ke saya. Era yang membeli.
+
+3. Pembersihan menyeluruh 3 bulan sekali, dan setelah tamu menginap lama. Jadwalnya saya kirim seperti biasa.
+
+Yang tidak berubah: pesan pagi, tombol Sudah selesai / Besok saja / Tidak bisa, dan lapor barang rusak dengan foto.
+
+Kalau ada yang belum jelas, tanya saja di sini kapan pun, saya jawab langsung. Tekan salah satu tombol di bawah ya.`,
+    example: ['Putu'],
+    quickReplies: ['Saya mengerti', 'Ada pertanyaan'],
+  },
 ];
 
 async function status() {

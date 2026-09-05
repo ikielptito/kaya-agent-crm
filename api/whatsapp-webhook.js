@@ -1395,6 +1395,14 @@ export async function nodeHandler(req, res) {
           await logStaff('maintenance_tukang');
           return res.status(200).end();
         }
+        // Her answer to Maya's onboarding message ("Saya mengerti" / "Ada
+        // pertanyaan"): before the task handlers, which would otherwise try
+        // to read a button label as a reply about today's clean.
+        const { handleOnboardingButton, handleOnboardingFollowup } = await import('../lib/staff-onboarding.js');
+        if (!mediaId && await handleOnboardingButton({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })) {
+          await logStaff('staff_onboard');
+          return res.status(200).end();
+        }
         // A readiness check she was just asked for comes first: those
         // photos certify a handover, and they arrive within the hour.
         const { handleReadiness } = await import('../lib/housekeeping-readiness.js');
@@ -1450,6 +1458,11 @@ export async function nodeHandler(req, res) {
         try {
           const { handleStaffQuestion } = await import('../lib/staff-help.js');
           if (!mediaId && await handleStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text })) {
+            await logStaff('staff_help');
+            return res.status(200).end();
+          }
+          // Two days after the onboarding, anything unclaimed is a question.
+          if (!mediaId && await handleOnboardingFollowup({ db: relayDb, wa: relayWa, fromNum, text })) {
             await logStaff('staff_help');
             return res.status(200).end();
           }

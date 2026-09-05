@@ -25,6 +25,20 @@ const KINDS = ['turnover', 'regular', 'pre_arrival', 'inspection', 'deep_clean']
 
 const PATCHABLE = new Set(['assigned_staff_id', 'task_date', 'notes', 'status', 'next_followup_at']);
 
+// Which templates Meta has approved, by name → true. Same source the cron
+// uses before sending anything.
+async function approvedTemplates() {
+  const wabaId = process.env.META_WABA_ID, token = process.env.META_WA_TOKEN;
+  if (!wabaId || !token) return {};
+  try {
+    const r = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates?limit=100&access_token=${token}`);
+    if (!r.ok) return {};
+    const map = {};
+    for (const t of ((await r.json()).data || [])) if (t.status === 'APPROVED') map[t.name] = true;
+    return map;
+  } catch { return {}; }
+}
+
 export default async function handler(req, res) {
   setConsoleCors(req, res);
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -363,6 +377,23 @@ export default async function handler(req, res) {
       }
       const out = await answerStaffQuestion({ db, wa: null, fromNum: '0', text, role, person, dryRun: true });
       return res.status(200).json({ claimed: !!out, as: role === 'era' ? 'Era' : person?.name || null, ...(out || {}) });
+    }
+
+    // Maya introduces the readiness system to the housekeepers herself.
+    // hk_onboard {dry_run, only:[names], again} sends the template; status
+    // shows who was sent, who tapped which button, who asked something.
+    if (action === 'hk_onboard') {
+      const { sendOnboarding } = await import('../lib/staff-onboarding.js');
+      const templatesMap = await approvedTemplates();
+      return res.status(200).json(await sendOnboarding({
+        db, wa: { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN },
+        templatesMap, only: Array.isArray(payload.only) ? payload.only : null,
+        again: !!payload.again, dryRun: !!payload.dry_run,
+      }));
+    }
+    if (action === 'hk_onboard_status') {
+      const { onboardingStatus } = await import('../lib/staff-onboarding.js');
+      return res.status(200).json({ people: await onboardingStatus(db), template: (await approvedTemplates())['samba_hk_onboarding'] ? 'approved' : 'not approved' });
     }
 
     if (action === 'hk_sweep_preview') {
