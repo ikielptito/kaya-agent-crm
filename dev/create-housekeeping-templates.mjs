@@ -70,6 +70,26 @@ Tolong kirim foto: kamar mandi, langit-langit, dinding dekat AC, dapur, dan kola
 Kirim fotonya langsung ke chat ini. Terima kasih.`,
     example: ['Villa Saturno'],
   },
+  {
+    // v2 (5 Sep 2026): the functional walk-through from Oli's own studio
+    // checklist folded into the fortnightly round. The handover after a
+    // clean stays at seven photos; this is the every-two-weeks look at what
+    // a photo of a clean room does not show — a lock that sticks, a plug
+    // that is dead, a remote with no batteries, a fire extinguisher that
+    // has quietly expired. Preferred by the sweep when approved, with the
+    // original as the fallback.
+    name: 'samba_hk_inspection_v2',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo, hari ini jadwalnya pemeriksaan rutin di {{1}}.
+
+Tolong kirim foto: kamar mandi, langit-langit, dinding dekat AC, dapur, dan kolam kalau ada. Kalau ada jamur, rembes air, atau yang rusak, foto dari dekat.
+
+Sambil jalan, coba juga: engsel, kunci dan gagang pintu · semua colokan, saklar dan lampu · AC dan remote TV · gorden dan tirai · keran, shower dan selang · toilet dan semprotan · kompor, kulkas dan dispenser · brankas · alat pemadam api (tanggal) · hanger lengkap · bantal kolam tidak berjamur.
+
+Yang tidak berfungsi, tulis saja di sini. Kalau semua bagus, balas "semua bagus". Terima kasih.`,
+    example: ['Villa Saturno'],
+  },
 ];
 
 async function status() {
@@ -89,7 +109,10 @@ async function create() {
     console.error('Set SYNC_SECRET to your Vercel LISTING_SYNC_SECRET, e.g.:\n  SYNC_SECRET=xxxx node dev/create-housekeeping-templates.mjs');
     process.exit(1);
   }
-  for (const t of TEMPLATES) {
+  // ONLY=<name> submits one template, so adding a version does not resubmit
+  // the ones Meta already approved.
+  const only = process.env.ONLY;
+  for (const t of TEMPLATES.filter(t => !only || t.name === only)) {
     const r = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + SECRET },
