@@ -309,7 +309,7 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
 {
   const { looksLikeStaffQuestion } = await import('../lib/staff-help.js');
   const yes = ['kenapa harus foto oven?', 'Kenapa harus foto dalam oven', 'gimana cara kirim foto', 'apa itu deep clean', 'why do they need to photograph the sofa', 'boleh saya kerjakan besok pagi?', 'what does Needs a look mean'];
-  const no = ['sudah', 'Sudah selesai', 'besok saja', 'lampu teras mati', 'ok', '🙏', 'terima kasih', 'Ok terimakasih', 'oke makasih ya 🙏', 'baik siap', 'sabun mandi tinggal sedikit', 'selesai'];
+  const no = ['sudah', 'Sudah selesai', 'besok saja', 'lampu teras mati', 'ok', '🙏', 'terima kasih', 'Ok terimakasih', 'oke makasih ya 🙏', 'baik siap', 'Okey kaka makasih', 'siap kak 🙏', 'sabun mandi tinggal sedikit', 'selesai'];
   t('questions are claimed', yes.map(looksLikeStaffQuestion), yes.map(() => true));
   t('task replies, acks and reports are not', no.map(looksLikeStaffQuestion), no.map(() => false));
 }
