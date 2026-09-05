@@ -157,7 +157,7 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
   // sending the housekeeper a second WhatsApp about one visit.
   const p = planTasks({
     today: TODAY,
-    units: [unit('haus-2', [stay('2026-08-01', '2026-09-06')])],
+    units: [unit('haus-2', [stay('2026-08-27', '2026-09-06')])],   // 10 nights: no long-stay deep clean
     careDays: NO_CLEANS,
     lastInspection: { 'haus-2': '2026-08-23' },      // due 6 Sept
   });
@@ -235,10 +235,10 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
 {
   // Due on the 8th, checkout on the 12th: the 12th has the turnover, so it
   // lands on the 13th and never on top of the same visit.
-  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-20', '2026-09-12'), stay('2026-09-13', '2026-09-30', 1)])], careDays: NO_CLEANS,
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-09-02', '2026-09-12'), stay('2026-09-13', '2026-09-30', 1)])], careDays: NO_CLEANS,
     lastDeepClean: { 'haus-1': '2026-06-10' } });
   const dc = datesOf(p, 'deep_clean')[0];
-  t('a deep clean never shares a day with another visit', datesOf(p, 'turnover').concat(datesOf(p, 'pre_arrival')).includes(dc), false);
+  t('a quarterly deep clean never shares a day with another visit', datesOf(p, 'turnover').concat(datesOf(p, 'pre_arrival')).includes(dc), false);
 }
 {
   // A tenant there for months: it happens on the due date anyway, and Era
@@ -258,6 +258,38 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
 {
   const p = planTasks({ today: TODAY, units: [unit('haus-1', [])], careDays: NO_CLEANS, cfg: { deep_clean_every_days: 0 } });
   t('deep cleans can be switched off', datesOf(p, 'deep_clean'), []);
+}
+
+// ── Deep clean after a long stay ─────────────────────────────────────
+{
+  // 28 nights, out on the 6th: turnover on the 6th, deep clean on the 7th.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-09', '2026-09-06')])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-07-01' } });
+  t('a long stay ends with a deep clean the day after the turnover', datesOf(p, 'deep_clean'), ['2026-09-07']);
+  t('and the quarterly clock restarts from it (no second one in the window)', datesOf(p, 'deep_clean').length, 1);
+}
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-30', '2026-09-06')])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-08-25' } });
+  t('a week-long stay does not', datesOf(p, 'deep_clean'), []);
+}
+{
+  // Next guest arrives the day after checkout: the deep clean lands on the
+  // checkout day itself and is flagged same-day for Era to weigh.
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-01', '2026-09-06'), stay('2026-09-07', '2026-09-20', 1)])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-07-01' } });
+  const dc = p.find(x => x.kind === 'deep_clean');
+  t('back-to-back: deep clean on the checkout day, flagged', [dc.task_date, dc.same_day, dc.guest_in_date], ['2026-09-06', true, '2026-09-07']);
+}
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-01', '2026-09-06')])], careDays: NO_CLEANS,
+    lastDeepClean: { 'haus-1': '2026-08-20' } });
+  t('not when a deep clean happened in the last month', datesOf(p, 'deep_clean'), []);
+}
+{
+  const p = planTasks({ today: TODAY, units: [unit('haus-1', [stay('2026-08-01', '2026-09-06')])], careDays: NO_CLEANS,
+    cfg: { deep_clean_after_nights: 0 }, lastDeepClean: { 'haus-1': '2026-08-20' } });
+  t('the long-stay rule can be switched off', datesOf(p, 'deep_clean'), []);
 }
 
 // ── The rounds ahead ─────────────────────────────────────────────────
