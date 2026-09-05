@@ -196,9 +196,12 @@ export default async function handler(req, res) {
     // Correct a round's findings by hand (a placeholder that slipped in, a
     // typo before the owner's report goes out).
     if (action === 'hk_inspection_patch') {
-      const findings = payload.findings == null ? null : String(payload.findings).slice(0, 1000);
+      const fields = {};
+      if ('findings' in payload) fields.findings = payload.findings == null ? null : String(payload.findings).slice(0, 1000);
+      if (Array.isArray(payload.item_ids)) fields.item_ids = payload.item_ids.map(Number).filter(Number.isInteger);
+      if (!Object.keys(fields).length) return res.status(400).json({ error: 'nothing to change' });
       const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, {
-        method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify({ findings }),
+        method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(fields),
       });
       if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
       return res.status(200).json({ ok: true, inspection: (await r.json())[0] || null });
