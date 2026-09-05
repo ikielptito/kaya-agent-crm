@@ -14,7 +14,8 @@ import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderIm
 import webpush from 'web-push';
 import { handleIcsGet, sendViewingInvites } from '../lib/viewings.js';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
-import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread } from './whatsapp-webhook.js';
+import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread, handleOwnerConversation } from './whatsapp-webhook.js';
+import { isOwnerCatchupCandidate, windowOpen, catchupOutcome } from '../lib/owner-catchup.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
 import { sweepUnanswered } from '../lib/sla.js';
@@ -1891,6 +1892,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?is_test=eq.false&unread_count=gt.0&last_inbound_at=gte.${sinceIso}&select=id,name,wa_num,wa_url,automation_override,samba_alerts_opt_out&order=last_inbound_at.desc&limit=${maxAgents}`, { headers });
       let candidates = await aRes.json();
       if (!Array.isArray(candidates)) candidates = [];
+      if (payload?.owners_only) candidates = [];   // the owner pass alone (verification, manual runs)
 
       // Current spend today (shared daily_usage counter, WITA day).
       const uRes = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
@@ -1973,6 +1975,63 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         body: JSON.stringify({ key: 'daily_usage', value: usage })
       }).catch(() => {});
 
+      // ── Owners ────────────────────────────────────────────────────
+      // The owner-side twin: owners whose reply generation failed (the
+      // "[Maya (owner) failed …]" marker) or who are still unread. Each one
+      // is re-run through the webhook's own owner handler, so the reply
+      // follows the live mode, prompt and send path. Runs AFTER the spend
+      // persist above because the handler counts its own spend into
+      // daily_usage; the cap is re-read here rather than carried over.
+      // See lib/owner-catchup.js for why owners needed their own net.
+      const ownerResults = [];
+      let ownersConsidered = 0;
+      if (payload?.owners !== false) {
+        let owners = [];
+        try {
+          const oRes = await fetch(`${SUPABASE_URL}/rest/v1/owners?paused=eq.false&last_inbound_at=gte.${sinceIso}&select=*&order=last_inbound_at.desc&limit=60`, { headers });
+          owners = oRes.ok ? await oRes.json() : [];
+        } catch { owners = []; }
+        const cands = (Array.isArray(owners) ? owners : []).filter(o => isOwnerCatchupCandidate(o, sinceIso)).slice(0, 20);
+        ownersConsidered = cands.length;
+        for (const o of cands) {
+          const label = o.name || ('+' + o.wa_num);
+          const num = String(o.wa_num || '').replace(/\D/g, '');
+          if (!num) { ownerResults.push({ owner: label, skipped: 'no_number' }); continue; }
+          // Still unanswered? Broadcasts (cron), holding lines (sla) and
+          // Maya's own relayed questions don't count as an answer.
+          let last = null;
+          try {
+            const lRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?owner_id=eq.${o.id}&or=(source.not.in.(cron,sla),source.is.null)&order=timestamp.desc&limit=1&select=direction,timestamp,content,wa_message_id`, { headers });
+            last = (await lRes.json())?.[0] || null;
+          } catch { last = null; }
+          if (!last || last.direction !== 'inbound') {
+            // Answered by a human meanwhile: clear the stale marker and unread.
+            await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, { method: 'PATCH', headers,
+              body: JSON.stringify({ unread_count: 0, ...(/^\[Maya \(owner\) failed/.test(String(o.suggested_reply || '')) ? { suggested_reply: '' } : {}) }) }).catch(() => {});
+            ownerResults.push({ owner: label, skipped: 'already_answered' });
+            continue;
+          }
+          let spendNow = 0;
+          try {
+            const u2 = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.daily_usage&select=value`, { headers });
+            spendNow = ((await u2.json())?.[0]?.value || {})[witaDay] || 0;
+          } catch { spendNow = 0; }
+          if (spendNow >= CAP_USD) { ownerResults.push({ owner: label, skipped: 'spend_cap' }); continue; }
+          const open = windowOpen(last.timestamp);
+          try {
+            await handleOwnerConversation({
+              SUPABASE_URL, sbHeaders: headers, owner: o, fromNum: num,
+              inbound: String(last.content || ''), timestamp: last.timestamp, waMessageId: last.wa_message_id || null,
+              WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, catchup: true, forceDraft: !open,
+            });
+          } catch (e) { ownerResults.push({ owner: label, error: e.message }); continue; }
+          let after = o;
+          try { after = (await (await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}&select=suggested_reply,unread_count`, { headers })).json())?.[0] || o; } catch {}
+          const outcome = catchupOutcome(after);
+          ownerResults.push({ owner: label, [outcome]: true, ...(open ? {} : { window_closed: true }) });
+        }
+      }
+
       return res.status(200).json({
         mode: globalMode,
         sent: results.filter(r => r.sent).length,
@@ -1980,6 +2039,12 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         considered: candidates.length,
         spend_today_usd: +todaySpend.toFixed(2),
         results,
+        owners: {
+          considered: ownersConsidered,
+          sent: ownerResults.filter(r => r.sent).length,
+          drafted: ownerResults.filter(r => r.drafted).length,
+          results: ownerResults,
+        },
       });
 
     } else if (action === 'quick_add_agent') {

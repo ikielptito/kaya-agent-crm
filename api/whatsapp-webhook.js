@@ -3306,7 +3306,14 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
 // flow but use the owners table + owner_id-tagged messages. (PORTAL_BASE is
 // declared near the top of the file, shared with the availability helpers.)
 
-async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, waMessageId, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, mediaType, mediaId }) {
+// `catchup`: re-running an inbound that was already counted (the nightly
+// owner catch-up in api/supabase.js, for a reply whose generation failed).
+// The row's last_inbound_at and unread_count are left alone and the burst
+// settle is skipped; everything else — mode, prompt, draft-or-send — is the
+// live path. `forceDraft`: the owner's 24h window is shut, so the reply can
+// only be staged for a human; a free-text send would be accepted by Meta and
+// then fail with 131047.
+export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum, inbound, timestamp, waMessageId, WA_TOKEN, WA_PHONE_ID, ANTHROPIC_KEY, mediaType, mediaId, catchup = false, forceDraft = false }) {
   // Automation mode: global setting, with a per-owner pause override.
   let globalMode = 'draft';
   try {
@@ -3314,9 +3321,9 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
     const sRow = (await sRes.json())?.[0];
     if (sRow?.value?.mode) globalMode = sRow.value.mode;
   } catch { /* default draft */ }
-  const mode = owner.paused ? 'paused' : globalMode;
+  const mode = owner.paused ? 'paused' : (forceDraft && globalMode !== 'off' ? 'draft' : globalMode);
 
-  const patch = { last_inbound_at: timestamp, unread_count: (owner.unread_count || 0) + 1 };
+  const patch = catchup ? {} : { last_inbound_at: timestamp, unread_count: (owner.unread_count || 0) + 1 };
 
   // ── Onboarding funnel bookkeeping (prospects only) ──
   if (isProspect(owner)) {
@@ -3383,7 +3390,7 @@ async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, fromNum
   // 24 contradictory "all set!" messages in 43 seconds. The photo upload above
   // still runs for every image; only the REPLY is left to the newest message,
   // which sees the whole burst in its thread.
-  await sleep(BURST_SETTLE_MS);
+  if (!catchup) await sleep(BURST_SETTLE_MS);
   if (await hasNewerOwnerInbound(SUPABASE_URL, sbHeaders, owner.id, timestamp, waMessageId)) {
     await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
     return;
@@ -3491,6 +3498,14 @@ export async function generateOwnerReply(apiKey, owner, inbound, thread, listing
   // stays on Sonnet. Ikiel, 24 Aug 2026.
   const ownerModel = (prospect && isColdProspect(owner)) ? 'claude-opus-5' : 'claude-sonnet-4-6';
 
+  // An owner who is also one of our agents (Dony Bambang) gets told so, so a
+  // fee or villa question from the agent side is answered here too.
+  let dualRole = '';
+  if (db) {
+    const { findAgentByNumber, dualRoleBlock } = await import('../lib/owner-dual-role.js');
+    dualRole = dualRoleBlock(await findAgentByNumber(db, owner.wa_num));
+  }
+
   const system = `You are Maya, listings coordinator for Samba Realty in Bali. You are messaging on WhatsApp with a villa OWNER / property manager — a partner and client, not a sales agent. Be warm, concise, first-name friendly, and never salesy.
 
 Owner: ${ownerName}
@@ -3500,7 +3515,7 @@ Their portal account email: ${owner.email || '(not collected yet — see ACCOUNT
 ${String(owner.notes || '').trim() ? `
 OWNER NOTES (durable facts recorded about this owner — they OVERRIDE any instinct to ask again; if a note says never ask about something, do not mention that thing at all):
 ${String(owner.notes).trim()}
-` : ''}
+` : ''}${dualRole}
 
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
