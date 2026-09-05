@@ -329,23 +329,39 @@ export default async function handler(req, res) {
       const WA_TOKEN = process.env.META_WA_TOKEN;
       const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
       if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
+      // A first contact gets the welcome template (who Maya is, what the
+      // portal shows, one tap to open) when Meta has approved it; the plain
+      // sign-in template otherwise, and always for a self-service login.
+      let name = 'samba_owner_login_link', components = [
+        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+      ];
+      if (payload.welcome?.first && payload.welcome?.villa) {
+        try {
+          const wabaId = process.env.META_WABA_ID;
+          const t = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates?fields=name,status&name=samba_owner_welcome_v1&limit=5`, { headers: { Authorization: 'Bearer ' + WA_TOKEN } });
+          const ok = ((await t.json()).data || []).some(x => x.name === 'samba_owner_welcome_v1' && x.status === 'APPROVED');
+          if (ok) {
+            name = 'samba_owner_welcome_v1';
+            components = [
+              { type: 'body', parameters: [{ type: 'text', text: String(payload.welcome.first).slice(0, 40) }, { type: 'text', text: String(payload.welcome.villa).replace(/[\r\n\t]+/g, ' ').slice(0, 60) }] },
+              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
+            ];
+          }
+        } catch { /* fall back to the sign-in template */ }
+      }
       const r = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp', to, type: 'template',
-          template: {
-            name: 'samba_owner_login_link',
-            language: { code: 'en' },
-            components: [
-              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
-            ],
-          },
-        }),
+        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: 'en' }, components } }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) return res.status(502).json({ error: d.error?.message || 'WhatsApp send failed' });
-      return res.status(200).json({ ok: true, message_id: d.messages?.[0]?.id || null });
+      // Logged so the owner's thread shows the first contact.
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ wa_num: to, direction: 'outbound', content: name === 'samba_owner_welcome_v1' ? `[Owner welcome — ${payload.welcome.villa}: portal link]` : '[Owner portal sign-in link]', timestamp: new Date().toISOString(), wa_message_id: d.messages?.[0]?.id || null, source: 'console', category: 'owner_onboard', template_name: name, status: 'sent' }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, message_id: d.messages?.[0]?.id || null, template: name });
     }
 
     // What Maya is shown when an owner asks about money — for checking her
