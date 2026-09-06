@@ -1296,6 +1296,17 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }
 
+    } else if (action === 'preview_team_reply') {
+      // DRY RUN of the team assistant for Era or Ikiel: what would Maya
+      // answer to this text right now? Sends nothing, spends nothing on the
+      // ledger; the tool calls are listed so a case can assert them.
+      const { handleTeamMessage } = await import('../lib/team-assistant.js');
+      const from = String(payload?.from || 'era').toLowerCase();
+      const num = from === 'ikiel' || from === 'admin' ? String(process.env.OWNER_WA_NUM || '').replace(/\D/g, '') : String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
+      const t0 = Date.now();
+      const out = await handleTeamMessage({ db: { SUPABASE_URL, sbHeaders: headers }, wa: null, fromNum: num, text: String(payload?.text || ''), apiKey: process.env.ANTHROPIC_API_KEY, dryRun: true, role: from === 'ikiel' || from === 'admin' ? 'admin' : 'era' });
+      return res.status(200).json({ from, ms: Date.now() - t0, ...(out || { claimed: false, outcome: 'not_claimed' }) });
+
     } else if (action === 'preview_reply') {
       // DRY RUN of the real webhook pipeline for one agent: what would Maya say
       // to their latest inbound (or to payload.inbound) right now? Returns the

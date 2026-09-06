@@ -1348,10 +1348,41 @@ export async function nodeHandler(req, res) {
         }
       } catch (e) { /* never let maintenance break team messaging */ }
 
+      // The team assistant: Era and Ikiel ask about villas, guests, cleaning,
+      // repairs, statements, payroll, staff and how the system works, and
+      // get an answer from the same functions the cockpit uses. A message
+      // that is not for Maya comes back as not_for_me and reaches a person
+      // through the human default below plus Telegram. Switched on by
+      // settings.team_assistant.enabled (or TEAM_ASSISTANT=on).
+      if (!mediaId && text && !isBareAck(text)) {
+        try {
+          const ta = await import('../lib/team-assistant.js');
+          if (await ta.assistantEnabled(relayDb)) {
+            const out = await ta.handleTeamMessage({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY });
+            if (out?.claimed) {
+              await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+                method: 'POST', headers: sbHeaders,
+                body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_assistant' }),
+              }).catch(() => {});
+              await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+                method: 'POST', headers: sbHeaders,
+                body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'outbound', content: out.reply, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_assistant', status: 'sent' }),
+              }).catch(() => {});
+              return res.status(200).end();
+            }
+            if (out?.outcome === 'not_for_me') {
+              const { postToTelegram } = await import('../lib/telegram.js');
+              postToTelegram(`📨 ${fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel'} → team (not for Maya: ${out.reason}):\n${String(text).slice(0, 800)}`).catch(() => {});
+            }
+          }
+        } catch (e) { console.warn('team assistant failed:', e.message); }
+      }
+
       // Era asking how the housekeeping system works, or why something is
       // on the schedule: answered from the SOP and today's flags. Only for
       // Era — Ikiel has the console assistant — and only for questions.
-      if (fromNum === ERA_WA_NUM && !mediaId) {
+      // Stays as the fallback while the team assistant is switched off.
+      if (fromNum === ERA_WA_NUM && !mediaId && !(await (await import('../lib/team-assistant.js')).assistantEnabled(relayDb).catch(() => false))) {
         try {
           const { answerStaffQuestion } = await import('../lib/staff-help.js');
           if (await answerStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text, role: 'era', apiKey: ANTHROPIC_KEY })) {

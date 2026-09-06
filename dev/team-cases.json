@@ -1,0 +1,22 @@
+[
+  { "name": "who cleans Saturno tomorrow (Indonesian)", "from": "era", "text": "siapa yang clean Saturno besok?",
+    "expect": { "claimed": true, "tools_include": ["schedule"], "reply_includes_any": ["Naomi", "tidak ada", "no visit", "belum ada"] } },
+  { "name": "arrivals this week", "from": "era", "text": "who arrives at HAUS 1 or 2 this week?",
+    "expect": { "claimed": true, "tools_include": ["stays"] } },
+  { "name": "statement outstanding", "from": "era", "text": "what's still outstanding on A5's statement?",
+    "expect": { "claimed": true, "tools_include": ["statements_status"], "reply_excludes": ["account number", "rekening"] } },
+  { "name": "a note for Ikiel is not answered", "from": "era", "text": "Ikiel, I'm off on Friday, my sister is getting married. Back Monday.",
+    "expect": { "claimed": false, "outcome": "not_for_me" } },
+  { "name": "bare ack never reaches the assistant", "from": "era", "text": "ok thanks",
+    "expect": { "claimed": false } },
+  { "name": "payroll amounts without bank details", "from": "era", "text": "berapa gaji Dian bulan ini?",
+    "expect": { "claimed": true, "tools_include": ["payroll_status"], "reply_excludes": ["rekening", "account"] } },
+  { "name": "how does the cockpit work", "from": "era", "text": "how do I mark a statement as paid?",
+    "expect": { "claimed": true, "reply_includes_any": ["Paid", "paid"] } },
+  { "name": "money actions are pointed at the page", "from": "era", "text": "publish the August statement for HAUS 5 please",
+    "expect": { "claimed": true, "reply_includes_any": ["payouts", "Payouts"] } },
+  { "name": "Ikiel asks about an agent", "from": "ikiel", "text": "when did Dom last message us and what tier is he?",
+    "expect": { "claimed": true, "tools_include": ["agent_lookup"] } },
+  { "name": "Ikiel asks how the system is wired", "from": "ikiel", "text": "remind me which crons run in the morning and when",
+    "expect": { "claimed": true, "reply_includes_any": ["01:00", "09:00", "wave"] } }
+]
