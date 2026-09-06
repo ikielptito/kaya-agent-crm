@@ -1,5 +1,6 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
 import { loadPlaybookBlock } from '../lib/maya-review.js';
+import { handbookDigest, handbookSection } from '../lib/handbook.js';
 import { forwardInbound, forwardMayaReply, postToTelegram } from '../lib/telegram.js';
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { createAgentRow } from '../lib/agents.js';
@@ -871,7 +872,8 @@ const MAYA_REPLY_SCHEMA = strObj({
     verdict: { type: 'string', enum: ['fit', 'near_miss', 'out'] },
     why: { type: 'string' },
   }) },
-  action: { type: 'string', enum: ['auto', 'escalate', 'need_availability'] },
+  action: { type: 'string', enum: ['auto', 'escalate', 'need_availability', 'handbook'] },
+  handbook_key: { type: 'string' },
   reply: { type: 'string' },
   availability_query: nullable(strObj({ slug: { type: 'string' }, check_in: { type: 'string' }, check_out: { type: 'string' } })),
   send_doc: nullable({ type: 'string' }),
@@ -2984,6 +2986,8 @@ async function generateReply(apiKey, agent, inbound, mode, portfolioContext, bro
   // (agent name, thread, mode) stays uncached after the breakpoint.
   const systemHead = `${MAYA_PERSONA}
 ${playbookBlock ? `\n${playbookBlock}\n` : ''}
+${handbookDigest('agent')}
+
 KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
 
@@ -3131,8 +3135,9 @@ ${CRM_SIGNALS_INSTRUCTIONS}
 Respond with ONLY a JSON object (no markdown, no prose):
 {
   "match_scan": [] | the fits and near-misses (plus up to 5 closest "out") when the agent has given client criteria, e.g. { "slug": "villa_saturno", "verdict": "fit", "why": "3BR villa, 35jt under 45jt ceiling, pool, Canggu; free 14 Sep" },
-  "action": "auto" | "escalate" | "need_availability",
-  "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability",
+  "action": "auto" | "escalate" | "need_availability" | "handbook",
+  "handbook_key": null | "<a key from HANDBOOK SECTIONS>",
+  "reply": "the message to send to the agent (1-4 sentences typical); leave "" when action is need_availability or handbook",
   "availability_query": null | { "slug": "<samba property slug>", "check_in": "YYYY-MM-DD", "check_out": "YYYY-MM-DD" },
   "send_doc": null | one of [${brochureKeys}],
   "send_cards": [] | up to 4 Samba rental slugs, e.g. ["villa_umah_astanine", "haus_4"] — valid slugs: [${rentalSlugs.join(', ') || '(none available)'}],
@@ -3152,7 +3157,7 @@ NEGOTIATION — when an agent asks for a lower price:
 - If the property's "Notes for Maya" contain a NEGOTIATION rule with a floor, you are authorised to negotiate that villa yourself: open at the listed rate, move only when the agent pushes back with a concrete number or reason, concede in small steps (never jump to the floor), never go below the floor, and never reveal the floor. When a figure is agreed, restate it plainly in the reply ("Agreed: 270jt for the year, starting 1 Oct") and set notify_team to Ikiel with the agreed number and the agent's name so he can issue the paperwork. Use "auto" for these turns — that is the point of the pilot.
 - If there is no floor in the notes: Era-managed villa → say you'll take it to Ikiel and set notify_team to Ikiel; any other listed contact → relay the request with ask_owner and tell the agent you're asking the villa. Never invent a discount, and never imply the price is flexible when you have no floor.
 MATCH SCAN ("match_scan") — fill this FIRST, before the reply, whenever the agent's latest message or the thread contains a client brief (any of: budget, bedrooms, area, dates, property type, features). Consider EVERY Samba rental in the portfolio, but WRITE only the fits and near-misses plus at most 5 "out" entries for the closest rejects (the rest are implied; keep each "why" under 15 words): "fit" = meets every hard criterion (property type, bedroom minimum, price at or BELOW the budget ceiling — cheaper is still a fit — and, if dates were given, free or freeing up by the start date); "near_miss" = exactly one hard criterion missed by a little (price up to ~15% over the ceiling, one bedroom short, right neighbourhood but not the named street, or frees up within ~2 weeks after the requested start); "out" = clearly fails, with the reason. Unknown features are NOT a miss. A price ABOVE the stated ceiling is NEVER a "fit", not even by a little — it is at most a "near_miss". Do not reclassify a near-miss as a "fit" in order to card it; if you catch yourself writing "over budget but…" about something you marked "fit", it is a near_miss. Every "fit" MUST then appear in your reply and (up to 4) in send_cards — if more than 4 fit, card the best 4 and name the rest in the text. send_cards is for FITS ONLY: never attach a card for a near-miss (over-budget, out-of-area, or one bedroom short) — mention those in the text, after the fits, clearly framed, so the cards the agent sees are all real matches. If a budget was given and NO property is in-budget, cards may show the closest near-miss(es) but the text must say plainly they are above budget. Near-misses come after the fits. Leave match_scan [] when there is no brief (greetings, commission questions, a single named property, KAYA sales talk).
-Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. For all other messages use "auto" or "escalate".
+Use "need_availability" ONLY to check a specific date range for a Samba rental, per the SAMBA LIVE AVAILABILITY instructions above — set "availability_query" and leave "reply" empty; the system handles the lookup and re-prompts you. Use "handbook" (set "handbook_key", leave "reply" empty) when the agent asks how something on Samba works — fees, the portal, viewings, policies, what an owner pays — and the facts block above is not enough; the section comes back and you answer from it. For all other messages use "auto" or "escalate".
 ${isHybrid
   ? `Set "action" to "auto" for everything you can carry end to end with confidence from the portfolio data: factual questions (commission %, a property's price or availability, sending a brochure); scheduling turns where you collect a preferred time and offer the listed contact; and — this is the core of the job — a CLIENT BRIEF you can answer with at least one genuine fit.
 A CLIENT BRIEF (an agent giving criteria — budget, bedrooms, area, dates, features — and asking what you have) is "auto" whenever your match_scan contains one or more "fit" entries (bedroom count, type and area met, price AT OR BELOW the ceiling, available or freeing up by the requested date). Recommend them yourself per the CLIENT MATCHING RULES: lead with the single best in-budget match, card only the fits (best 4), name any extra fits in text, and move the agent toward a viewing. Do NOT escalate a brief just because it lists criteria — an agent waiting on a shortlist you can already build is precisely what you are here to answer autonomously.
@@ -3211,7 +3216,9 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
   const messages = [{ role: 'user', content: firstTurn }];
   let llmCalls = 0;
   let costUsd = 0;
-  const MAX_LLM_CALLS = 2;
+  // One availability check and one handbook lookup at most, then the reply.
+  const MAX_LLM_CALLS = 3;
+  let availabilityUsed = false, handbookUsed = false;
 
   try {
     for (let hop = 0; hop < MAX_LLM_CALLS; hop++) {
@@ -3257,7 +3264,17 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
 
       // Maya wants a live calendar check for a specific range — do it, then
       // feed the result back for a final reply. Only on the first hop.
-      if (parsed.action === 'need_availability' && parsed.availability_query && hop < MAX_LLM_CALLS - 1) {
+      if (parsed.action === 'handbook' && parsed.handbook_key && !handbookUsed && hop < MAX_LLM_CALLS - 1) {
+        handbookUsed = true;
+        const sec = handbookSection(parsed.handbook_key, 'agent');
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: sec
+          ? `Handbook section "${sec.key}" — ${sec.title}:\n${sec.text}\n\nNow reply to the agent from this (JSON, action "auto" or "escalate"). Quote figures and policy exactly; do not add anything the section does not say.`
+          : `No handbook section named "${parsed.handbook_key}". Answer from the facts you have (JSON, action "auto"), or escalate if you cannot.` });
+        continue;
+      }
+      if (parsed.action === 'need_availability' && parsed.availability_query && !availabilityUsed && hop < MAX_LLM_CALLS - 1) {
+        availabilityUsed = true;
         const result = await checkPortalAvailability(parsed.availability_query);
         messages.push({ role: 'assistant', content: raw });
         messages.push({ role: 'user', content: `Live calendar result: ${result}\n\nNow reply to the agent with a final JSON response (action "auto" or "escalate"). Quote the dates and be specific. If not available, mention the next free option if helpful.\n\nThis result covers ONLY the one property you checked. If the agent gave a client brief (budget, bedrooms, area, features), your reply must still follow the CLIENT MATCHING RULES in full: re-scan the whole portfolio, lead with EVERY candidate that fits the hard criteria — remember the budget is a ceiling, so cheaper properties are in, not out — using the live availability summary for the ones you did not calendar-check (say you'll confirm their exact dates), and only then add any over-budget near-miss, clearly framed. Do not let the property you happened to check crowd out better-fitting ones. Attach cards for every property you recommend.` });
@@ -3621,16 +3638,19 @@ RULES (continued):
 - For money matters BEYOND those fundamentals — money owed, billing disputes, complaints, bespoke contract terms, legal questions: set action "escalate" (Ikiel handles those personally). Even when you escalate, FIRST answer whatever parts the fundamentals cover in your reply, then say Ikiel will confirm the rest — never leave "reply" empty on an escalation; silence reads as being ignored.
 - Keep replies to 1–4 short sentences (a multi-part fundamentals question may take a few more). This is WhatsApp.
 ${onboardingBlock}
+${handbookDigest('owner')}
+
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "handbook" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "handbook_key": null | "<a key from HANDBOOK SECTIONS>",
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3685,6 +3705,14 @@ Use "report" to fetch real numbers before answering a performance question (set 
         } catch (e) { block = `(housekeeping records unavailable: ${e.message})`; }
         messages.push({ role: 'assistant', content: raw });
         messages.push({ role: 'user', content: `Their housekeeping log:\n${block}\n\nNow answer the owner from this data only — cite the dates and what each record says, in plain friendly WhatsApp language (JSON, action "auto"). If what they asked is not in this data, say so and offer to have Era check (action "escalate" with a helpful reply).` });
+        continue;
+      }
+      if (parsed.action === 'handbook' && parsed.handbook_key && hop < MAX - 1) {
+        const sec = handbookSection(parsed.handbook_key, 'owner');
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: sec
+          ? `Handbook section "${sec.key}" — ${sec.title}:\n${sec.text}\n\nNow answer the owner from this, in plain friendly WhatsApp language (JSON, action "auto"). Quote figures and policy exactly; do not add anything the section does not say.`
+          : `No handbook section named "${parsed.handbook_key}". Answer from the facts you have (JSON, action "auto"), or escalate.` });
         continue;
       }
       if (parsed.action === 'maintenance' && hop < MAX - 1) {
