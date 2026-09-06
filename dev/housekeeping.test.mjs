@@ -320,5 +320,40 @@ const stay = (check_in, check_out, vacant_days_before = null) => ({
   t('a real caption is', realText('jamur di plafon kamar mandi'), 'jamur di plafon kamar mandi');
 }
 
+// ── The evening chase ────────────────────────────────────────────────
+{
+  const { planChase, chaseParams, eraMessage } = await import('../lib/housekeeping-chase.js');
+  const ana = { id: 4, name: 'Ana', wa_num: '6281237692282', active: true };
+  const putu = { id: 5, name: 'Putu', wa_num: '6287862135047', active: true };
+  const tasks = [
+    { id: 1, slug: 'lanehaus-1', kind: 'regular', task_date: TODAY, status: 'notified', staff: ana },
+    { id: 2, slug: 'lanehaus-3', kind: 'pre_arrival', task_date: TODAY, status: 'notified', staff: ana },
+    { id: 3, slug: 'haus-1', kind: 'regular', task_date: TODAY, status: 'notified', staff: putu },
+    { id: 4, slug: 'haus-2', kind: 'regular', task_date: TODAY, status: 'done', staff: putu },
+    { id: 5, slug: 'haus-4', kind: 'regular', task_date: '2026-08-31', status: 'notified', staff: putu },
+    { id: 6, slug: 'tropicana-b2', kind: 'inspection', task_date: TODAY, status: 'notified', staff: ana },
+  ];
+  const reach = { '6287862135047': false };
+  const morning = planChase({ tasks, today: TODAY, hour: 12, state: {}, reach });
+  t('nothing before 17:00', [morning.chase.length, morning.escalate.length], [0, 0]);
+  const five = planChase({ tasks, today: TODAY, hour: 17, state: {}, reach });
+  t('17:00 chases one message per person, open today only, not inspections', five.chase.map(g => [g.staff.name, g.tasks.map(x => x.id)]), [['Ana', [1, 2]]]);
+  t('a dead phone is not chased', five.unreachable.map(x => x.id), [3]);
+  t('nothing to Era yet', five.escalate.length, 0);
+  const again = planChase({ tasks, today: TODAY, hour: 18, state: { day: TODAY, chased: [1, 2] }, reach });
+  t('chased once a day', again.chase.length, 0);
+  const seven = planChase({ tasks, today: TODAY, hour: 19, state: { day: TODAY, chased: [1, 2] }, reach });
+  t('19:00 escalates everything still open today, chased or not, incl. the dead phone', seven.escalate.map(x => [x.id, x.chased, x.unreachable]), [[1, true, false], [2, true, false], [3, false, true]]);
+  t('19:00 no longer chases', seven.chase.length, 0);
+  const done = planChase({ tasks, today: TODAY, hour: 20, state: { day: TODAY, chased: [1, 2], era_day: TODAY }, reach });
+  t('Era hears once a day', done.escalate.length, 0);
+  const yday = planChase({ tasks, today: TODAY, hour: 17, state: { day: '2026-08-31', chased: [1, 2] } });
+  t('yesterday\'s chase list does not carry over', yday.chase.map(g => g.tasks.map(x => x.id)), [[1, 2], [3]]);
+  const name = (s) => ({ 'lanehaus-1': 'LaneHAUS 1', 'lanehaus-3': 'LaneHAUS 3' })[s] || s;
+  t('one villa: villa and task', chaseParams([tasks[0]], name), ['LaneHAUS 1', 'bersih-bersih rutin']);
+  t('two villas: both named, tap once per villa', chaseParams([tasks[0], tasks[1]], name)[1].includes('satu kali untuk setiap villa'), true);
+  t('Era line marks the dead phone', eraMessage(seven.escalate, name).split('\n')[3].includes('not reaching her phone'), true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

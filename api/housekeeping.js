@@ -525,6 +525,15 @@ export default async function handler(req, res) {
       return res.status(200).json({ id: row.id, type: payload.type === 'inspection' ? 'inspection' : 'handover', photo_urls });
     }
 
+    // Dry run of the evening chase at a given WITA hour (default: now).
+    if (action === 'hk_chase_preview') {
+      const { runHousekeepingChase } = await import('../lib/housekeeping-chase.js');
+      const tm = await approvedTemplates().catch(() => ({}));
+      return res.status(200).json(await runHousekeepingChase({
+        db, wa: null, templatesMap: tm, catalogNames: await catalogNames(db).catch(() => ({})),
+        preview: true, hour: payload.hour != null ? parseInt(payload.hour, 10) : null,
+      }));
+    }
     if (action === 'hk_sweep_preview') {
       return res.status(200).json(await runHousekeepingSweep({
         SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN,

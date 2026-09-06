@@ -49,6 +49,20 @@ Kalau sudah selesai atau ada kendala, tekan tombol di bawah. Terima kasih.`,
     quickReplies: ['Sudah selesai', 'Besok saja', 'Tidak bisa'],
   },
   {
+    // The 17:00 chase for a visit still not marked done. Same three
+    // buttons as the morning so the tap lands in the same handler.
+    name: 'samba_hk_chase',
+    language: 'id',
+    category: 'UTILITY',
+    body: `Halo, tadi pagi ada jadwal di {{1}}.
+
+Tugas: {{2}}
+
+Sudah selesai belum? Kalau sudah, tekan Sudah selesai supaya tercatat. Kalau belum bisa hari ini, tekan tombol lain supaya Era tahu. Terima kasih.`,
+    example: ['HAUS Canggu · Unit 2', 'bersih-bersih rutin'],
+    quickReplies: ['Sudah selesai', 'Besok saja', 'Tidak bisa'],
+  },
+  {
     name: 'samba_hk_week',
     language: 'id',
     category: 'UTILITY',

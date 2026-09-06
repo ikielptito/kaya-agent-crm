@@ -175,7 +175,20 @@ export default async function handler(req, res) {
           return await runEraBacklogNudge({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN } });
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog });
+      // The evening chase: 17:00 asks each housekeeper about today's visits
+      // still not marked done; 19:00 hands what is still open to Era.
+      const hkChase = await (async () => {
+        try {
+          const { runHousekeepingChase } = await import('../lib/housekeeping-chase.js');
+          const { catalogNames } = await import('../lib/housekeeping.js');
+          const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders).catch(() => ({}));
+          return await runHousekeepingChase({
+            db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN }, templatesMap,
+            catalogNames: await catalogNames({ SUPABASE_URL, sbHeaders }).catch(() => ({})),
+          });
+        } catch (e) { return { error: e.message }; }
+      })();
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
