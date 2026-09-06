@@ -95,5 +95,19 @@
     "Google"
    ]
   }
+ },
+ {
+  "name": "owner asks for the sign-in link",
+  "ownerId": 361,
+  "inbound": "Can you send me the portal link again?",
+  "expect": {
+   "action": [
+    "auto"
+   ],
+   "reply_includes_any": [
+    "sent",
+    "link"
+   ]
+  }
  }
 ]

@@ -1306,7 +1306,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const thread = await fetchOwnerThread(SUPABASE_URL, headers, owner.id).catch(() => '');
       const listingSlugs = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
       const t0 = Date.now();
-      const out = await generateOwnerReply(process.env.ANTHROPIC_API_KEY, owner, String(inbound || ''), thread, listingSlugs, { SUPABASE_URL, sbHeaders: headers, owner });
+      const out = await generateOwnerReply(process.env.ANTHROPIC_API_KEY, owner, String(inbound || ''), thread, listingSlugs, { SUPABASE_URL, sbHeaders: headers, owner, dryRun: true });
       return res.status(200).json({ owner: { id: owner.id, name: owner.name }, ms: Date.now() - t0, ...out });
 
     } else if (action === 'preview_team_reply') {

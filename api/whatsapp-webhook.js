@@ -3674,7 +3674,7 @@ ${handbookDigest('owner')}
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "bookings" | "handbook" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "bookings" | "handbook" | "login_link" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
   "handbook_key": null | "<a key from HANDBOOK SECTIONS>",
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
@@ -3682,7 +3682,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. Use "login_link" when they ask for the portal link, cannot sign in, or lost their session (leave reply ""): a one-tap sign-in link goes to their WhatsApp and you are told whether it went; never promise a link without this action. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3747,6 +3747,28 @@ Use "report" to fetch real numbers before answering a performance question (set 
           : `No handbook section named "${parsed.handbook_key}". Answer from the facts you have (JSON, action "auto"), or escalate.` });
         continue;
       }
+      if (parsed.action === 'login_link' && hop < MAX - 1) {
+        // The portal mints the one-time token and asks us to deliver it; the
+        // same path as typing the number on the sign-in page. Only a number
+        // on file for a villa gets one.
+        let note;
+        try {
+          if (db?.dryRun) note = '(dry run) The sign-in link would be sent to their WhatsApp now.';
+          else {
+            const r = await fetch(`${process.env.PORTAL_BASE_URL || 'https://sambarentals.com'}/api/statements`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'wa_login_start', payload: { phone: String(owner.wa_num || '').replace(/\D/g, '') } }),
+              signal: AbortSignal.timeout(12000),
+            });
+            const d = await r.json().catch(() => ({}));
+            note = r.ok ? 'The sign-in link has just been sent to their WhatsApp (this same chat); it opens the portal with one tap and is valid for 10 minutes.'
+              : `The link could NOT be sent: ${d.error || `HTTP ${r.status}`}. If the number is not on file, they can sign in with Google at sambarentals.com/portal, or Ikiel can add the number.`;
+          }
+        } catch (e) { note = `The link could not be sent right now (${e.message}); suggest Google sign-in at sambarentals.com/portal and offer to try again.`; }
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `${note}\n\nNow tell the owner in one or two friendly sentences (JSON, action "auto").` });
+        continue;
+      }
       if (parsed.action === 'bookings' && hop < MAX - 1) {
         // The booking calendar for their managed villas, 30 days back and
         // 90 ahead. Guest names as Hostex gives them; never for marketplace
@@ -3757,7 +3779,7 @@ Use "report" to fetch real numbers before answering a performance question (set 
             const { ownerManagedSlugs } = await import('../lib/housekeeping-owner.js');
             const { fetchStays } = await import('../lib/housekeeping.js');
             const managed = await ownerManagedSlugs(db, { waNum: owner.wa_num, slugs: listingSlugs });
-            if (!managed.length) block = '(this owner has no Samba-managed villa; their own calendar is not something you can see)';
+            if (!managed.length) block = 'MARKETPLACE VILLA — not managed by Samba. The owner runs their own bookings on Airbnb, Booking.com or their own calendar; Samba has no view of who is staying. This is not an outage: tell them plainly that their bookings live in their own calendar, and that Samba only syncs blocked dates for availability. Do not offer to have Era check.';
             else {
               const t = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
               const from = new Date(Date.parse(t) - 30 * 86400e3).toISOString().slice(0, 10), to = new Date(Date.parse(t) + 90 * 86400e3).toISOString().slice(0, 10);
