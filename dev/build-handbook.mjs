@@ -114,6 +114,71 @@ add('legal.privacy', 'Privacy policy (sambarentals.com/privacy)', ['owner', 'age
   add('persona.identity', 'Who Maya is: identity, disclosure, voice', ['system'], spec.slice(from, to > from ? to : undefined));
 }
 
+// ── Generated system map (from code; not hashed — code changes daily) ─
+function listJs(dir) { return fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => f.endsWith('.js')).sort() : []; }
+function headerOf(src) {
+  const lines = src.split('\n');
+  const out = [];
+  for (const l of lines) { if (l.startsWith('//')) out.push(l.replace(/^\/\/ ?/, '')); else if (out.length) break; else if (l.trim() && !l.startsWith('#!')) break; }
+  return out.join(' ').replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+function actionsOf(src) {
+  const set = new Set();
+  for (const m of src.matchAll(/action === '([a-z0-9_\/-]+)'/g)) set.add(m[1]);
+  for (const m of src.matchAll(/case '([a-z0-9_\/-]+)':/g)) set.add(m[1]);
+  return [...set].sort();
+}
+{
+  const routes = [];
+  for (const [label, repo] of [['CRM', CRM], ['portal', PORTAL]]) {
+    for (const f of listJs(path.join(repo, 'api'))) {
+      const src = fs.readFileSync(path.join(repo, 'api', f), 'utf8');
+      const acts = actionsOf(src);
+      routes.push(`${label} api/${f} — ${headerOf(src) || '(no header)'}${acts.length ? `\n  actions: ${acts.join(', ')}` : ''}`);
+    }
+  }
+  add('system.routes', 'Every API file in both repos, its purpose and its actions (generated from code)', ['system'], routes.join('\n'));
+
+  const crons = [];
+  for (const [label, repo] of [['CRM', CRM], ['portal', PORTAL]]) {
+    const vj = JSON.parse(fs.readFileSync(path.join(repo, 'vercel.json'), 'utf8'));
+    for (const c of (vj.crons || [])) {
+      const [min, hour] = c.schedule.split(' ');
+      const wita = /^\d+$/.test(hour) ? `${String((Number(hour) + 8) % 24).padStart(2, '0')}:${String(min).padStart(2, '0')} WITA` : `every hour at :${String(min).padStart(2, '0')} WITA`;
+      crons.push(`${label} ${c.path} — cron "${c.schedule}" (UTC) = ${wita}`);
+    }
+  }
+  add('system.crons', 'Scheduled jobs in both repos, with Bali times (generated)', ['system'], crons.join('\n'));
+
+  const keys = new Set();
+  for (const dir of ['lib', 'api']) for (const f of listJs(path.join(CRM, dir))) {
+    const src = fs.readFileSync(path.join(CRM, dir, f), 'utf8');
+    for (const m of src.matchAll(/getSettingValue\(db, '([^']+)'\)/g)) keys.add(m[1]);
+    for (const m of src.matchAll(/settings\?key=eq\.([a-zA-Z0-9_]+)/g)) keys.add(m[1]);
+  }
+  add('system.settings', 'Settings keys the CRM reads (generated): each is a row in the settings table', ['system'], [...keys].sort().join('\n'));
+
+  const env = {};
+  for (const [label, repo] of [['CRM', CRM], ['portal', PORTAL]]) {
+    const set = new Set();
+    for (const dir of ['lib', 'api']) for (const f of listJs(path.join(repo, dir))) {
+      const src = fs.readFileSync(path.join(repo, dir, f), 'utf8');
+      for (const m of src.matchAll(/process\.env\.([A-Z][A-Z0-9_]+)/g)) set.add(m[1]);
+    }
+    env[label] = [...set].sort();
+  }
+  add('system.env', 'Environment variables each repo reads (generated; values never listed)', ['system'], Object.entries(env).map(([k, v]) => `${k}: ${v.join(', ')}`).join('\n\n'));
+
+  const links = [];
+  for (const [label, repo] of [['portal', PORTAL], ['CRM', CRM]]) {
+    const pth = path.join(repo, 'lib', 'tokens.js');
+    if (!fs.existsSync(pth)) continue;
+    const src = fs.readFileSync(pth, 'utf8').split('\n');
+    src.forEach((l, i) => { const m = l.match(/^export function (\w+)/); if (m) { let j = i - 1, c = []; while (j >= 0 && src[j].startsWith('//')) { c.unshift(src[j].replace(/^\/\/ ?/, '')); j--; } links.push(`${label} ${m[1]}() — ${c.join(' ').slice(0, 200)}`); } });
+  }
+  add('system.links', 'Signed-link helpers in both repos (generated)', ['system'], links.join('\n'));
+}
+
 // ── Digests: the facts each audience carries in its prompt ──────────
 // Hand-curated, byte-stable, no dates. When a source page changes, the
 // freshness test fails and these lines get re-checked by a person.

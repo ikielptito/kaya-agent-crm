@@ -3674,7 +3674,7 @@ ${handbookDigest('owner')}
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "handbook" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "bookings" | "handbook" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
   "handbook_key": null | "<a key from HANDBOOK SECTIONS>",
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
@@ -3682,7 +3682,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3745,6 +3745,30 @@ Use "report" to fetch real numbers before answering a performance question (set 
         messages.push({ role: 'user', content: sec
           ? `Handbook section "${sec.key}" — ${sec.title}:\n${sec.text}\n\nNow answer the owner from this, in plain friendly WhatsApp language (JSON, action "auto"). Quote figures and policy exactly; do not add anything the section does not say.`
           : `No handbook section named "${parsed.handbook_key}". Answer from the facts you have (JSON, action "auto"), or escalate.` });
+        continue;
+      }
+      if (parsed.action === 'bookings' && hop < MAX - 1) {
+        // The booking calendar for their managed villas, 30 days back and
+        // 90 ahead. Guest names as Hostex gives them; never for marketplace
+        // villas, whose calendar the owner runs.
+        let block = '(booking calendar unavailable right now — do not guess dates)';
+        try {
+          if (db?.SUPABASE_URL) {
+            const { ownerManagedSlugs } = await import('../lib/housekeeping-owner.js');
+            const { fetchStays } = await import('../lib/housekeeping.js');
+            const managed = await ownerManagedSlugs(db, { waNum: owner.wa_num, slugs: listingSlugs });
+            if (!managed.length) block = '(this owner has no Samba-managed villa; their own calendar is not something you can see)';
+            else {
+              const t = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
+              const from = new Date(Date.parse(t) - 30 * 86400e3).toISOString().slice(0, 10), to = new Date(Date.parse(t) + 90 * 86400e3).toISOString().slice(0, 10);
+              const feed = await fetchStays({ from, to });
+              const units = (feed?.units || []).filter(u => managed.includes(u.slug));
+              if (units.length) block = `Today ${t} (Bali). Stays ${from} → ${to}:\n` + units.map(u => `${u.name || u.slug}:\n` + ((u.stays || []).filter(x => x.check_out >= from).map(x => `  ${x.check_in} → ${x.check_out} (${x.nights} nights, ${x.channel || 'booking'}${x.guest ? `, ${x.guest}` : ''})`).join('\n') || '  no stays in this window')).join('\n');
+            }
+          }
+        } catch (e) { block = `(booking calendar unavailable: ${e.message})`; }
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Their booking calendar:\n${block}\n\nNow answer the owner from this data only — dates as "Mon 7 Sep", nights, channel; a gap between stays is free. If what they asked is not in this data, say so and offer to have Era check (action "escalate" with a helpful reply).` });
         continue;
       }
       if (parsed.action === 'maintenance' && hop < MAX - 1) {

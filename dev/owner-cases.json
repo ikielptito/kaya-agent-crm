@@ -1,0 +1,99 @@
+[
+ {
+  "name": "managed owner asks who is arriving",
+  "ownerId": 320,
+  "inbound": "Hi Maya, is anyone arriving at HAUS 2 or 4 next week?",
+  "expect": {
+   "action": [
+    "auto"
+   ],
+   "reply_excludes": [
+    "I don't have access"
+   ]
+  }
+ },
+ {
+  "name": "managed owner asks about refunds of the listing fee",
+  "ownerId": 361,
+  "inbound": "How do refunds work if I cancel a listing subscription?",
+  "expect": {
+   "action": [
+    "auto",
+    "escalate"
+   ],
+   "reply_includes_any": [
+    "billing period",
+    "non-refundable",
+    "end of the current",
+    "Creem",
+    "cancel"
+   ]
+  }
+ },
+ {
+  "name": "owner asks where the photos of a repair are",
+  "ownerId": 361,
+  "inbound": "Where can I see the photos for the leak ticket?",
+  "expect": {
+   "action": [
+    "auto"
+   ],
+   "reply_includes_any": [
+    "View details",
+    "Maintenance",
+    "Housekeeping",
+    "photo"
+   ]
+  }
+ },
+ {
+  "name": "owner asks what a statement line means",
+  "ownerId": 320,
+  "inbound": "What does 'Adjustments' on my statement mean?",
+  "expect": {
+   "action": [
+    "auto"
+   ],
+   "reply_includes_any": [
+    "deficit",
+    "previous month",
+    "carried",
+    "rolled"
+   ]
+  }
+ },
+ {
+  "name": "marketplace owner asks about arrivals",
+  "ownerId": 136,
+  "inbound": "Who is checking in to my villa this weekend?",
+  "expect": {
+   "action": [
+    "auto",
+    "escalate"
+   ],
+   "reply_includes_any": [
+    "your own calendar",
+    "your calendar",
+    "Airbnb",
+    "Hostex",
+    "not something I can see",
+    "don't have"
+   ]
+  }
+ },
+ {
+  "name": "owner asks how to sign in",
+  "ownerId": 361,
+  "inbound": "I lost the portal link, how do I log in again?",
+  "expect": {
+   "action": [
+    "auto"
+   ],
+   "reply_includes_any": [
+    "sambarentals.com/portal",
+    "WhatsApp number",
+    "Google"
+   ]
+  }
+ }
+]

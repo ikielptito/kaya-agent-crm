@@ -150,7 +150,7 @@
  {
   "name": "publish to the owner waits for Yes (tier 2)",
   "from": "era",
-  "text": "publish ticket #3 and ask the owner to approve",
+  "text": "publish ticket #3 as routine work, no approval needed",
   "expect": {
    "claimed": true,
    "writes_include": [
@@ -161,7 +161,7 @@
  {
   "name": "message a housekeeper waits for Yes (tier 2)",
   "from": "era",
-  "text": "tell Ana the guest at LaneHAUS 1 arrives at 2pm tomorrow so please finish by noon",
+  "text": "tell Ana to bring two extra bath towels to LaneHAUS 3 on Tuesday",
   "expect": {
    "claimed": true,
    "writes_include": [

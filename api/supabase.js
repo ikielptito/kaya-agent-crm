@@ -1296,6 +1296,19 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
         return res.status(500).json({ error: 'Claude call failed: ' + e.message });
       }
 
+    } else if (action === 'preview_owner_reply') {
+      // DRY RUN of owner mode for one owner: the real prompt, actions and
+      // data lookups, nothing sent or staged. {ownerId | waNum, inbound}
+      const { ownerId, waNum, inbound } = payload || {};
+      const filter = ownerId != null ? `id=eq.${parseInt(ownerId, 10)}` : `wa_num=eq.${String(waNum || '').replace(/\D/g, '')}`;
+      const owner = (await fetch(`${SUPABASE_URL}/rest/v1/owners?${filter}&select=*&limit=1`, { headers }).then(x => x.json()).catch(() => []))?.[0];
+      if (!owner) return res.status(404).json({ error: 'owner not found' });
+      const thread = await fetchOwnerThread(SUPABASE_URL, headers, owner.id).catch(() => '');
+      const listingSlugs = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
+      const t0 = Date.now();
+      const out = await generateOwnerReply(process.env.ANTHROPIC_API_KEY, owner, String(inbound || ''), thread, listingSlugs, { SUPABASE_URL, sbHeaders: headers, owner });
+      return res.status(200).json({ owner: { id: owner.id, name: owner.name }, ms: Date.now() - t0, ...out });
+
     } else if (action === 'preview_team_reply') {
       // DRY RUN of the team assistant for Era or Ikiel: what would Maya
       // answer to this text right now? Sends nothing, spends nothing on the
