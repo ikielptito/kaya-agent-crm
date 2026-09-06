@@ -1483,6 +1483,11 @@ export async function nodeHandler(req, res) {
           await logStaff('staff_onboard');
           return res.status(200).end();
         }
+        // Her tap on "foto ini untuk laporan yang mana?"
+        if (String(extracted.buttonPayload || '').startsWith('pa:')) {
+          const { handlePhotoTap } = await import('../lib/photo-assign.js');
+          if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) { await logStaff('photo_assign'); return res.status(200).end(); }
+        }
         // A readiness check she was just asked for comes first: those
         // photos certify a handover, and they arrive within the hour.
         const { handleReadiness } = await import('../lib/housekeeping-readiness.js');

@@ -81,16 +81,17 @@ export default async function handler(req, res) {
       return res.status(200).json({ item: { ...item, suggested: await suggestionUrls(db, id).catch(() => []) } });
     }
     // Photos a model matched to a ticket, waiting for a person.
+    if (action === 'maint_photo_pending_clear') { const { clearPending } = await import('../lib/photo-assign.js'); await clearPending(db); return res.status(200).json({ ok: true }); }
     if (action === 'maint_photo_confirm') { const { confirmPhoto } = await import('../lib/photo-assign.js'); return res.status(200).json(await confirmPhoto(db, id, String(payload.path || ''))); }
     if (action === 'maint_photo_reject') { const { rejectPhoto } = await import('../lib/photo-assign.js'); return res.status(200).json(await rejectPhoto(db, String(payload.path || ''), { itemId: id })); }
     if (action === 'maint_photo_suggest') { const { suggest } = await import('../lib/photo-assign.js'); return res.status(200).json({ ok: true, count: await suggest(db, id, Array.isArray(payload.paths) ? payload.paths : [payload.path], { why: payload.why || 'suggested from the console', from: 'console' }) }); }
     if (action === 'maint_photo_ask') {
-      const { suggestions, askEra } = await import('../lib/photo-assign.js');
+      const { suggestions, askReporter } = await import('../lib/photo-assign.js');
       const ids = (Array.isArray(payload.item_ids) ? payload.item_ids : [id]).map(n => parseInt(n, 10)).filter(Boolean);
       const items = []; const photos = new Set();
       for (const i of ids) { const it = await getItem(db, i); if (!it) continue; items.push({ id: it.id, title: it.title }); for (const s of await suggestions(db, i)) photos.add(s.path); }
       const wa = { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN };
-      return res.status(200).json(await askEra(db, wa, { items, photos: [...photos], villa: payload.villa || null }));
+      return res.status(200).json(await askReporter(db, wa, { to: payload.to || null, lang: payload.lang || 'id', items, photos: [...photos], villa: payload.villa || null }));
     }
 
     if (action === 'maint_create') {
