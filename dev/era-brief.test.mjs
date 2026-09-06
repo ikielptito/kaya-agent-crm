@@ -15,7 +15,7 @@ const b = {
 };
 const lines = briefHeadline(b).split('\n');
 t('line 1 names the same-day turnover and the other arrival, and tomorrow', lines[0], 'Mon 7 Sep — HAUS Canggu · Unit 2: Hicham leaves, Anna arrives (same-day). arriving: LaneHAUS · Unit 3 (Lisa). tomorrow: Villa Saturno arriving.');
-t('line 2 counts cleans per person, rounds, unassigned, tukang', lines[1], '5 cleans (Ana 2, Ita 3), 1 round — 1 unassigned; 1 tukang visit.');
+t('line 2 counts cleans per person, rounds, unassigned, tukang', lines[1], '5 cleans (Ana 2, Ita 2), 1 round — 1 unassigned; 1 tukang visit.');
 t('line 3 is what waits on her, Monday adds statements', lines[2], '2 tickets waiting on you, oldest 8 days; 1 agent question open; 1 statement for 2026-08 not yet published.');
 t('line 4 is yesterday', lines[3], 'Yesterday: Tropicana Valley · B3 inspection round (Gede) not marked done; HAUS Canggu · Unit 1 photo check missing.');
 const quiet = briefHeadline({ ...b, guests: { departures: [], arrivals: [], tomorrow_arrivals: [], in_house: [], unavailable: false }, cleaning: [], rounds: [], tukang: [], backlog: [], relays: [], viewings: [], loose: { not_done: [], readiness: [] }, monday: false });
