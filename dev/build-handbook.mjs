@@ -62,6 +62,7 @@ add('staff.guide', 'Panduan Housekeeper Samba (Indonesian, full text)', ['staff'
 add('era.guide', 'Panduan Kesiapan Villa — Era’s readiness guide (full text)', ['era', 'system'], read('portal', 'docs/handbook/era-readiness-guide.md'));
 add('system.portal', 'How sambarentals.com is built and wired', ['system', 'era'], read('portal', 'docs/handbook/system-portal.md'));
 add('system.crm', 'How Maya is built and wired', ['system', 'era'], read('crm', 'docs/handbook/system-crm.md'));
+add('whatsnew', 'What is new on Samba, by audience and date (the changelog)', ['owner', 'agent', 'staff', 'era', 'system'], read('crm', 'docs/handbook/changelog.md'));
 
 // Public pages, stripped to text.
 add('owner.pitch', 'For owners: how Samba works, pricing, FAQ (sambarentals.com/home)', ['owner', 'agent', 'era', 'system'], htmlToText(read('portal', 'public/list-property.html')));
@@ -210,6 +211,7 @@ const FACTS = {
     'Owners see, in their portal: statements, weekly reports, repair tickets, and the housekeeping log with photos (never staff names). Owner-facing messages come from Maya; a human reply from the console is signed with your name.',
     'Money and payroll are cockpit actions, never WhatsApp: publishing a statement, recording a payment, publishing or paying a payroll run, bank details. Anything commercial or a dispute goes to Ikiel.',
     'Samba-managed units: HAUS Canggu 1/2/4/5 (Putu), LaneHAUS 1/3 (Ana), Villa Saturno (Naomi), Tropicana Valley A4/A5/B4 (Ita), Tropicana B2/B3/B5/B6 (Gede). HAUS Canggu and Tropicana B2/B3/B5/B6 cleaning is paid outside Samba. Tropicana B2/B3/B5/B6 are co-owned with Oli (Double 8), expenses-only statements.',
+    'What Maya can do for you in this chat: answer from the schedule, bookings, tickets, statements, payroll, staff list, viewings and the app guides; apply small changes at once with an Undo button (a visit done, moved, reassigned or added; a ticket estimate, note, move to another villa, or waiting-until); stage anything that reaches another person behind a Yes/No button (publish or heads-up to an owner, dispatch a tukang, complete a ticket, message a housekeeper, a statement line); offer a list to tap when a target is ambiguous. "Maya, diam" pauses her 12 hours, "Maya, lanjut" resumes. New features are announced here as they ship; ask "what\'s new" for the changelog.',
   ],
   system: [
     'Two repos: the CRM (Maya, Vercel + Supabase, WhatsApp Cloud API, Anthropic models) and the portal (sambarentals.com, Vercel + Upstash KV + Hostex + Google Drive, dependency-free). Push to main deploys either. Vercel Hobby caps the portal at 12 functions, hence ?action= routing.',

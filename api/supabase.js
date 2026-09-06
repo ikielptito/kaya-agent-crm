@@ -890,6 +890,17 @@ export default async function handler(req, res) {
         publicUrl: SUPABASE_URL + '/storage/v1/object/public/brochures/' + path
       });
 
+    } else if (action === 'whats_new') {
+      // Tell an audience what changed. {audience: era|ikiel|owners|staff|housekeepers,
+      // text?, template?, params?, buttonParam?, shown?, only?, dry_run?}
+      // Owners need an approved template; Era, Ikiel and staff get text.
+      const { announce } = await import('../lib/release-notes.js');
+      const wa = { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN };
+      try {
+        const out = await announce({ SUPABASE_URL, sbHeaders: headers }, wa, { ...(payload || {}), dryRun: !!payload?.dry_run });
+        return res.status(200).json(out);
+      } catch (e) { return res.status(400).json({ error: e.message }); }
+
     } else if (action === 'wa_interactive_test') {
       // Console: send one native control (buttons or a list) to a team
       // number and see it render; the tap comes back through the webhook.
