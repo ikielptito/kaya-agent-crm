@@ -894,9 +894,14 @@ export default async function handler(req, res) {
       // Tell an audience what changed. {audience: era|ikiel|owners|staff|housekeepers,
       // text?, template?, params?, buttonParam?, shown?, only?, dry_run?}
       // Owners need an approved template; Era, Ikiel and staff get text.
-      const { announce } = await import('../lib/release-notes.js');
+      const { announce, enqueue } = await import('../lib/release-notes.js');
       const wa = { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN };
       try {
+        if (payload?.when_approved) {
+          const { when_approved, dry_run, ...entry } = payload;
+          const id = await enqueue({ SUPABASE_URL, sbHeaders: headers }, entry);
+          return res.status(200).json({ queued: id, note: 'sent by the hourly beat once the template is approved' });
+        }
         const out = await announce({ SUPABASE_URL, sbHeaders: headers }, wa, { ...(payload || {}), dryRun: !!payload?.dry_run });
         return res.status(200).json(out);
       } catch (e) { return res.status(400).json({ error: e.message }); }

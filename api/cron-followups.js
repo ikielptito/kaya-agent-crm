@@ -195,7 +195,15 @@ export default async function handler(req, res) {
           return await runEraBrief({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN } });
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief });
+      // Announcements waiting on a template approval.
+      const whatsNew = await (async () => {
+        try {
+          const { processQueue } = await import('../lib/release-notes.js');
+          const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders).catch(() => ({}));
+          return await processQueue({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, templatesMap);
+        } catch (e) { return { error: e.message }; }
+      })();
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
