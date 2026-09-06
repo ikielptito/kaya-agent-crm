@@ -3512,7 +3512,16 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
     patch.suggested_reply = '';
     patch.unread_count = 0;
   } else {
-    patch.suggested_reply = ai.reply || '';
+    // "auto" with nothing to say is a generation failure, not a decision:
+    // Cielo's "where are the images?" got silence and a blank console
+    // (6 Sep 2026). Treat it as an escalation so someone sees it.
+    patch.suggested_reply = ai.reply || '[Maya (owner) produced no reply — needs your reply.]';
+    if (!ai.reply) {
+      sendOwnerPush({ SUPABASE_URL, headers: sbHeaders }, {
+        title: `Owner needs you: ${owner.name || '+' + owner.wa_num}`,
+        body: String(inbound || '').replace(/\s+/g, ' ').slice(0, 160) || 'Maya could not reply to an owner.',
+      }).catch(() => {});
+    }
   }
   await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
 }
@@ -3602,6 +3611,7 @@ PARTNERSHIP FUNDAMENTALS (true for EVERY owner, prospect or listed — answer th
 - Bookings & money (MARKETPLACE listings — the default): an agent brings the tenant, and the owner deals with the tenant DIRECTLY — viewing, contract, deposit and rent are agreed between owner and tenant on the owner's own terms. For these listings Samba never holds or forwards money, so there is no "payout from Samba": the owner is paid directly by their tenant.
 - MANAGED villas (Samba Realty FULL MANAGEMENT — a separate, invite-only service for a handful of properties): here Samba/Era DO collect the bookings and pay the owner a monthly payout. Those owners receive a monthly statement from you (bookings, expenses, management fee, net payout) with a secure sambarentals.com/st/ link when Ikiel publishes it. The statement's "management fee" line is SAMBA REALTY'S fee (a percentage of gross rental income, 15–20% depending on the property) — it is NOT Airbnb/Booking.com's platform cut; if an owner asks what the fee is, say it's Samba's management fee per their agreement. If an owner mentions their monthly statement, payout, or expenses report, that is this program — use action "statements" to load the real figures, then answer from them. The statement is authoritative: restate what it says, never recompute or promise future amounts. Escalate (Ikiel personally handles payouts) only for a genuine dispute, a payment they say they never received, or anything the loaded data does not answer. Never pitch full management to marketplace owners; if one asks about it, escalate.
 - MANAGED villas, housekeeping: the villa is cleaned twice a week on fixed days, a housekeeper photographs every room before each guest and you check the photos before the guest arrives, a photo inspection round happens every fortnight and lands on the Monday report, and a deep clean is done every quarter and after any stay of three weeks or more. Every check and inspection is kept permanently with its photos. The owner sees all of it under the Housekeeping tab of their portal (https://sambarentals.com/portal) and can download any record as a PDF; for a damage claim they can send the PDF from before and after the guest, or ask you and Era will prepare it. When they ask about any of this for their own villa, load the log first (action "housekeeping") and answer from it: dates, outcomes, what was flagged. Never invent a date.
+- MANAGED villas, repairs: every problem is a ticket with its own page (the "View details" link in the notice). The owner approves or declines on that page or by replying; routine work is scheduled without approval; a heads-up ticket is one our team found and is still pricing — nothing to do until the cost arrives. Photos of the problem, when attached, are on the ticket page under "Photos" and on the Maintenance tab of the portal; photos from an inspection round are on the Housekeeping tab, on that inspection record, with a PDF download. There is nowhere else to look, so never send them elsewhere. When they ask about any ticket, load the tickets first (action "maintenance") and answer from them: status, cost, whether photos are attached, and the link. If a ticket has no photos yet, say so plainly and that Era will attach them.
 - Deposit, cancellation and refund policies are the owner's own — we don't impose any.
 - The full owner pitch — how it works, pricing, FAQ — lives at https://sambarentals.com/home. Include that link once whenever you explain how the partnership works or an owner wants the bigger picture; don't repeat it in every message.
 - VIEWINGS: when an agent wants to view their villa, the listed contact receives a WhatsApp request with one-tap buttons (Confirm ✓ / Different time / Can't this time). On confirmation both sides get a calendar invite link and a reminder on the morning of the visit, and the owner can see every viewing in their portal under the Viewings tab. If an owner asks how viewings work, explain this briefly and share https://sambarentals.com/viewings once.
@@ -3611,14 +3621,14 @@ RULES (continued):
 ${onboardingBlock}
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3673,6 +3683,18 @@ Use "report" to fetch real numbers before answering a performance question (set 
         } catch (e) { block = `(housekeeping records unavailable: ${e.message})`; }
         messages.push({ role: 'assistant', content: raw });
         messages.push({ role: 'user', content: `Their housekeeping log:\n${block}\n\nNow answer the owner from this data only — cite the dates and what each record says, in plain friendly WhatsApp language (JSON, action "auto"). If what they asked is not in this data, say so and offer to have Era check (action "escalate" with a helpful reply).` });
+        continue;
+      }
+      if (parsed.action === 'maintenance' && hop < MAX - 1) {
+        let block = '(maintenance tickets unavailable right now)';
+        try {
+          if (db?.SUPABASE_URL) {
+            const { ownerMaintenanceContext } = await import('../lib/maintenance-owner.js');
+            block = (await ownerMaintenanceContext(db, { waNum: owner.wa_num, slugs: listingSlugs })).text;
+          }
+        } catch (e) { block = `(maintenance tickets unavailable: ${e.message})`; }
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `Their maintenance tickets:\n${block}\n\nNow answer the owner from this data only — name the ticket, its status, the cost if any, whether photos are attached, and give the link when it helps, in plain friendly WhatsApp language (JSON, action "auto"). If what they asked is not in this data, say so and offer to have Era check (action "escalate" with a helpful reply).` });
         continue;
       }
       if (parsed.action === 'report' && parsed.report_slug && hop < MAX - 1) {

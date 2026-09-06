@@ -193,6 +193,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, path });
     }
 
+    // Put an inspection round's photos on the tickets it raised (vision
+    // match, confident only). {inspection_id, item_ids?, only_empty?}
+    if (action === 'maint_attach_inspection_photos') {
+      const { attachInspectionPhotos } = await import('../lib/inspection-photos.js');
+      return res.status(200).json(await attachInspectionPhotos(db, {
+        inspectionId: parseInt(payload.inspection_id, 10), itemIds: payload.item_ids || null, onlyEmpty: payload.only_empty !== false,
+      }));
+    }
     if (action === 'maint_public') {
       const item = await publicItem(db, String(payload.group_key || ''), parseInt(payload.item_id ?? payload.id, 10));
       if (!item) return res.status(404).json({ error: 'No maintenance item for that link' });
