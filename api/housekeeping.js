@@ -206,6 +206,15 @@ export default async function handler(req, res) {
       if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
       return res.status(200).json({ ok: true, inspection: (await r.json())[0] || null });
     }
+    // Remove an inspection record that holds nothing (no photos): a round
+    // opened by a stray word, never walked.
+    if (action === 'hk_inspection_delete') {
+      const row = (await sbGet(`housekeeping_inspections?id=eq.${id}&select=id,photos,item_ids&limit=1`))?.[0];
+      if (!row) return res.status(404).json({ error: 'no such inspection' });
+      if ((row.photos || []).length || (row.item_ids || []).length) return res.status(409).json({ error: 'that record has photos or tickets; edit it instead' });
+      await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, { method: 'DELETE', headers: sbHeaders });
+      return res.status(200).json({ ok: true });
+    }
     if (action === 'hk_inspections') {
       let q = 'housekeeping_inspections?select=*,staff:by_staff_id(id,name)&order=inspected_on.desc&limit='
         + (parseInt(payload.limit, 10) || 50);
