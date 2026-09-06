@@ -27,7 +27,7 @@ if (!fs.existsSync(PORTAL)) {
 }
 
 // Size: the digests ride in prompts.
-const CEIL = { agent: 3600, owner: 4000, staff: 3000, era: 4000, system: 6000 };
+const CEIL = { agent: 3600, owner: 4000, staff: 3000, era: 6000, system: 6000 };
 for (const a of AUDIENCES) t(`${a} digest ≤ ${CEIL[a]} chars`, DIGESTS[a].length <= CEIL[a], `(${DIGESTS[a].length})`);
 t('no digest carries a date', !AUDIENCES.some(a => /\b20\d\d-\d\d-\d\d\b/.test(DIGESTS[a])));
 

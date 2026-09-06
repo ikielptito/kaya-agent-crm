@@ -117,7 +117,11 @@ export default async function handler(req, res) {
       const outstanding = rows.filter(s => (s.status === 'published' || s.status === 'partial')
         && !noSettle.has(s.group_key) && !expOnly.has(s.group_key)
         && ((Number(s.payout_total) || 0) - (Number(s.paid_total) || 0)) > 0);
+      // Expenses Era logged with Maya for months that have no draft yet.
+      let inbox = [];
+      try { const { inboxForPage } = await import('../lib/expense-log.js'); inbox = await inboxForPage(db); } catch { inbox = []; }
       return res.status(200).json({
+        inbox,
         statements: rows,
         outstanding: {
           count: outstanding.length,
@@ -190,6 +194,21 @@ export default async function handler(req, res) {
     if (action === 'statement_amend_from_sheet') return res.status(200).json(await amendFromSheet(db, id, { notifyOwner: !!payload.notify_owner, actor: payload.actor || 'admin' }));
     if (action === 'statement_dismiss_discrepancy') return res.status(200).json(await dismissDiscrepancy(db, id));
     if (action === 'statement_revision_changes') return res.status(200).json(await setRevisionChanges(db, id, payload.changes || []));
+    // An expense Era logged with Maya that has not yet reached a statement.
+    if (action === 'statement_inbox_remove') {
+      const { removeInboxItem } = await import('../lib/expense-log.js');
+      await removeInboxItem(db, String(payload.inbox_id || ''));
+      return res.status(200).json({ ok: true });
+    }
+    // Dry run of the expense reader: what Maya would file from this line.
+    if (action === 'statement_expense_preview') {
+      const { looksLikeExpense, extractExpense } = await import('../lib/expense-log.js');
+      const text = String(payload.text || '');
+      const cat = ((await sb('statement_groups?select=key,name,listing_slugs&active=is.true')) || []).map(g => ({ key: g.key, name: g.name, slugs: g.listing_slugs || [] }));
+      const gate = looksLikeExpense(text);
+      const parsed = gate ? await extractExpense(process.env.ANTHROPIC_API_KEY, { text, cat }) : null;
+      return res.status(200).json({ gate, parsed });
+    }
     if (action === 'statement_attachments') {
       const { statementAttachments } = await import('../lib/statement-requests.js');
       return res.status(200).json({ attachments: await statementAttachments(db, id) });

@@ -1311,6 +1311,23 @@ export async function nodeHandler(req, res) {
         }
       } catch (e) { /* never let this break team messaging */ }
 
+      // An expense told in words, receipt photo and all ("laundry HAUS 5
+      // 250rb"): filed on the month's draft, or held until the draft exists.
+      try {
+        const { handleExpenseMessage } = await import('../lib/expense-log.js');
+        if (await handleExpenseMessage({
+          db: relayDb, wa: relayWa, fromNum, fromName: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', text, apiKey: ANTHROPIC_KEY,
+          mediaType, mediaId, caption: extracted.caption || null,
+          fetchImage: async (id) => { const m = await fetchWaMediaBase64(id, WA_TOKEN).catch(() => null); return m?.data ? { base64: m.data, contentType: m.mime || 'image/jpeg' } : null; },
+        })) {
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+            method: 'POST', headers: sbHeaders,
+            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'expense_log', media_type: mediaType || null, media_id: mediaId || null }),
+          }).catch(() => {});
+          return res.status(200).end();
+        }
+      } catch (e) { console.warn('expense log failed:', e.message); }
+
       // Her answer to the backlog nudge — "#4 done, #7 fixed, #15 estimate
       // 85,000" — is a set of updates to tickets that exist, and must never
       // reach the report parser below, which once turned exactly such a
