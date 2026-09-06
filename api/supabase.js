@@ -1304,7 +1304,7 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const from = String(payload?.from || 'era').toLowerCase();
       const num = from === 'ikiel' || from === 'admin' ? String(process.env.OWNER_WA_NUM || '').replace(/\D/g, '') : String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
       const t0 = Date.now();
-      const out = await handleTeamMessage({ db: { SUPABASE_URL, sbHeaders: headers }, wa: null, fromNum: num, text: String(payload?.text || ''), apiKey: process.env.ANTHROPIC_API_KEY, dryRun: true, role: from === 'ikiel' || from === 'admin' ? 'admin' : 'era' });
+      const out = await handleTeamMessage({ db: { SUPABASE_URL, sbHeaders: headers }, wa: null, fromNum: num, text: String(payload?.text || ''), apiKey: process.env.ANTHROPIC_API_KEY, dryRun: true, role: from === 'ikiel' || from === 'admin' ? 'admin' : 'era', buttonPayload: payload?.buttonPayload || null });
       return res.status(200).json({ from, ms: Date.now() - t0, ...(out || { claimed: false, outcome: 'not_claimed' }) });
 
     } else if (action === 'preview_reply') {

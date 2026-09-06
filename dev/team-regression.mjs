@@ -26,6 +26,8 @@ function check(c, out) {
   for (const s of e.reply_includes || []) if (!reply.includes(s)) fails.push(`reply lacks "${s}"`);
   if (e.reply_includes_any && !e.reply_includes_any.some(s => reply.includes(s))) fails.push(`reply lacks any of ${JSON.stringify(e.reply_includes_any)}`);
   for (const s of e.reply_excludes || []) if (reply.toLowerCase().includes(s.toLowerCase())) fails.push(`reply contains "${s}"`);
+  const writes = (out.writes || []).map(w => `${w.tool}:${w.mode}`);
+  for (const w of e.writes_include || []) if (!writes.includes(w)) fails.push(`write ${w} missing (${writes.join(',') || 'none'})`);
   return fails;
 }
 let pass = 0, fail = 0, cost = 0;
@@ -36,7 +38,7 @@ for (const c of cases) {
     cost += Number(out.cost_usd || 0);
     const fails = check(c, out);
     if (fails.length) { fail++; console.log(`FAIL\n    ${fails.join('\n    ')}\n    reply: ${String(out.reply || '').slice(0, 300)}`); }
-    else { pass++; console.log(`ok (${(out.tools || []).join(',') || 'no tools'}, $${Number(out.cost_usd || 0).toFixed(3)}, ${out.ms}ms)\n    ${String(out.reply || '').slice(0, 200).replace(/\n/g, ' / ')}`); }
+    else { pass++; console.log(`ok (${(out.tools || []).join(',') || 'no tools'}${(out.writes||[]).length ? ' · ' + out.writes.map(w => w.tool + ':' + w.mode).join(',') : ''}, $${Number(out.cost_usd || 0).toFixed(3)}, ${out.ms}ms)\n    ${String(out.reply || '').slice(0, 200).replace(/\n/g, ' / ')}`); }
   } catch (e) { fail++; console.log(`ERROR ${e.message}`); }
 }
 console.log(`\n${pass} passed, ${fail} failed · $${cost.toFixed(2)} spent`);

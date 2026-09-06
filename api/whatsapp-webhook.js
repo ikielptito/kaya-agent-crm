@@ -1354,11 +1354,12 @@ export async function nodeHandler(req, res) {
       // that is not for Maya comes back as not_for_me and reaches a person
       // through the human default below plus Telegram. Switched on by
       // settings.team_assistant.enabled (or TEAM_ASSISTANT=on).
-      if (!mediaId && text && !isBareAck(text)) {
+      if (!mediaId && text) {
         try {
           const ta = await import('../lib/team-assistant.js');
-          if (await ta.assistantEnabled(relayDb)) {
-            const out = await ta.handleTeamMessage({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY });
+          const teamTap = String(extracted.buttonPayload || '').startsWith('team:');
+          if (await ta.assistantEnabled(relayDb) && (teamTap || !isBareAck(text) || await ta.hasPending(relayDb, fromNum))) {
+            const out = await ta.handleTeamMessage({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY, buttonPayload: extracted.buttonPayload || null });
             if (out?.claimed) {
               await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
                 method: 'POST', headers: sbHeaders,
