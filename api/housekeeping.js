@@ -535,6 +535,17 @@ export default async function handler(req, res) {
     }
 
     // Dry run of the evening chase at a given WITA hour (default: now).
+    // Era's daily brief: the data (for the portal's page), a preview of
+    // the message, or a send right now.
+    if (action === 'hk_era_brief') {
+      const { buildBrief } = await import('../lib/era-brief.js');
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.date)) ? payload.date : null;
+      return res.status(200).json(await buildBrief(db, { date }));
+    }
+    if (action === 'hk_era_brief_preview' || action === 'hk_era_brief_send') {
+      const { runEraBrief } = await import('../lib/era-brief.js');
+      return res.status(200).json(await runEraBrief({ db, wa: { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, preview: action === 'hk_era_brief_preview', force: action === 'hk_era_brief_send' }));
+    }
     if (action === 'hk_chase_preview') {
       const { runHousekeepingChase } = await import('../lib/housekeeping-chase.js');
       const tm = await approvedTemplates().catch(() => ({}));

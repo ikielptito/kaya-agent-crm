@@ -188,7 +188,14 @@ export default async function handler(req, res) {
           });
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase });
+      // Era's morning brief at 07:05 WITA, then one line per schedule change.
+      const eraBrief = await (async () => {
+        try {
+          const { runEraBrief } = await import('../lib/era-brief.js');
+          return await runEraBrief({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN } });
+        } catch (e) { return { error: e.message }; }
+      })();
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
