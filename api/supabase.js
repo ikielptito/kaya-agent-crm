@@ -890,6 +890,21 @@ export default async function handler(req, res) {
         publicUrl: SUPABASE_URL + '/storage/v1/object/public/brochures/' + path
       });
 
+    } else if (action === 'wa_interactive_test') {
+      // Console: send one native control (buttons or a list) to a team
+      // number and see it render; the tap comes back through the webhook.
+      const { sendButtons, sendList } = await import('../lib/wa-interactive.js');
+      const to = String(payload?.to || process.env.OWNER_WA_NUM || '').replace(/\D/g, '');
+      if (!to) return res.status(400).json({ error: 'to required' });
+      const wa = { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN };
+      const mid = payload?.kind === 'list'
+        ? await sendList(wa, to, { body: 'Test list from Maya. Pick one row.', buttonLabel: 'Pick', rows: [
+            { id: 'test:pick:1', title: 'HAUS Canggu · Unit 1', description: 'first row' },
+            { id: 'test:pick:2', title: 'Villa Saturno', description: 'second row' },
+            { id: 'test:pick:3', title: 'Tropicana Valley · A5', description: 'third row' }] })
+        : await sendButtons(wa, to, 'Test buttons from Maya. Tap one.', [{ id: 'test:yes:1', title: 'Yes' }, { id: 'test:no:1', title: 'No' }, { id: 'test:undo:1', title: 'Undo #1' }]);
+      return res.status(200).json({ ok: !!mid, wa_message_id: mid });
+
     } else if (action === 'team_question_open') {
       // Put a structured question to a team member (Era) and make sure it
       // reaches her: direct text when her 24h window is open, otherwise the

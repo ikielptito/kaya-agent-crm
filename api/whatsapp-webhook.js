@@ -1316,7 +1316,7 @@ export async function nodeHandler(req, res) {
       if (!mediaId) {
         try {
           const { handleBacklogReply, handleBacklogUndo } = await import('../lib/maintenance-backlog-reply.js');
-          if (await handleBacklogUndo({ db: relayDb, wa: relayWa, fromNum, text })
+          if (await handleBacklogUndo({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })
               || await handleBacklogReply({ db: relayDb, wa: relayWa, fromNum, text, who: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', apiKey: ANTHROPIC_KEY })) {
             await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
               method: 'POST', headers: sbHeaders,
@@ -1334,7 +1334,7 @@ export async function nodeHandler(req, res) {
       try {
         const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
         const took = await handleStaffMaintenance({
-          db: relayDb, wa: relayWa, fromNum, text,
+          db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null,
           mediaType, mediaId, waToken: WA_TOKEN,
         });
         if (took) {
@@ -1462,7 +1462,7 @@ export async function nodeHandler(req, res) {
         if (person.can_report) {
           const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
           const took = await handleStaffMaintenance({
-            db: relayDb, wa: relayWa, fromNum, text,
+            db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null,
             mediaType, mediaId, waToken: WA_TOKEN,
           });
           if (took) { await logStaff('maintenance_staff'); return res.status(200).end(); }
@@ -1476,7 +1476,7 @@ export async function nodeHandler(req, res) {
           const { couldBeMaintenance } = await import('../lib/maintenance-intake.js');
           if (await couldBeMaintenance(text, mediaType === 'image' && !!mediaId)) {
             const forced = await handleStaffMaintenance({
-              db: relayDb, wa: relayWa, fromNum, text,
+              db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null,
               mediaType, mediaId, waToken: WA_TOKEN, force: true,
             });
             if (forced) { await logStaff('maintenance_staff'); return res.status(200).end(); }
@@ -1689,7 +1689,7 @@ export async function nodeHandler(req, res) {
         const { isReporter } = await import('../lib/maintenance.js');
         const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
         if (await isReporter(relayDb, fromNum)) {
-          const took = await handleStaffMaintenance({ db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN });
+          const took = await handleStaffMaintenance({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, mediaType, mediaId, waToken: WA_TOKEN });
           if (took) {
             await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
               method: 'POST', headers: sbHeaders,
@@ -2269,12 +2269,14 @@ function extractInboundContent(msg) {
   }
   // Quick-reply button tap (from a template) or interactive button reply. The
   // payload drives one-tap preference changes; text is the visible label.
-  if (msg.button || msg.interactive?.button_reply) {
-    const payload = msg.button?.payload || msg.interactive?.button_reply?.id || '';
-    const label = msg.button?.text || msg.interactive?.button_reply?.title || payload;
+  if (msg.button || msg.interactive?.button_reply || msg.interactive?.list_reply) {
+    const pick = msg.interactive?.list_reply || null;
+    const payload = msg.button?.payload || msg.interactive?.button_reply?.id || pick?.id || '';
+    const label = msg.button?.text || msg.interactive?.button_reply?.title || pick?.title || payload;
     out.buttonPayload = payload;
+    out.interactiveType = pick ? 'list' : (msg.interactive ? 'button' : 'template');
     out.textForClaude = label;
-    out.dbContent = `[Tapped: ${label}]`;
+    out.dbContent = pick ? `[Picked: ${label}]` : `[Tapped: ${label}]`;
     return out;
   }
   out.dbContent = `[Unknown message type: ${msg.type}]`;
