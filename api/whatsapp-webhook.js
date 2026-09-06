@@ -3386,7 +3386,20 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
   // acknowledges with the running count. Failures degrade to a text note so
   // the conversation never breaks on a Drive hiccup.
   if (mediaType === 'image' && mediaId && WA_TOKEN) {
-    if (driveConfigured()) {
+    // A MANAGED-villa owner's photo is almost never a listing photo: it is
+    // a screenshot of something we sent, or something wrong at the villa.
+    // Cielo's screenshot of a broken link was filed as a villa photo and
+    // acknowledged as one (6 Sep 2026). Look at it instead.
+    let managed = false;
+    try {
+      const gr = await fetch(`${SUPABASE_URL}/rest/v1/statement_groups?select=owner_wa_nums&active=eq.true`, { headers: sbHeaders });
+      const gs = gr.ok ? await gr.json() : [];
+      managed = gs.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === fromNum));
+    } catch { managed = false; }
+    if (managed) {
+      const seen = await describeOwnerPhoto(mediaId, WA_TOKEN).catch(() => null);
+      inbound = `[The owner of a managed villa sent a photo (NOT saved as a listing photo). ${seen ? `What it shows: ${seen}` : 'It could not be opened.'} If it is a screenshot of a Samba message or page, help with exactly that — if it shows an error or a link that does not open, apologise, say Ikiel has been told and it is being fixed now, and escalate. If it shows something broken, dirty or missing at the villa, thank them, say Era will look at it today, and escalate so it becomes a ticket. Otherwise ask what they would like done with it.]${inbound && !/^\[/.test(inbound) ? ` Caption: "${inbound}"` : ''}`;
+    } else if (driveConfigured()) {
       try {
         // claimOwnerDriveFolder is race-safe: a photo burst arrives as N
         // concurrent invocations that all read drive_folder_id as null, and
@@ -3895,6 +3908,29 @@ async function hasNewerOwnerInbound(url, headers, ownerId, ownTimestamp, ownWaMe
     if (latestT > ownT) return true;
     return latestT === ownT && String(latest.wa_message_id) > String(ownWaMessageId);
   } catch (_) { return false; }
+}
+
+// One sentence about what an owner's photo shows, for the reply model.
+async function describeOwnerPhoto(mediaId, waToken) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const { fetchMediaBase64 } = await import('../lib/maintenance-staff.js');
+  const img = await fetchMediaBase64(mediaId, waToken);
+  if (!img?.base64) return null;
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: process.env.MAINTENANCE_VISION_MODEL || 'claude-sonnet-4-6', max_tokens: 160,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: img.mime || 'image/jpeg', data: img.base64 } },
+        { type: 'text', text: 'In at most 40 words, say what this image is. If it is a screenshot, quote any error or heading text exactly. If it is a room or object, say what is wrong with it if anything is.' },
+      ] }],
+    }),
+  });
+  if (!r.ok) return null;
+  const d = await r.json();
+  return (d.content || []).filter(b => b.type === 'text').map(b => b.text).join('').trim().slice(0, 300) || null;
 }
 
 // Get-or-create the owner's Drive photo folder without racing.
