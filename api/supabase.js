@@ -414,6 +414,22 @@ export default async function handler(req, res) {
       r = await fetch(`${SUPABASE_URL}/rest/v1/relays?${parts.join('&')}`, { headers });
       return res.status(r.status).json(await r.json());
 
+    } else if (action === 'patch_relay') {
+      // Console: hand-correct one relay (expire a duplicate, put an answer
+      // back in the delivery queue). payload: { id, fields } — status and the
+      // sweep's own clocks only; the question and the answer text are not
+      // editable from here.
+      const { id, fields } = payload || {};
+      if (id == null || !fields) return res.status(400).json({ error: 'id and fields required' });
+      const ALLOWED = ['status', 'nudges', 'answer_template_at', 'template_sent_at', 'asked_at', 'delivered_at', 'kb_status'];
+      const body = Object.fromEntries(Object.entries(fields).filter(([k]) => ALLOWED.includes(k)));
+      if (!Object.keys(body).length) return res.status(400).json({ error: `no editable field given (${ALLOWED.join(', ')})` });
+      r = await fetch(`${SUPABASE_URL}/rest/v1/relays?id=eq.${parseInt(id, 10)}`, {
+        method: 'PATCH', headers: { ...headers, Prefer: 'return=representation' }, body: JSON.stringify(body),
+      });
+      if (!r.ok) return res.status(r.status).json({ error: await r.text() });
+      return res.status(200).json({ ok: true, relay: (await r.json())?.[0] || null });
+
     } else if (action === 'patch_owner') {
       const { id, fields } = payload || {};
       if (id == null) return res.status(400).json({ error: 'id required' });
