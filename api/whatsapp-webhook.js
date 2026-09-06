@@ -3785,7 +3785,8 @@ Use "report" to fetch real numbers before answering a performance question (set 
               const from = new Date(Date.parse(t) - 30 * 86400e3).toISOString().slice(0, 10), to = new Date(Date.parse(t) + 90 * 86400e3).toISOString().slice(0, 10);
               const feed = await fetchStays({ from, to });
               const units = (feed?.units || []).filter(u => managed.includes(u.slug));
-              if (units.length) block = `Today ${t} (Bali). Stays ${from} → ${to}:\n` + units.map(u => `${u.name || u.slug}:\n` + ((u.stays || []).filter(x => x.check_out >= from).map(x => `  ${x.check_in} → ${x.check_out} (${x.nights} nights, ${x.channel || 'booking'}${x.guest ? `, ${x.guest}` : ''})`).join('\n') || '  no stays in this window')).join('\n');
+              if (feed?.units && !units.length) block = 'MARKETPLACE VILLA — not managed by Samba. The owner runs their own bookings on Airbnb, Booking.com or their own calendar; Samba has no view of who is staying. This is not an outage: tell them plainly that their bookings live in their own calendar, and that Samba only syncs blocked dates for availability. Do not offer to have Era check.';
+              else if (units.length) block = `Today ${t} (Bali). Stays ${from} → ${to}:\n` + units.map(u => `${u.name || u.slug}:\n` + ((u.stays || []).filter(x => x.check_out >= from).map(x => `  ${x.check_in} → ${x.check_out} (${x.nights} nights, ${x.channel || 'booking'}${x.guest ? `, ${x.guest}` : ''})`).join('\n') || '  no stays in this window')).join('\n');
             }
           }
         } catch (e) { block = `(booking calendar unavailable: ${e.message})`; }
