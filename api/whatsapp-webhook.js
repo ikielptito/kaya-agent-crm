@@ -1597,6 +1597,30 @@ export async function nodeHandler(req, res) {
       }
     } catch (e) { /* never let staff routing break ordinary messaging */ }
 
+    // ── WHAT SHE IS REPLYING TO ───────────────────────────────────
+    // WhatsApp lets a person quote an earlier message. When the quoted one is
+    // a listing card, that card IS the subject: "Hi this one still available"
+    // under a Tropicana B5 card is a question about B5. Until 7 Sep 2026 the
+    // quote was stored (reply_to) but never read, and Maya answered about
+    // whichever villa she had mentioned last (Sumerti Ani, Astanine for
+    // Tropicana). The quoted message is named at the top of what she reads;
+    // what is stored in the thread stays her exact words.
+    if (msg?.context?.id) {
+      try {
+        const qRes = await fetch(
+          `${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(msg.context.id)}&select=content,direction&limit=1`,
+          { headers: sbHeaders });
+        const q = (await qRes.json())?.[0];
+        if (q?.content) {
+          const titles = cardTitles(q.content);
+          const quoted = titles?.length
+            ? `[The agent is REPLYING TO the listing card${titles.length > 1 ? 's' : ''}: ${titles.join(', ')} — "this one" / "that" / "it" means this villa]`
+            : `[The agent is REPLYING TO ${q.direction === 'outbound' ? "Maya's" : 'their own'} earlier message: "${humanizeMarker(q.content).replace(/\s+/g, ' ').slice(0, 200)}"]`;
+          text = `${quoted}\n${text}`;
+        }
+      } catch (_) { /* a quote we cannot resolve is just a normal message */ }
+    }
+
     // Find matching agent
     const agentRes = await fetch(
       `${SUPABASE_URL}/rest/v1/agents?wa_num=eq.${fromNum}&select=*`,
@@ -2742,6 +2766,18 @@ async function fetchRecentThread(url, headers, agentId, limit = 45) {
     const rows = await r.json();
     if (!Array.isArray(rows) || rows.length === 0) return '';
     rows.reverse();                                        // oldest first
+    // Quoted messages by id, so an inbound that replies to a card is shown
+    // with the card's villa — the subject of the question, otherwise lost.
+    const byWamid = new Map();
+    for (const m of rows) if (m.wa_message_id) byWamid.set(m.wa_message_id, m);
+    const quoteOf = (m) => {
+      if (!m.reply_to) return '';
+      const q = byWamid.get(m.reply_to);
+      if (!q) return '';
+      const titles = cardTitles(q.content);
+      const what = titles?.length ? `the card: ${titles.join(', ')}` : `"${humanizeMarker(q.content || '').replace(/\s+/g, ' ').slice(0, 80)}"`;
+      return ` (replying to ${what})`;
+    };
     const lines = [];
     let burst = [];                                        // pending collapsed cards
     let burstTime = '';
@@ -2760,7 +2796,7 @@ async function fetchRecentThread(url, headers, agentId, limit = 45) {
       // The agent's words stay whole (a client brief is often 400–800 chars and
       // used to lose its budget or bedroom count here); Maya's own long
       // messages are trimmed — she can refer to them, she need not reread them.
-      lines.push(`[${t}] ${sender}: ${humanizeMarker(m.content || '').slice(0, m.direction === 'outbound' ? 320 : 1200)}`);
+      lines.push(`[${t}] ${sender}: ${humanizeMarker(m.content || '').slice(0, m.direction === 'outbound' ? 320 : 1200)}${m.direction === 'inbound' ? quoteOf(m) : ''}`);
     }
     flushBurst();
     return lines.join('\n');
@@ -3139,6 +3175,7 @@ DATA PRIORITY RULES (critical — read carefully):
 6. The "Extended details (from brochure)" block is supplementary information pulled from the project's sales brochure. Use it for questions that aren't covered by structured fields (architects, builder/contractor, design philosophy, materials, construction methodology, amenity rationale, etc.). Quote it freely when relevant.
 7. If a field is empty AND there's nothing in extended_info that covers the question, do not guess or fill in from memory. For a Samba rental, ask the listed contact (ask_owner); for a KAYA project, say you'll check with Ikiel and set notify_team.
 8. Better still, GO AND GET THE ANSWER — see ASKING THE VILLA CONTACT below. "I don't have that" is a dead end; "let me find out for you" is the job.
+9. "What's included?" / "apa saja termasuk?" / "inclusions" for a Samba villa: the "INCLUDED IN THE RENT" list under that villa's Details (in VILLAS IN PLAY) is the answer — read it out, item by item, with confidence. It is on file whenever that list exists; never say the inclusions are not on file when it does. Ask the villa contact only about a specific item that is NOT in the list (and say the list first). If the villa is not in VILLAS IN PLAY this turn, name it in your reply so it is next turn, and answer from the short card meanwhile.
 
 VIEWING REQUESTS ("open_viewing") — the structured path for arranging a visit:
 When an agent wants to VIEW a specific Samba villa and gives (or you have just collected) a day/time window, set "open_viewing": { "slug", "requested_window" } in the SAME reply where you tell them you're arranging it. The system asks that villa's listed contact to confirm the slot with one-tap buttons, tracks the viewing (requested → confirmed), sends BOTH sides a calendar invite on confirmation, reminds both sides on the day, and follows up for the outcome — so a viewing never silently evaporates. Confirmed viewings also appear in the agent's profile on the portal with an add-to-calendar link. Still send the contact's card (send_contact) so the agent can coordinate directly, and keep every existing rule: you NEVER say the viewing is confirmed — confirmation comes from the contact and the system will show it in THIS AGENT'S VIEWINGS. One open_viewing per reply; don't re-open one that already exists in the viewings list (check it), and if the agent changes the time, mention the change in a fresh open_viewing only if the old one was declined/expired — otherwise relay the change via ask_owner.
