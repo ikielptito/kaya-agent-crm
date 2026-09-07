@@ -201,6 +201,12 @@ export default async function handler(req, res) {
       // What the page should show. Era's app reads this once on load.
       return res.status(200).json({ scope });
 
+    } else if (action === 'reconcile_rentals') {
+      // Rebuild every rentals row from the portal feed now, the same pass the
+      // nightly cron runs — for when the mapping (lib/rental-map.js) changed
+      // and the new shape must reach Maya before tonight.
+      const { reconcileAllRentals } = await import('../lib/rental-sync.js');
+      return res.status(200).json(await reconcileAllRentals({ SUPABASE_URL, headers }));
     } else if (action === 'get_staff') {
       // The roster, for the Staff segment of the inbox. Active people only —
       // a deactivated housekeeper's old thread stays reachable under "All".
