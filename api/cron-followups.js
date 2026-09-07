@@ -32,7 +32,7 @@ import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
 import { resolveCampaign, isCampaignPaused, isColdImportAgent, bump as bumpCampaign, noteRun, logEvent as logCampaignEvent, patchCampaign, executeBroadcast } from '../lib/campaigns.js';
-import { reportToken } from '../lib/tokens.js';
+import { reportToken, portfolioToken } from '../lib/tokens.js';
 import { sbRows } from '../lib/sb-rows.js';
 
 // Scoped-down persona for proactive follow-ups. The full MAYA_PERSONA forbids
@@ -1357,9 +1357,14 @@ function fmtWeekRange(week) {
 // newest first, fall through only while a template is not usable yet, so v3
 // takes over the moment it clears review with no deploy.
 const OWNER_REPORT_TEMPLATES = ['samba_owner_weekly_report_v3', 'samba_owner_weekly_report'];
+// Multi-villa owners: the portfolio template says "your N villas" and takes a
+// fifth parameter (the count). Until Meta approves it the walk falls through
+// to the single-villa wording with the same totals — the link is what matters.
+const OWNER_PORTFOLIO_TEMPLATES = ['samba_owner_portfolio_report_v1', ...OWNER_REPORT_TEMPLATES];
 const REPORT_TEMPLATE_MISSING = new Set([132001, 132000, 132005, 132007, 132012, 132015]);
-async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, enquiries, tok }) {
-  for (const tmpl of OWNER_REPORT_TEMPLATES) {
+async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, enquiries, tok, portfolio = 0 }) {
+  for (const tmpl of (portfolio > 1 ? OWNER_PORTFOLIO_TEMPLATES : OWNER_REPORT_TEMPLATES)) {
+    const params = tmpl.startsWith('samba_owner_portfolio') ? [name, week, portfolio, views, enquiries] : [name, week, views, enquiries];
     try {
       const r = await fetch(`${GRAPH}/${phoneId}/messages`, {
         method: 'POST',
@@ -1370,7 +1375,7 @@ async function sendOwnerReportTemplate(phoneId, token, to, { name, week, views, 
             name: tmpl,
             language: { code: 'en' },
             components: [
-              { type: 'body', parameters: [name, week, views, enquiries].map(text => ({ type: 'text', text: String(text) })) },
+              { type: 'body', parameters: params.map(text => ({ type: 'text', text: String(text) })) },
               { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
             ],
           },
@@ -1439,33 +1444,50 @@ export async function sendWeeklyOwnerReports({ SUPABASE_URL, sbHeaders, WA_TOKEN
     if (!slugs.length) { skipped++; continue; }
     // Preview: report the routing plan without sending anything or touching
     // dedupe state, so a report-contact change can be checked immediately.
-    if (preview) { plan.push({ owner: o.name, wa_num: num, villas: slugs }); continue; }
+    if (preview) { plan.push({ owner: o.name, wa_num: num, villas: slugs, link: `${PORTAL_BASE}/r/${slugs.length > 1 ? portfolioToken(slugs) : reportToken(slugs[0])}` }); continue; }
     // Per-owner dedupe stays a single scalar: checked once before the loop,
     // stamped once after. A mid-loop failure therefore won't re-send the
     // earlier villas next run — accepted trade-off; failures are counted.
     if (o.last_report_sent_at && new Date(o.last_report_sent_at).getTime() > sixDaysAgo) { skipped++; continue; }
     let anySent = false;
-    for (const slug of slugs) {
-      let d;
+    const firstName = String(o.name || 'there').split(/\s+/)[0];
+    const reportFor = async (slug) => {
       try {
         const rr = await fetch(`${PORTAL_BASE}/api/portal?action=report&slug=${encodeURIComponent(slug)}`, { headers: secret ? { Authorization: `Bearer ${secret}` } : {} });
-        if (!rr.ok) { failed++; continue; }
-        d = await rr.json();
-      } catch { failed++; continue; }
-      const firstName = String(o.name || 'there').split(/\s+/)[0];
-      const views = String(d.metrics?.views?.now ?? 0);
-      const enquiries = String(d.metrics?.enquiries?.now ?? 0);
-      const tok = reportToken(slug);
-      const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(d.week), views, enquiries, tok });
+        return rr.ok ? await rr.json() : null;
+      } catch { return null; }
+    };
+    const logSent = (label, views, enquiries) => fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({ owner_id: o.id, wa_num: o.wa_num, direction: 'outbound', content: `[Weekly report sent — ${label}: ${views} views, ${enquiries} enquiries]`, timestamp: new Date().toISOString(), source: 'cron', status: 'sent' }),
+    }).catch(() => {});
+
+    if (slugs.length > 1) {
+      // ONE message per owner. The per-villa send made a 12-villa owner's
+      // Monday twelve identical templates in forty seconds (7 Sep 2026): the
+      // template has no villa-name slot, so nothing but the link told them
+      // apart. The portfolio link opens a page listing every villa with its
+      // own numbers and a link through to each full report; the ping carries
+      // the totals.
+      const reports = (await Promise.all(slugs.map(reportFor))).filter(Boolean);
+      if (!reports.length) { failed++; continue; }
+      const views = reports.reduce((n, d) => n + (d.metrics?.views?.now ?? 0), 0);
+      const enquiries = reports.reduce((n, d) => n + (d.metrics?.enquiries?.now ?? 0), 0);
+      const tok = portfolioToken(slugs);
+      const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(reports[0].week), views: String(views), enquiries: String(enquiries), tok, portfolio: slugs.length });
       if (!ok) { failed++; continue; }
       sent++; anySent = true;
-      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-        method: 'POST', headers: sbHeaders,
-        body: JSON.stringify({ owner_id: o.id, wa_num: o.wa_num, direction: 'outbound', content: `[Weekly report sent — ${d.name || slug}: ${views} views, ${enquiries} enquiries]`, timestamp: new Date().toISOString(), source: 'cron', status: 'sent' }),
-      }).catch(() => {});
-      // Gentle spacing: a 14-villa owner gets 14 templates back-to-back —
-      // don't hammer the Graph API or trip per-number rate limits.
-      if (slugs.length > 1) await new Promise(res => setTimeout(res, 300));
+      await logSent(`${slugs.length} villas`, views, enquiries);
+    } else {
+      const slug = slugs[0];
+      const d = await reportFor(slug);
+      if (!d) { failed++; continue; }
+      const views = String(d.metrics?.views?.now ?? 0);
+      const enquiries = String(d.metrics?.enquiries?.now ?? 0);
+      const ok = await sendOwnerReportTemplate(WA_PHONE_ID, WA_TOKEN, o.wa_num, { name: firstName, week: fmtWeekRange(d.week), views, enquiries, tok: reportToken(slug) });
+      if (!ok) { failed++; continue; }
+      sent++; anySent = true;
+      await logSent(d.name || slug, views, enquiries);
     }
     if (anySent) {
       await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${o.id}`, {
