@@ -2,6 +2,12 @@
 
 The running record of features people were told about, newest first. Maya reads this to answer "what changed" and "since when"; the whats_new console action sends each entry to its audience and stamps it here by hand.
 
+## 7 September 2026
+
+**Housekeepers.** Maya now understands a message about the week — "B3 dan B5 hari Senin dan Kamis", "jadwal saya Senin & Jumat", "hari ini saya cleaning B3 dan B5", "besok B4" — and sets the villa's cleaning days from it, confirms today's visits, and says back what she recorded (in Indonesian). A greeting gets a greeting. Tapping a button on the morning message now answers exactly that villa's visit. A correction ("bukan A4, tetapi B4") undoes the previous change and applies it to the villa meant. A photo of a fault from a housekeeper who names only her unit ("b3") is filed against that unit. Told each of them directly by Maya.
+
+**Era.** Every reply Maya sends to staff is now visible in the Staff tab (they were not before). Changing a villa's cleaning days on the Schedule page skips the regular cleans already planned on the old days and rebuilds the new ones; a rebuild never touches a visit someone moved by hand. Maya tells Era in one line whenever a housekeeper sets her days.
+
 ## 6 September 2026
 
 **Owners (managed villas).** A Housekeeping tab in the owner portal: every cleaning visit, pre-guest photo check and inspection round, with photos and a PDF per record, and what is planned next at the top. Maya answers questions about bookings (who is staying, arrivals and departures, free dates) and sends a fresh portal sign-in link on request. The owner guide was updated (five tabs, records page). Told by WhatsApp template `samba_owner_update_hk_v1`.

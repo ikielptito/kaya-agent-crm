@@ -1470,6 +1470,13 @@ export async function nodeHandler(req, res) {
           }),
         }).catch(() => {});
 
+        // Every reply these handlers send is logged from here on, so the
+        // staff console shows both sides of the conversation.
+        try {
+          (await import('../lib/housekeeping-intake.js')).bindLog(relayDb);
+          (await import('../lib/housekeeping-readiness.js')).bindLog(relayDb);
+          (await import('../lib/maintenance-staff.js')).bindLog(relayDb);
+        } catch { /* logging is a nicety */ }
         const { handleTukangReply } = await import('../lib/maintenance-dispatch.js');
         if (await handleTukangReply(relayDb, relayWa, { from: fromNum, text })) {
           await logStaff('maintenance_tukang');
@@ -1488,6 +1495,16 @@ export async function nodeHandler(req, res) {
           const { handlePhotoTap } = await import('../lib/photo-assign.js');
           if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) { await logStaff('photo_assign'); return res.status(200).end(); }
         }
+        // The three buttons on the morning message answer a CLEANING task;
+        // they are resolved before anything else so a "Sudah selesai" meant
+        // for A4 can never close an inspection round at B4 (7 Sep 2026).
+        const { handleInspection, handleCleaningReply } = await import('../lib/housekeeping-intake.js');
+        if (extracted.buttonPayload && await handleCleaningReply({
+          db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload, replyTo: msg?.context?.id || null, tapOnly: true,
+        })) {
+          await logStaff('housekeeping');
+          return res.status(200).end();
+        }
         // A readiness check she was just asked for comes first: those
         // photos certify a handover, and they arrive within the hour.
         const { handleReadiness } = await import('../lib/housekeeping-readiness.js');
@@ -1497,12 +1514,23 @@ export async function nodeHandler(req, res) {
           await logStaff('housekeeping');
           return res.status(200).end();
         }
+        // A greeting, and a statement of her week ("B3 dan B5 hari Senin dan
+        // Kamis"), before the inspection handler — which would otherwise file
+        // both as findings on whatever round is open.
+        const { handleGreeting, handleScheduleStatement } = await import('../lib/housekeeping-schedule.js');
+        if (await handleGreeting({ db: relayDb, wa: relayWa, fromNum, text, mediaId })) {
+          await logStaff('housekeeping');
+          return res.status(200).end();
+        }
+        if (await handleScheduleStatement({ db: relayDb, wa: relayWa, fromNum, text, mediaId, waMessageId })) {
+          await logStaff('housekeeping_schedule');
+          return res.status(200).end();
+        }
         // An inspection round in progress takes precedence over ordinary
         // reporting: her photos belong to that round, and only the ones that
         // actually describe a fault also become work orders.
-        const { handleInspection, handleCleaningReply } = await import('../lib/housekeeping-intake.js');
         if (await handleInspection({
-          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN, waMessageId, replyTo: msg?.context?.id || null,
+          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN, waMessageId, replyTo: msg?.context?.id || null, buttonPayload: extracted.buttonPayload || null,
         })) {
           await logStaff('housekeeping');
           return res.status(200).end();
@@ -1510,7 +1538,7 @@ export async function nodeHandler(req, res) {
         // "sudah" closes today's clean; "besok saja" moves it. Only reached
         // when no inspection round is open, so a photo round is never
         // mistaken for a request to reschedule.
-        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })) {
+        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, replyTo: msg?.context?.id || null })) {
           await logStaff('housekeeping');
           return res.status(200).end();
         }
@@ -1530,7 +1558,7 @@ export async function nodeHandler(req, res) {
           const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
           const took = await handleStaffMaintenance({
             db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, waMessageId, replyTo: msg?.context?.id || null,
-            mediaType, mediaId, waToken: WA_TOKEN,
+            mediaType, mediaId, waToken: WA_TOKEN, staffSlugs: person.slugs || [],
           });
           if (took) { await logStaff('maintenance_staff'); return res.status(200).end(); }
 
@@ -1544,7 +1572,7 @@ export async function nodeHandler(req, res) {
           if (await couldBeMaintenance(text, mediaType === 'image' && !!mediaId)) {
             const forced = await handleStaffMaintenance({
               db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, waMessageId, replyTo: msg?.context?.id || null,
-              mediaType, mediaId, waToken: WA_TOKEN, force: true,
+              mediaType, mediaId, waToken: WA_TOKEN, force: true, staffSlugs: person.slugs || [],
             });
             if (forced) { await logStaff('maintenance_staff'); return res.status(200).end(); }
           }

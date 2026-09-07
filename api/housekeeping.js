@@ -15,6 +15,7 @@
 //   hk_rounds {months?}               inspections and deep cleans projected ahead
 //   hk_stats {days?}                  per-housekeeper counts for the last N days
 //   hk_calendar {months?}             everything for a calendar feed
+//   hk_schedule_preview {name|wa, text|texts[]}  dry run of the schedule parser
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import { generateTasks, catalogNames, fetchStays, projectRounds, roundAnchors } from '../lib/housekeeping.js';
@@ -123,8 +124,10 @@ export default async function handler(req, res) {
     // changing a threshold, or when the schedule was first generated with
     // rules that have since been fixed.
     if (action === 'hk_replan') {
+      // Never a visit someone moved by hand: those carry a date a person
+      // chose, and the rule would put them back where they were.
       const r = await fetch(
-        `${SUPABASE_URL}/rest/v1/housekeeping_tasks?status=eq.planned&notified_at=is.null`,
+        `${SUPABASE_URL}/rest/v1/housekeeping_tasks?status=eq.planned&notified_at=is.null&moved_by=is.null`,
         { method: 'DELETE', headers: { ...sbHeaders, Prefer: 'return=representation' } });
       if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
       const removed = (await r.json().catch(() => [])) || [];
@@ -140,21 +143,34 @@ export default async function handler(req, res) {
     if (action === 'hk_care_patch') {
       const slug = String(payload.slug || '');
       if (!slug) return res.status(400).json({ error: 'slug required' });
-      const days = [...new Set((Array.isArray(payload.clean_days) ? payload.clean_days : [])
-        .map(n => parseInt(n, 10)).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort();
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/property_care?on_conflict=slug`, {
-        method: 'POST',
-        headers: { ...sbHeaders, Prefer: 'resolution=merge-duplicates,return=representation' },
-        body: JSON.stringify({
-          slug, clean_days: days,
-          ...(payload.active != null ? { active: !!payload.active } : {}),
-          updated_at: new Date().toISOString(),
-        }),
-      });
-      if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
-      // Changing the days only affects tasks nobody has been told about; a
-      // clean already asked for stays where it is.
-      return res.status(200).json({ ok: true, care: (await r.json())[0] || null });
+      // Sets the days AND makes the calendar agree: regular cleans already
+      // planned on the old days (never one anybody was told about, never one
+      // moved by hand) are skipped, and the new days are generated. Before
+      // 7 Sep 2026 this only wrote the row, so three weeks of wrong-day
+      // cleans stayed on the schedule after a change.
+      const { applyCleanDays } = await import('../lib/housekeeping-schedule.js');
+      const out = await applyCleanDays(db, { slug, days: payload.clean_days, actor: payload.actor || 'admin', regenerate: payload.regenerate !== false });
+      if (payload.active != null) {
+        await fetch(`${SUPABASE_URL}/rest/v1/property_care?slug=eq.${encodeURIComponent(slug)}`, {
+          method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ active: !!payload.active, updated_at: new Date().toISOString() }),
+        });
+      }
+      const care = (await sbGet(`property_care?slug=eq.${encodeURIComponent(slug)}&select=*&limit=1`))?.[0] || null;
+      return res.status(200).json({ ok: true, care, ...out });
+    }
+
+    // Dry run of the schedule parser on a person's words: what "b3 dan b5
+    // hari senin dan kamis" would mean for Gede, without writing anything.
+    // texts may be several messages (a burst), oldest first.
+    if (action === 'hk_schedule_preview') {
+      const { listStaff } = await import('../lib/staff.js');
+      const { previewSchedule } = await import('../lib/housekeeping-schedule.js');
+      const people = await listStaff(db, { active_only: true });
+      const p = people.find(x => x.name === payload.name || String(x.wa_num || '').replace(/\D/g, '') === String(payload.wa || '').replace(/\D/g, ''));
+      if (!p) return res.status(404).json({ error: 'no such staff member' });
+      const texts = Array.isArray(payload.texts) ? payload.texts : [payload.text].filter(Boolean);
+      if (!texts.length) return res.status(400).json({ error: 'text required' });
+      return res.status(200).json(await previewSchedule(db, { person: p, texts }));
     }
 
     if (action === 'hk_patch') {
