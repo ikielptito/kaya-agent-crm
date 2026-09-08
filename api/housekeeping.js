@@ -293,7 +293,7 @@ export default async function handler(req, res) {
     if (action === 'hk_owner_record_photos') {
       const { cleanSlugs } = await import('../lib/housekeeping-owner.js');
       const mine = new Set(cleanSlugs(payload.slugs));
-      const table = payload.type === 'inspection' ? 'housekeeping_inspections' : 'housekeeping_readiness';
+      const table = payload.type === 'inspection' ? 'housekeeping_inspections' : payload.type === 'visit' ? 'housekeeping_tasks' : 'housekeeping_readiness';
       const row = (await sbGet(`${table}?id=eq.${id}&select=id,slug,photos&limit=1`))?.[0];
       if (!row || !mine.has(row.slug)) return res.status(404).json({ error: 'no such record' });
       const { signPhotoUrl } = await import('../lib/maintenance.js');
@@ -302,7 +302,7 @@ export default async function handler(req, res) {
         const u = await signPhotoUrl(db, p, 3600).catch(() => null);
         if (u) photo_urls.push(u);
       }
-      return res.status(200).json({ id: row.id, type: payload.type === 'inspection' ? 'inspection' : 'handover', photo_urls });
+      return res.status(200).json({ id: row.id, type: ['inspection', 'visit'].includes(payload.type) ? payload.type : 'handover', photo_urls });
     }
 
     // ── Readiness ─────────────────────────────────────────────────
@@ -508,60 +508,30 @@ export default async function handler(req, res) {
     // taken before they arrived and after they left. Photos are signed on
     // demand per record, not here: a month of records is hundreds of them.
     if (action === 'hk_records') {
-      const today = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10);
-      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.from)) ? payload.from : new Date(Date.parse(today) - 90 * 86400e3).toISOString().slice(0, 10);
-      const to = /^\d{4}-\d{2}-\d{2}$/.test(String(payload.to)) ? payload.to : today;
-      const slug = payload.slug ? `&slug=eq.${encodeURIComponent(String(payload.slug))}` : '';
-      const limit = Math.min(500, parseInt(payload.limit, 10) || 300);
-      const [checks, rounds, names] = await Promise.all([
-        sbGet(`housekeeping_readiness?asked_at=gte.${from}T00:00:00Z&asked_at=lte.${to}T23:59:59Z${slug}`
-          + `&select=id,slug,kind,status,guest_in_date,photos,checks,flags,restock,asked_at,closed_at,task_id,staff:by_staff_id(name)&order=asked_at.desc&limit=${limit}`),
-        sbGet(`housekeeping_inspections?inspected_on=gte.${from}&inspected_on=lte.${to}${slug}`
-          + `&select=id,slug,inspected_on,photos,findings,item_ids,reported_at,task_id,staff:by_staff_id(name)&order=inspected_on.desc&limit=${limit}`),
-        catalogNames(db).catch(() => ({})),
-      ]);
-      const records = [
-        ...checks.map(c => ({
-          type: 'handover', id: c.id, slug: c.slug, kind: c.kind, status: c.status,
-          date: new Date(new Date(c.asked_at).getTime() + 8 * 3600e3).toISOString().slice(0, 10),
-          at: c.asked_at, closed_at: c.closed_at, staff: c.staff?.name || null,
-          photo_count: (c.photos || []).length, checks: c.checks || [], flags: c.flags || [],
-          restock: c.restock || null, guest_in_date: c.guest_in_date || null, task_id: c.task_id,
-        })),
-        ...rounds.map(r => ({
-          type: 'inspection', id: r.id, slug: r.slug, kind: 'inspection', status: (r.item_ids || []).length ? 'raised' : 'clear',
-          date: r.inspected_on, at: r.reported_at, staff: r.staff?.name || null,
-          photo_count: (r.photos || []).length, findings: r.findings || null, item_ids: r.item_ids || [], task_id: r.task_id,
-        })),
-      ].sort((a, b) => String(b.at).localeCompare(String(a.at)));
-      return res.status(200).json({ from, to, names, records });
+      const { buildRecords } = await import('../lib/housekeeping-records.js');
+      const limit = Math.min(3000, parseInt(payload.limit, 10) || 1500);
+      return res.status(200).json(await buildRecords(db, { from: payload.from, to: payload.to, slugs: payload.slug ? [String(payload.slug)] : null, limit, audience: 'era' }));
+    }
+    // One record in full: photos (signed), the housekeeper's thread, the
+    // events behind it, the repairs it raised. type: visit|handover|inspection.
+    if (action === 'hk_record_detail') {
+      const { recordDetail } = await import('../lib/housekeeping-records.js');
+      const type = ['visit', 'handover', 'inspection'].includes(payload.type) ? payload.type : 'handover';
+      const d = await recordDetail(db, { type, id, audience: 'era' });
+      if (!d) return res.status(404).json({ error: 'no such record' });
+      return res.status(200).json(d);
     }
     // One record with everything the portal needs to print it: the record,
     // the villa name, signed photo URLs, the repairs it raised.
     if (action === 'hk_record_export') {
-      const isInsp = payload.type === 'inspection';
-      const row = (await sbGet(isInsp
-        ? `housekeeping_inspections?id=eq.${id}&select=*,staff:by_staff_id(name)&limit=1`
-        : `housekeeping_readiness?id=eq.${id}&select=*,staff:by_staff_id(name)&limit=1`))?.[0];
-      if (!row) return res.status(404).json({ error: 'no such record' });
-      const names = await catalogNames(db).catch(() => ({}));
-      const { signPhotoUrl } = await import('../lib/maintenance.js');
-      const photo_urls = [];
-      for (const p of (row.photos || []).slice(0, 40)) {
-        const u = await signPhotoUrl(db, p, 900).catch(() => null);
-        if (u) photo_urls.push(u);
-      }
-      let repairs = [];
-      if ((row.item_ids || []).length) {
-        repairs = ((await sbGet(`maintenance_items?id=in.(${row.item_ids.join(',')})&select=id,title,status`)) || []).map(i => ({ title: i.title, status: i.status }));
-      }
-      const record = isInsp
-        ? { type: 'inspection', id: row.id, slug: row.slug, kind: 'inspection', status: (row.item_ids || []).length ? 'raised' : 'clear', date: row.inspected_on, at: row.reported_at, staff: row.staff?.name || null, findings: row.findings || null, checks: [], flags: [], restock: null, guest_in_date: null }
-        : { type: 'handover', id: row.id, slug: row.slug, kind: row.kind, status: row.status, date: new Date(new Date(row.asked_at).getTime() + 8 * 3600e3).toISOString().slice(0, 10), at: row.asked_at, closed_at: row.closed_at, staff: row.staff?.name || null, checks: row.checks || [], flags: row.flags || [], restock: row.restock || null, guest_in_date: row.guest_in_date || null, findings: null };
-      return res.status(200).json({ record, villa: names[row.slug] || row.slug, photo_urls, repairs });
+      const { recordDetail } = await import('../lib/housekeeping-records.js');
+      const type = ['visit', 'handover', 'inspection'].includes(payload.type) ? payload.type : 'handover';
+      const d = await recordDetail(db, { type, id, audience: payload.audience === 'owner' ? 'owner' : 'era' });
+      if (!d) return res.status(404).json({ error: 'no such record' });
+      return res.status(200).json({ record: d.record, villa: d.record.villa, photo_urls: d.photo_urls, repairs: d.repairs, events: d.events });
     }
     if (action === 'hk_record_photos') {
-      const table = payload.type === 'inspection' ? 'housekeeping_inspections' : 'housekeeping_readiness';
+      const table = payload.type === 'inspection' ? 'housekeeping_inspections' : payload.type === 'visit' ? 'housekeeping_tasks' : 'housekeeping_readiness';
       const row = (await sbGet(`${table}?id=eq.${id}&select=id,photos&limit=1`))?.[0];
       if (!row) return res.status(404).json({ error: 'no such record' });
       const { signPhotoUrl } = await import('../lib/maintenance.js');
@@ -570,7 +540,7 @@ export default async function handler(req, res) {
         const u = await signPhotoUrl(db, p, 3600).catch(() => null);
         if (u) photo_urls.push(u);
       }
-      return res.status(200).json({ id: row.id, type: payload.type === 'inspection' ? 'inspection' : 'handover', photo_urls });
+      return res.status(200).json({ id: row.id, type: ['inspection', 'visit'].includes(payload.type) ? payload.type : 'handover', photo_urls });
     }
 
     // Dry run of the evening chase at a given WITA hour (default: now).
