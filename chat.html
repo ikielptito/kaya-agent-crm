@@ -3637,8 +3637,8 @@ function renderPendingFacts(facts) {
 }
 async function decideFact(relayId, approve) {
   try {
-    const el = document.getElementById('factline-' + relayId);
-    const kb_fact = el ? el.innerText.replace(/\s+/g, ' ').trim() : null;
+    const line = document.getElementById('factline-' + relayId);
+    const kb_fact = line ? line.innerText.replace(/\s+/g, ' ').trim() : null;
     const out = await api('resolve_fact', { relayId, approve, ...(approve && kb_fact ? { kb_fact } : {}) });
     if (out && out.ok === false) throw new Error(out.error || 'failed');
     const el = document.getElementById('fact-' + relayId); if (el) el.remove();
