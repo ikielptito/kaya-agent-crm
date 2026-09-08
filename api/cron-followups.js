@@ -183,6 +183,15 @@ export default async function handler(req, res) {
           return await runHousekeepingSweep({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap, skipWeek: true, catalogNames: await catalogNames({ SUPABASE_URL, sbHeaders }).catch(() => ({})) });
         } catch (e) { return { error: e.message }; }
       })();
+      // Yesterday's (and older) unconfirmed visits, asked about with buttons
+      // at 10:00 WITA — the record is filled by the person who was there.
+      const hkBackfill = await (async () => {
+        try {
+          const { runBackfill } = await import('../lib/housekeeping-backfill.js');
+          const { catalogNames } = await import('../lib/housekeeping.js');
+          return await runBackfill({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN }, catalogNames: await catalogNames({ SUPABASE_URL, sbHeaders }).catch(() => ({})) });
+        } catch (e) { return { error: e.message }; }
+      })();
       // Who can be reached: derived hourly so the sweeps, the chase and the
       // brief read one fact per housekeeper (lib/staff-channel.js).
       const channels = await (async () => {
@@ -244,7 +253,7 @@ export default async function handler(req, res) {
           return await processQueue({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, templatesMap);
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, hk_morning: hkMorning, channels, readiness, maintenance, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, hk_morning: hkMorning, hk_backfill: hkBackfill, channels, readiness, maintenance, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }

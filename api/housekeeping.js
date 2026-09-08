@@ -595,6 +595,15 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ tables, people });
     }
+    // Ask the housekeepers about past visits nobody confirmed. {preview,
+    // only:[names], force} — force sends now even if today's run happened.
+    if (action === 'hk_backfill') {
+      const { runBackfill } = await import('../lib/housekeeping-backfill.js');
+      return res.status(200).json(await runBackfill({
+        db, wa: { phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, catalogNames: await catalogNames(db).catch(() => ({})),
+        preview: !!payload.preview, force: !!payload.force, only: Array.isArray(payload.only) ? payload.only : null,
+      }));
+    }
     if (action === 'hk_sweep_preview') {
       return res.status(200).json(await runHousekeepingSweep({
         SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN,
