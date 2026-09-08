@@ -215,6 +215,9 @@ export default async function handler(req, res) {
       const fields = {};
       if ('findings' in payload) fields.findings = payload.findings == null ? null : String(payload.findings).slice(0, 1000);
       if (Array.isArray(payload.item_ids)) fields.item_ids = payload.item_ids.map(Number).filter(Number.isInteger);
+      // Photos can be moved off a misfiled record (onto the visit they
+      // belong to) so the record can then be deleted.
+      if (Array.isArray(payload.photos)) fields.photos = payload.photos.map(String).filter(Boolean);
       if (!Object.keys(fields).length) return res.status(400).json({ error: 'nothing to change' });
       const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(fields),
