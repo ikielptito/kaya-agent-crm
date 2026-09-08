@@ -27,3 +27,10 @@ The running record of features people were told about, newest first. Maya reads 
 **Housekeepers.** Onboarding in Indonesian with the housekeeper guide PDF; the seven-photo readiness check before every guest; the v2 inspection round with a functional walk-through.
 
 **Era.** Maintenance backlog nudges through the day, answered in the chat ("#4 done, #15 estimate 85,000"); the Records library and shareable record PDFs; the villa standard sheet; the calendar feed.
+
+## 8 Sep 2026 — one door for staff messages
+- Housekeeper replies are routed by the message they answer (tap or quoted reply → the recorded ask), then by deterministic word rules, then by one classifier that sees her open visits, round, check and asks. Acknowledgements ("siap", "ok") never change a record; "sudah selesai" closes exactly one thing or asks which.
+- Photos have a fourth home: proof of the day's visit, on the visit itself. Readiness checks keep only photos, "selesai" and restock lines; inspection rounds keep photos and findings, never acknowledgements or day-off notes.
+- A dead phone (nothing delivered for two days) is not chased: the visit is marked uncovered and Era hears once, then every third day. A reader who ignores asks gets daily tasks and the chase, not the week message or photo rounds.
+- Tickets: moving a ticket resets the owner latches (the new owner is asked; the old owner's link says it was re-filed; an approval by the old owner is not carried over). Owners can approve or decline by typing when one ticket is waiting on them. Completion is refused while the owner has not answered. Reopen restores the prior state. The backlog nudge skips snoozed and dispatched tickets and does not repeat an unchanged list. The maintenance queues run hourly.
+- Every inbound staff or team message is claimed by its WhatsApp id before handling, so Meta's redeliveries cannot create a second ticket or close a second task. New tables (staff_asks, staff_photos, maintenance_events, housekeeping_events, staff_channel) — migration 2026-09-08 — record asks, photos, history and reachability; the code runs without them.

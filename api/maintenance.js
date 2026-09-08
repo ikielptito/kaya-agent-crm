@@ -78,7 +78,9 @@ export default async function handler(req, res) {
       const item = await getItem(db, id);
       if (!item) return res.status(404).json({ error: 'Item not found' });
       const { suggestionUrls } = await import('../lib/photo-assign.js');
-      return res.status(200).json({ item: { ...item, suggested: await suggestionUrls(db, id).catch(() => []) } });
+      const { eventsFor } = await import('../lib/events.js');
+      const { forItem } = await import('../lib/photos.js');
+      return res.status(200).json({ item: { ...item, suggested: await suggestionUrls(db, id).catch(() => []), events: await eventsFor(db, 'maintenance', id).catch(() => []), photo_log: await forItem(db, id).catch(() => []) } });
     }
     // Photos a model matched to a ticket, waiting for a person.
     if (action === 'maint_photo_pending_clear') { const { clearPending } = await import('../lib/photo-assign.js'); await clearPending(db); return res.status(200).json({ ok: true }); }
@@ -122,12 +124,9 @@ export default async function handler(req, res) {
       const groups = (await sbGet(`statement_groups?active=is.true&select=key,name,listing_slugs`)) || [];
       const group = groups.find(g => (g.listing_slugs || []).includes(slug));
       if (!group) return res.status(400).json({ error: `no owner group holds ${slug}; add it under Properties first` });
-      const item = (await sbGet(`maintenance_items?id=eq.${id}&select=*&limit=1`))?.[0];
-      if (!item) return res.status(404).json({ error: 'item not found' });
-      const { patchItem, appendThread } = await import('../lib/maintenance.js');
-      await patchItem(db, id, { group_key: group.key, slug, unit_label: payload.unit_label ? String(payload.unit_label).slice(0, 40) : null });
-      await appendThread(db, id, { who: payload.actor || 'admin', text: `Moved from ${item.slug || item.group_key} to ${slug}` });
-      return res.status(200).json({ ok: true, group: group.key, owner_was_notified: !!item.notified_at, was: item.slug || item.group_key });
+      const { moveItem } = await import('../lib/maintenance.js');
+      const moved = await moveItem(db, id, { slug, group_key: group.key, unit_label: payload.unit_label || null, by: payload.actor || 'admin' });
+      return res.status(200).json(moved);
     }
     // Dry run of Era's status reply: what Maya would apply, without applying.
     if (action === 'maint_backlog_reply_preview') {

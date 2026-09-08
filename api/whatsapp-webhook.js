@@ -115,6 +115,24 @@ async function flushTeamAlerts(url, headers, phoneId, token, fromNum) {
 // up, which is exactly what a re-opener template asks for. It tells the relay
 // legs when a delivery IS the whole turn, and when there's a real message
 // underneath that still deserves a normal reply.
+// Claim an inbound message before handling it. The partial unique index
+// wa_messages_wamid_uniq turns Meta's at-least-once redelivery into a 409:
+// the second lambda sees 'duplicate' and stops, instead of both running a
+// 20-second handler and creating the ticket twice. The row is written with
+// a provisional category; the handler that claims it PATCHes the real one.
+async function claimInbound(supabaseUrl, headers, { fromNum, waMessageId, content, mediaType = null, mediaId = null, category = 'inbound', ownerId = null }) {
+  if (!waMessageId) return 'unclaimed';
+  try {
+    const r = await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: { ...headers, Prefer: 'return=minimal' },
+      body: JSON.stringify({ agent_id: null, owner_id: ownerId, wa_num: fromNum, direction: 'inbound', content: String(content || '').slice(0, 4000), wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category, media_type: mediaType, media_id: mediaId }),
+    });
+    if (r.status === 409) return 'duplicate';
+    if (!r.ok) { const t = await r.text().catch(() => ''); if (/duplicate|unique|23505/i.test(t)) return 'duplicate'; return 'unclaimed'; }
+    return 'claimed';
+  } catch { return 'unclaimed'; }
+}
+
 const isBareAck = (s) =>
   /^(ok(ay|e)?|ya|yes|yep|yup|sure|siap|noted|thanks?|thank you|terima kasih|👍|🙏)[\s.!]*$/i
     .test(String(s || '').trim());
@@ -1264,6 +1282,13 @@ export async function nodeHandler(req, res) {
     const relayWa = { phoneId: WA_PHONE_ID, token: WA_TOKEN };
 
     if (TEAM_NUMS.has(fromNum)) {
+      // Claim before handling (see claimInbound): Era's photo bursts and
+      // Meta's redeliveries used to run the handlers twice.
+      const teamClaim = await claimInbound(SUPABASE_URL, sbHeaders, { fromNum, waMessageId, content: extracted.dbContent || text, mediaType, mediaId, category: 'team' });
+      if (teamClaim === 'duplicate') return res.status(200).end();
+      const logTeam = (category) => teamClaim === 'claimed' && waMessageId
+        ? fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, { method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' }, body: JSON.stringify(category ? { category } : {}) }).catch(() => {})
+        : fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', ...(category ? { category } : {}), media_type: mediaType || null, media_id: mediaId || null }) }).catch(() => {});
       const flushed = await flushTeamAlerts(SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, fromNum);
       // Era is the "enquire with" contact for our directly-managed villas, so
       // she gets relayed agent questions like any owner: her reply opens the
@@ -1285,10 +1310,7 @@ export async function nodeHandler(req, res) {
       try {
         const { handleTeamQuestionReply } = await import('../lib/team-questions.js');
         if (await handleTeamQuestionReply({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY })) {
-          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-            method: 'POST', headers: sbHeaders,
-            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_question' }),
-          }).catch(() => {});
+          await logTeam('team_question');
           return res.status(200).end();
         }
       } catch (e) { /* never let a Q&A break team messaging */ }
@@ -1303,10 +1325,7 @@ export async function nodeHandler(req, res) {
           mediaType, mediaId, caption: extracted.caption || null,
           fetchImage: async (id) => { const m = await fetchWaMediaBase64(id, WA_TOKEN).catch(() => null); return m?.data ? { base64: m.data, contentType: m.mime || 'image/jpeg' } : null; },
         })) {
-          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-            method: 'POST', headers: sbHeaders,
-            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'statement_change' }),
-          }).catch(() => {});
+          await logTeam('statement_change');
           return res.status(200).end();
         }
       } catch (e) { /* never let this break team messaging */ }
@@ -1316,7 +1335,7 @@ export async function nodeHandler(req, res) {
         try {
           const { handlePhotoTap } = await import('../lib/photo-assign.js');
           if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) {
-            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'photo_assign' }) }).catch(() => {});
+            await logTeam('photo_assign');
             return res.status(200).end();
           }
         } catch (e) { console.warn('photo tap failed:', e.message); }
@@ -1331,10 +1350,7 @@ export async function nodeHandler(req, res) {
           mediaType, mediaId, caption: extracted.caption || null,
           fetchImage: async (id) => { const m = await fetchWaMediaBase64(id, WA_TOKEN).catch(() => null); return m?.data ? { base64: m.data, contentType: m.mime || 'image/jpeg' } : null; },
         })) {
-          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-            method: 'POST', headers: sbHeaders,
-            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'expense_log', media_type: mediaType || null, media_id: mediaId || null }),
-          }).catch(() => {});
+          await logTeam('expense_log');
           return res.status(200).end();
         }
       } catch (e) { console.warn('expense log failed:', e.message); }
@@ -1348,10 +1364,7 @@ export async function nodeHandler(req, res) {
           const { handleBacklogReply, handleBacklogUndo } = await import('../lib/maintenance-backlog-reply.js');
           if (await handleBacklogUndo({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })
               || await handleBacklogReply({ db: relayDb, wa: relayWa, fromNum, text, who: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', apiKey: ANTHROPIC_KEY })) {
-            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-              method: 'POST', headers: sbHeaders,
-              body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_status' }),
-            }).catch(() => {});
+            await logTeam('maintenance_status');
             return res.status(200).end();
           }
         } catch (e) { /* fall through to the report parser */ }
@@ -1368,10 +1381,7 @@ export async function nodeHandler(req, res) {
           mediaType, mediaId, waToken: WA_TOKEN,
         });
         if (took) {
-          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-            method: 'POST', headers: sbHeaders,
-            body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_staff', media_type: mediaType || null, media_id: mediaId || null }),
-          }).catch(() => {});
+          await logTeam('maintenance_staff');
           return res.status(200).end();
         }
       } catch (e) { /* never let maintenance break team messaging */ }
@@ -1389,10 +1399,7 @@ export async function nodeHandler(req, res) {
           if (await ta.assistantEnabled(relayDb) && (teamTap || !isBareAck(text) || await ta.hasPending(relayDb, fromNum))) {
             const out = await ta.handleTeamMessage({ db: relayDb, wa: relayWa, fromNum, text, apiKey: ANTHROPIC_KEY, buttonPayload: extracted.buttonPayload || null });
             if (out?.claimed) {
-              await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-                method: 'POST', headers: sbHeaders,
-                body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_assistant' }),
-              }).catch(() => {});
+              await logTeam('team_assistant');
               await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
                 method: 'POST', headers: sbHeaders,
                 body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'outbound', content: out.reply, timestamp: new Date().toISOString(), source: 'webhook', category: 'team_assistant', status: 'sent' }),
@@ -1415,10 +1422,7 @@ export async function nodeHandler(req, res) {
         try {
           const { answerStaffQuestion } = await import('../lib/staff-help.js');
           if (await answerStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text, role: 'era', apiKey: ANTHROPIC_KEY })) {
-            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-              method: 'POST', headers: sbHeaders,
-              body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'staff_help' }),
-            }).catch(() => {});
+            await logTeam('staff_help');
             return res.status(200).end();
           }
         } catch (e) { /* fall through to the human default */ }
@@ -1429,10 +1433,7 @@ export async function nodeHandler(req, res) {
       // can put her number on an owners row (Hostex overrides list her as
       // the contact), and without this guard her free-text replies would be
       // answered by owner-mode Maya as if she were listing a villa.
-      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-        method: 'POST', headers: sbHeaders,
-        body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook' }),
-      }).catch(() => {});
+      await logTeam(null);
       return res.status(200).end();
     }
 
@@ -1448,154 +1449,93 @@ export async function nodeHandler(req, res) {
     // known staff member is never an agent lead — if neither handler claims
     // the message it is logged and left for a human rather than falling
     // through to Maya, who would try to rent them a villa.
-    try {
-      const { staffByWa } = await import('../lib/staff.js');
-      const person = await staffByWa(relayDb, fromNum);
-      if (person && person.active) {
-        // Era's staff console hears every staff message, whichever handler
-        // claims it below — a tukang's "besok pagi" is hers to see even when
-        // Maya books it herself. Fire-and-forget, staff device list only.
-        sendPushNotifications(SUPABASE_URL, sbHeaders, {
-          title: `${person.name || '+' + fromNum} · ${(person.roles || []).map(r => r === 'tukang' ? 'Tukang' : r.charAt(0).toUpperCase() + r.slice(1)).join(' · ') || 'Staff'}`,
-          body: (extracted.dbContent || text || 'New message').slice(0, 160),
-          staffId: person.id, badgeCount: 1, listKey: 'push_subscriptions_staff',
-        }).catch(() => {});
-        const logStaff = (category) => fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
-          method: 'POST', headers: sbHeaders,
-          body: JSON.stringify({
-            agent_id: null, wa_num: fromNum, direction: 'inbound',
-            content: extracted.dbContent || text, wa_message_id: waMessageId,
-            timestamp: new Date().toISOString(), source: 'webhook', category,
-            media_type: mediaType || null, media_id: mediaId || null,
-          }),
-        }).catch(() => {});
-
-        // Every reply these handlers send is logged from here on, so the
-        // staff console shows both sides of the conversation.
-        try {
-          (await import('../lib/housekeeping-intake.js')).bindLog(relayDb);
-          (await import('../lib/housekeeping-readiness.js')).bindLog(relayDb);
-          (await import('../lib/maintenance-staff.js')).bindLog(relayDb);
-        } catch { /* logging is a nicety */ }
-        const { handleTukangReply } = await import('../lib/maintenance-dispatch.js');
-        if (await handleTukangReply(relayDb, relayWa, { from: fromNum, text })) {
-          await logStaff('maintenance_tukang');
-          return res.status(200).end();
-        }
-        // Her answer to Maya's onboarding message ("Saya mengerti" / "Ada
-        // pertanyaan"): before the task handlers, which would otherwise try
-        // to read a button label as a reply about today's clean.
-        const { handleOnboardingButton, handleOnboardingFollowup } = await import('../lib/staff-onboarding.js');
-        if (!mediaId && await handleOnboardingButton({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })) {
-          await logStaff('staff_onboard');
-          return res.status(200).end();
-        }
-        // Her tap on "foto ini untuk laporan yang mana?"
-        if (String(extracted.buttonPayload || '').startsWith('pa:')) {
-          const { handlePhotoTap } = await import('../lib/photo-assign.js');
-          if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) { await logStaff('photo_assign'); return res.status(200).end(); }
-        }
-        // The three buttons on the morning message answer a CLEANING task;
-        // they are resolved before anything else so a "Sudah selesai" meant
-        // for A4 can never close an inspection round at B4 (7 Sep 2026).
-        const { handleInspection, handleCleaningReply } = await import('../lib/housekeeping-intake.js');
-        if (extracted.buttonPayload && await handleCleaningReply({
-          db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload, replyTo: msg?.context?.id || null, tapOnly: true,
-        })) {
-          await logStaff('housekeeping');
-          return res.status(200).end();
-        }
-        // A readiness check she was just asked for comes first: those
-        // photos certify a handover, and they arrive within the hour.
-        const { handleReadiness } = await import('../lib/housekeeping-readiness.js');
-        if (await handleReadiness({
-          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
-        })) {
-          await logStaff('housekeeping');
-          return res.status(200).end();
-        }
-        // A greeting, and a statement of her week ("B3 dan B5 hari Senin dan
-        // Kamis"), before the inspection handler — which would otherwise file
-        // both as findings on whatever round is open.
-        const { handleGreeting, handleScheduleStatement } = await import('../lib/housekeeping-schedule.js');
-        if (await handleGreeting({ db: relayDb, wa: relayWa, fromNum, text, mediaId })) {
-          await logStaff('housekeeping');
-          return res.status(200).end();
-        }
-        if (await handleScheduleStatement({ db: relayDb, wa: relayWa, fromNum, text, mediaId, waMessageId })) {
-          await logStaff('housekeeping_schedule');
-          return res.status(200).end();
-        }
-        // An inspection round in progress takes precedence over ordinary
-        // reporting: her photos belong to that round, and only the ones that
-        // actually describe a fault also become work orders.
-        if (await handleInspection({
-          db: relayDb, wa: relayWa, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN, waMessageId, replyTo: msg?.context?.id || null, buttonPayload: extracted.buttonPayload || null,
-        })) {
-          await logStaff('housekeeping');
-          return res.status(200).end();
-        }
-        // "sudah" closes today's clean; "besok saja" moves it. Only reached
-        // when no inspection round is open, so a photo round is never
-        // mistaken for a request to reschedule.
-        if (await handleCleaningReply({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, replyTo: msg?.context?.id || null })) {
-          await logStaff('housekeeping');
-          return res.status(200).end();
-        }
-        // Two days after Maya's onboarding message, a plain sentence with
-        // no fault words is a question about the system, not a work order:
-        // "jika tidak ada oven" was once read by the model backstop below
-        // as a maintenance report. Keyword-shaped reports still go through.
-        {
-          const { looksLikeMaintenance } = await import('../lib/maintenance-intake.js');
-          if (!mediaId && !looksLikeMaintenance(text, false)
-              && await handleOnboardingFollowup({ db: relayDb, wa: relayWa, fromNum, text })) {
-            await logStaff('staff_help');
-            return res.status(200).end();
-          }
-        }
-        if (person.can_report) {
-          const { handleStaffMaintenance } = await import('../lib/maintenance-staff.js');
-          const took = await handleStaffMaintenance({
-            db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, waMessageId, replyTo: msg?.context?.id || null,
-            mediaType, mediaId, waToken: WA_TOKEN, staffSlugs: person.slugs || [],
-          });
-          if (took) { await logStaff('maintenance_staff'); return res.status(200).end(); }
-
-          // Backstop. Nothing claimed this message, which means the keyword
-          // gate did not recognise it — and that gate is a word list, so it
-          // only knows the phrasings somebody thought of. One cheap model
-          // call decides whether it was a report before it is dropped. This
-          // is the class of bug where Maya silently ignores a leak because
-          // it was worded unusually, and a dropped message leaves no trace.
-          const { couldBeMaintenance } = await import('../lib/maintenance-intake.js');
-          if (await couldBeMaintenance(text, mediaType === 'image' && !!mediaId)) {
-            const forced = await handleStaffMaintenance({
-              db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null, waMessageId, replyTo: msg?.context?.id || null,
-              mediaType, mediaId, waToken: WA_TOKEN, force: true, staffSlugs: person.slugs || [],
-            });
-            if (forced) { await logStaff('maintenance_staff'); return res.status(200).end(); }
-          }
-        }
-        // A question about how the system works, or why a task matters.
-        // Last, so a task reply, a photo round or a fault report is never
-        // mistaken for one; answered from the SOP and her own day.
-        try {
-          const { handleStaffQuestion } = await import('../lib/staff-help.js');
-          if (!mediaId && await handleStaffQuestion({ db: relayDb, wa: relayWa, fromNum, text })) {
-            await logStaff('staff_help');
-            return res.status(200).end();
-          }
-          // Two days after the onboarding, anything unclaimed is a question.
-          if (!mediaId && await handleOnboardingFollowup({ db: relayDb, wa: relayWa, fromNum, text })) {
-            await logStaff('staff_help');
-            return res.status(200).end();
-          }
-        } catch (e) { /* silence is the old behaviour; keep it as the floor */ }
-        await logStaff('staff');
-        return res.status(200).end();
+    // One door (lib/staff-dispatch.js): the reference she answered, then
+    // the words, then one classifier. And one rule above all of it: a known
+    // staff member NEVER falls through to the agent flow. Before 8 Sep 2026
+    // any exception inside this block (a Supabase hiccup in staffByWa, a
+    // send that threw) continued into sales-mode Maya, who tried to rent
+    // the housekeeper a villa.
+    {
+      let person = null;
+      try {
+        const { staffByWa } = await import('../lib/staff.js');
+        person = await staffByWa(relayDb, fromNum);
+      } catch (e) {
+        // Cannot read the roster: treat an unknown as an agent (old
+        // behaviour), but say so once, because a roster outage is the kind
+        // of thing that silently misroutes everyone.
+        console.warn('staff lookup failed:', e.message);
+        try { await postToTelegram(`⚠️ <b>Staff roster unreadable</b> for +${fromNum}: ${e.message.slice(0, 120)}`); } catch { /* optional */ }
       }
-    } catch (e) { /* never let staff routing break ordinary messaging */ }
+      if (person && person.active) {
+        // Claim the message before handling it. Meta redelivers when the
+        // handler is slow; the unique index on wa_message_id makes the
+        // second delivery a no-op rather than a second ticket.
+        const claim = await claimInbound(SUPABASE_URL, sbHeaders, { fromNum, waMessageId, content: extracted.dbContent || text, mediaType, mediaId, category: 'staff' });
+        if (claim === 'duplicate') return res.status(200).end();
+        const logStaff = (category) => claim === 'claimed' && waMessageId
+          ? fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, { method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' }, body: JSON.stringify({ category }) }).catch(() => {})
+          : fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category, media_type: mediaType || null, media_id: mediaId || null }) }).catch(() => {});
+        try {
+          // Era's staff console hears every staff message, whichever handler
+          // claims it below — a tukang's "besok pagi" is hers to see even when
+          // Maya books it herself. Fire-and-forget, staff device list only.
+          sendPushNotifications(SUPABASE_URL, sbHeaders, {
+            title: `${person.name || '+' + fromNum} · ${(person.roles || []).map(r => r === 'tukang' ? 'Tukang' : r.charAt(0).toUpperCase() + r.slice(1)).join(' · ') || 'Staff'}`,
+            body: (extracted.dbContent || text || 'New message').slice(0, 160),
+            staffId: person.id, badgeCount: 1, listKey: 'push_subscriptions_staff',
+          }).catch(() => {});
+          // Every reply these handlers send is logged from here on, so the
+          // staff console shows both sides of the conversation.
+          try {
+            (await import('../lib/housekeeping-intake.js')).bindLog(relayDb);
+            (await import('../lib/housekeeping-readiness.js')).bindLog(relayDb);
+            (await import('../lib/maintenance-staff.js')).bindLog(relayDb);
+          } catch { /* logging is a nicety */ }
+          const { handleTukangReply } = await import('../lib/maintenance-dispatch.js');
+          if (await handleTukangReply(relayDb, relayWa, { from: fromNum, text })) {
+            await logStaff('maintenance_tukang');
+            return res.status(200).end();
+          }
+          // Her answer to Maya's onboarding message ("Saya mengerti" / "Ada
+          // pertanyaan"): before the task handlers, which would otherwise try
+          // to read a button label as a reply about today's clean.
+          const { handleOnboardingButton, handleOnboardingFollowup } = await import('../lib/staff-onboarding.js');
+          if (!mediaId && await handleOnboardingButton({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })) {
+            await logStaff('staff_onboard');
+            return res.status(200).end();
+          }
+          // Her tap on "foto ini untuk laporan yang mana?"
+          if (String(extracted.buttonPayload || '').startsWith('pa:')) {
+            const { handlePhotoTap } = await import('../lib/photo-assign.js');
+            if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) { await logStaff('photo_assign'); return res.status(200).end(); }
+          }
+          const { dispatchStaffMessage, forwardUnmatched } = await import('../lib/staff-dispatch.js');
+          const category = await dispatchStaffMessage({
+            db: relayDb, wa: relayWa, person, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
+            waMessageId, replyTo: msg?.context?.id || null, buttonPayload: extracted.buttonPayload || null, apiKey: ANTHROPIC_KEY,
+            staffSlugs: person.slugs || [],
+          });
+          if (category) { await logStaff(category); return res.status(200).end(); }
+          // Two days after the onboarding, anything unclaimed is a question.
+          if (!mediaId && text) {
+            try {
+              if (await handleOnboardingFollowup({ db: relayDb, wa: relayWa, fromNum, text })) { await logStaff('staff_help'); return res.status(200).end(); }
+            } catch { /* fall through to the forward */ }
+          }
+          await logStaff('staff');
+          if (text || mediaId) await forwardUnmatched({ db: relayDb, wa: relayWa, person, fromNum, text: text || extracted.dbContent }).catch(() => {});
+          return res.status(200).end();
+        } catch (e) {
+          // Whatever broke, she is staff: log it, tell a human, and stop.
+          console.error('staff routing error:', e.message);
+          await logStaff('staff_error');
+          try { await postToTelegram(`⚠️ <b>Staff message not handled</b> — ${person.name}: "${String(extracted.dbContent || text || '').slice(0, 200)}"
+${e.message.slice(0, 200)}`); } catch { /* optional */ }
+          return res.status(200).end();
+        }
+      }
+    }
 
     // ── WHAT SHE IS REPLYING TO ───────────────────────────────────
     // WhatsApp lets a person quote an earlier message. When the quoted one is
@@ -1818,6 +1758,19 @@ export async function nodeHandler(req, res) {
           }
         }
       } catch (e) { /* never let reporting break owner messaging */ }
+      // A typed "approved" / "not now" to the one repair waiting on them.
+      if (!mediaId && text) {
+        try {
+          const { handleOwnerDecision } = await import('../lib/maintenance-owner.js');
+          if (await handleOwnerDecision({ db: relayDb, wa: relayWa, fromNum, text })) {
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+              method: 'POST', headers: sbHeaders,
+              body: JSON.stringify({ agent_id: null, owner_id: owner.id, wa_num: fromNum, direction: 'inbound', content: text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category: 'maintenance_owner' }),
+            }).catch(() => {});
+            return res.status(200).end();
+          }
+        } catch (e) { /* fall through to owner mode */ }
+      }
       try {
         await handleOwnerConversation({
           SUPABASE_URL, sbHeaders, owner, fromNum,

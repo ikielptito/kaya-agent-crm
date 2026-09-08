@@ -167,6 +167,31 @@ export default async function handler(req, res) {
           return await generateTasks({ SUPABASE_URL, sbHeaders });
         } catch (e) { return { error: e.message }; }
       })();
+      // Who can be reached: derived hourly so the sweeps, the chase and the
+      // brief read one fact per housekeeper (lib/staff-channel.js).
+      const channels = await (async () => {
+        try { const { refreshChannels } = await import('../lib/staff-channel.js'); const m = await refreshChannels({ SUPABASE_URL, sbHeaders }); return Object.fromEntries(Object.values(m).map(x => [x.name, x.mode])); }
+        catch (e) { return { error: e.message }; }
+      })();
+      // Handover checks nobody answered: closed the evening before an
+      // arrival, or after the timeout — hourly, not at 09:00 behind the cap.
+      const readiness = await (async () => {
+        try { const { readinessSweep } = await import('../lib/housekeeping-readiness.js'); return await readinessSweep({ db: { SUPABASE_URL, sbHeaders }, wa: { phoneId: WA_PHONE_ID, token: WA_TOKEN } }); }
+        catch (e) { return { error: e.message }; }
+      })();
+      // The maintenance queues, hourly: an approval ask reaches the owner
+      // within the hour of Era's publish, a tukang's "Tuesday 9am" reaches
+      // Era the same hour, and the visit reminders fire when designed. The
+      // queues are latch-idempotent, so the daily pass running them again
+      // is harmless. Same OWNERS_ENABLED gate as the daily pass.
+      const maintenance = await (async () => {
+        if (process.env.OWNERS_ENABLED !== '1') return { skipped: 'OWNERS_ENABLED off' };
+        try {
+          const { runMaintenanceSweep } = await import('../lib/maintenance-sweep.js');
+          const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders).catch(() => ({}));
+          return await runMaintenanceSweep({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap });
+        } catch (e) { return { error: e.message }; }
+      })();
       // Era's maintenance backlog: one list, at fixed hours of the day,
       // only when something is waiting on her. Same hourly beat.
       const eraBacklog = await (async () => {
@@ -203,7 +228,7 @@ export default async function handler(req, res) {
           return await processQueue({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, templatesMap);
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, channels, readiness, maintenance, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }
@@ -1281,13 +1306,26 @@ async function loadCampaignsMap(url, headers) {
   } catch (e) { return {}; }
 }
 
+// The last map that loaded is kept in settings.wa_templates_cache: a Meta
+// hiccup at 09:00 used to return {} and every staff sweep then reported
+// every template as "not approved yet", sending nothing and alerting nobody
+// (audit, 8 Sep 2026). Now a failed fetch falls back to the last good map
+// and posts one line to Telegram.
 async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
-  // Fetch approved templates from Meta. We need WABA_ID for this.
   const wabaId = process.env.META_WABA_ID;
   if (!wabaId || !waToken) return {};
+  const db = { SUPABASE_URL: supabaseUrl, sbHeaders };
+  const fallback = async (why) => {
+    try {
+      const { getSettingValue } = await import('../lib/campaigns.js');
+      const cached = await getSettingValue(db, 'wa_templates_cache');
+      try { await postToTelegram(`⚠️ <b>Template list unavailable</b> (${why}); using the cached list${cached?.at ? ` from ${cached.at}` : ''}.`); } catch { /* optional */ }
+      return cached?.map || {};
+    } catch { return {}; }
+  };
   try {
-    const r = await fetch(`${GRAPH}/${wabaId}/message_templates?limit=100&access_token=${waToken}`);
-    if (!r.ok) return {};
+    const r = await fetch(`${GRAPH}/${wabaId}/message_templates?limit=100&access_token=${waToken}`, { signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return fallback(`HTTP ${r.status}`);
     const data = await r.json();
     const map = {};
     (data.data || []).filter(t => t.status === 'APPROVED').forEach(t => {
@@ -1307,8 +1345,11 @@ async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
         placeholderCount: ((bodyComponent?.text || '').match(/\{\{(\d+)\}\}/g) || []).length
       };
     });
+    if (Object.keys(map).length) {
+      try { const { saveSettingValue } = await import('../lib/campaigns.js'); await saveSettingValue(db, 'wa_templates_cache', { at: new Date().toISOString(), map }); } catch { /* optional */ }
+    }
     return map;
-  } catch (e) { return {}; }
+  } catch (e) { return fallback(e.message); }
 }
 
 // Returns Meta's message id on success (or true if the id is missing from

@@ -439,6 +439,26 @@ export default async function handler(req, res) {
       return res.status(200).json({ claimed: !!out, as: role === 'era' ? 'Era' : person?.name || null, ...(out || {}) });
     }
 
+    // Dry run of the staff dispatcher: what a message from this person would
+    // be read as (the reference, the word rules, the classifier), sending
+    // nothing and writing nothing. {name, text, reply_to?, button?}
+    if (action === 'hk_dispatch_preview') {
+      const { listStaff } = await import('../lib/staff.js');
+      const { openWork, resolveReference, classifyStaffText } = await import('../lib/staff-dispatch.js');
+      const { isAck, isDone, isAllFine, isGreeting, isQuestion, isAvail, isRestock, realText, SCHEDULE_WORD_RE } = await import('../lib/staff-lang.js');
+      const people = await listStaff(db, { active_only: true });
+      const person = people.find(p => p.name === payload.name) || null;
+      if (!person) return res.status(404).json({ error: 'no such staff member' });
+      const body = realText(payload.text || '');
+      const work = await openWork(db, person);
+      const ref = await resolveReference(db, { replyTo: payload.reply_to || null, buttonPayload: payload.button || null, person, work }).catch(e => ({ error: e.message }));
+      const rules = { ack: isAck(body), done: isDone(body), all_fine: isAllFine(body), greeting: isGreeting(body), question: isQuestion(body), avail: isAvail(body), restock: isRestock(body), schedule_word: SCHEDULE_WORD_RE.test(body) };
+      const deterministic = Object.entries(rules).filter(([, v]) => v).map(([k]) => k);
+      const cls = body && !deterministic.length ? await classifyStaffText({ body, person, work, names: await catalogNames(db).catch(() => ({})) }).catch(e => ({ error: e.message })) : null;
+      const brief = { tasks: work.tasks.map(t => ({ id: t.id, slug: t.slug, kind: t.kind, date: t.task_date, status: t.status })), round: work.round?.id || null, check: work.check?.id || null, recent: work.recent.map(t => t.id), asks: work.asks.map(a => ({ id: a.id, kind: a.kind, targets: a.target_ids })) };
+      return res.status(200).json({ person: person.name, body, reference: ref ? { kind: ref.kind, task: ref.task?.id || null, tasks: (ref.tasks || []).map(t => t.id), check: ref.check?.id || null, ask: ref.ask?.id || null } : null, rules: deterministic, classifier: cls, open: brief });
+    }
+
     // Maya introduces the readiness system to the housekeepers herself.
     // hk_onboard {dry_run, only:[names], again} sends the template; status
     // shows who was sent, who tapped which button, who asked something.
