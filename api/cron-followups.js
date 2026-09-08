@@ -167,6 +167,22 @@ export default async function handler(req, res) {
           return await generateTasks({ SUPABASE_URL, sbHeaders });
         } catch (e) { return { error: e.message }; }
       })();
+      // The morning visits, from 09:00 WITA, in case the daily pass did not
+      // get this far (8 Sep 2026: no daily run logged, nothing sent). The
+      // sweep only sends visits not yet notified, so running it here and in
+      // the daily pass cannot double up; the Monday week message stays with
+      // the daily pass, which is the one that is not idempotent.
+      const hkMorning = await (async () => {
+        try {
+          const hour = new Date(Date.now() + 8 * 3600e3).getUTCHours();
+          if (hour < 9 || hour > 12) return { skipped: `hour ${hour}` };
+          const { runHousekeepingSweep } = await import('../lib/housekeeping-sweep.js');
+          const { catalogNames } = await import('../lib/housekeeping.js');
+          const templatesMap = await loadTemplatesMap(WA_PHONE_ID, WA_TOKEN, SUPABASE_URL, sbHeaders).catch(() => ({}));
+          if (!Object.keys(templatesMap).length) return { skipped: 'no template map' };
+          return await runHousekeepingSweep({ SUPABASE_URL, sbHeaders, WA_TOKEN, WA_PHONE_ID, templatesMap, skipWeek: true, catalogNames: await catalogNames({ SUPABASE_URL, sbHeaders }).catch(() => ({})) });
+        } catch (e) { return { error: e.message }; }
+      })();
       // Who can be reached: derived hourly so the sweeps, the chase and the
       // brief read one fact per housekeeper (lib/staff-channel.js).
       const channels = await (async () => {
@@ -228,7 +244,7 @@ export default async function handler(req, res) {
           return await processQueue({ SUPABASE_URL, sbHeaders }, { phoneId: WA_PHONE_ID, token: WA_TOKEN }, templatesMap);
         } catch (e) { return { error: e.message }; }
       })();
-      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, channels, readiness, maintenance, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
+      return res.status(200).json({ relay_sweep: out, sla_sweep: sla, closing_window_nudges: closing, housekeeping, hk_morning: hkMorning, channels, readiness, maintenance, era_backlog: eraBacklog, evening_chase: hkChase, era_brief: eraBrief, whats_new: whatsNew });
     } catch (e) {
       return res.status(500).json({ error: 'relay sweep failed: ' + e.message });
     }

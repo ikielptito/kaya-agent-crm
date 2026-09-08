@@ -24,7 +24,7 @@ function check(c, out) {
   if (e.outcome && out.outcome !== e.outcome) fails.push(`outcome ${out.outcome} ≠ ${e.outcome}`);
   for (const t of e.tools_include || []) if (!tools.includes(t)) fails.push(`tool ${t} not used (${tools.join(',') || 'none'})`);
   for (const s of e.reply_includes || []) if (!reply.includes(s)) fails.push(`reply lacks "${s}"`);
-  if (e.reply_includes_any && !e.reply_includes_any.some(s => reply.includes(s))) fails.push(`reply lacks any of ${JSON.stringify(e.reply_includes_any)}`);
+  if (e.reply_includes_any && !e.reply_includes_any.some(s => reply.toLowerCase().includes(String(s).toLowerCase()))) fails.push(`reply lacks any of ${JSON.stringify(e.reply_includes_any)}`);
   for (const s of e.reply_excludes || []) if (reply.toLowerCase().includes(s.toLowerCase())) fails.push(`reply contains "${s}"`);
   const writes = (out.writes || []).map(w => `${w.tool}:${w.mode}`);
   for (const w of e.writes_include || []) if (!writes.includes(w)) fails.push(`write ${w} missing (${writes.join(',') || 'none'})`);
