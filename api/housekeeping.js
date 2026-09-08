@@ -602,6 +602,26 @@ export default async function handler(req, res) {
         catalogNames: await catalogNames(db).catch(() => ({})), templatesMap, preview: false,
       }));
     }
+    // Are the 8 Sep 2026 tables there, and what does each housekeeper's
+    // channel look like? {refresh: true} recomputes the channel rows now.
+    if (action === 'hk_channels') {
+      const tables = {};
+      for (const t of ['staff_asks', 'staff_photos', 'maintenance_events', 'housekeeping_events', 'staff_channel']) {
+        const r = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&limit=1`, { headers: sbHeaders });
+        tables[t] = r.ok ? 'ok' : `missing (${r.status})`;
+      }
+      const { refreshChannels, channels } = await import('../lib/staff-channel.js');
+      const modes = payload.refresh ? await refreshChannels(db) : await channels(db);
+      const { openAsks } = await import('../lib/asks.js');
+      const staff = (await sbGet('staff?active=is.true&select=id,name,wa_num&limit=50')) || [];
+      const people = [];
+      for (const p of staff) {
+        const m = modes[p.id] || {};
+        const asks = await openAsks(db, p.wa_num).catch(() => []);
+        people.push({ name: p.name, mode: m.mode || null, last_inbound: m.last_inbound_at || null, last_read: m.last_read_at || null, undelivered_since: m.undelivered_since || null, asks_7d: m.asks_7d ?? null, ignored_7d: m.ignored_asks_7d ?? null, open_asks: asks.map(a => ({ id: a.id, kind: a.kind, targets: a.target_ids, asked: a.asked_at })) });
+      }
+      return res.status(200).json({ tables, people });
+    }
     if (action === 'hk_sweep_preview') {
       return res.status(200).json(await runHousekeepingSweep({
         SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN,
