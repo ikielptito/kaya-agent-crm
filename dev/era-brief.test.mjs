@@ -23,6 +23,6 @@ t('a quiet day is three short lines', quiet.split('\n'), ['Mon 7 Sep — no gues
 const prev = { today: '2026-09-07', tasks: { 1: { date: '2026-09-07', slug: 'haus-2', kind: 'turnover', who: 'Putu' }, 2: { date: '2026-09-08', slug: 'haus-4', kind: 'regular', who: 'Putu' } }, arrivals: ['haus-2|2026-09-07|Anna Berg'], departures: [] };
 const cur = { today: '2026-09-07', tasks: { 1: { date: '2026-09-07', slug: 'haus-2', kind: 'turnover', who: 'Putu' }, 2: { date: '2026-09-09', slug: 'haus-4', kind: 'regular', who: 'Ita' }, 3: { date: '2026-09-08', slug: 'lanehaus-3', kind: 'pre_arrival', who: 'Ana' } }, arrivals: ['haus-2|2026-09-07|Anna Berg', 'lanehaus-3|2026-09-08|Tom'], departures: [] };
 const names = { 'haus-2': 'HAUS 2', 'haus-4': 'HAUS 4', 'lanehaus-3': 'LaneHAUS 3' };
-t('changes: a new task, a moved one, a new arrival', diffSnapshot(prev, cur, s => names[s] || s), ['Moved: regular clean at HAUS 4 → Wed 9 Sep, now Ita.', 'New: pre-arrival prep at LaneHAUS 3 tomorrow (Ana).', 'New arrival tomorrow: LaneHAUS 3 (Tom).']);
+t('changes: a new task, a moved one, a new arrival', diffSnapshot(prev, cur, s => names[s] || s), ['Moved: routine clean at HAUS 4 → Wed 9 Sep, now Ita.', 'New: arrival prep at LaneHAUS 3 tomorrow (Ana).', 'New arrival tomorrow: LaneHAUS 3 (Tom).']);
 t('no change, no lines', diffSnapshot(cur, cur, s => s), []);
 console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
