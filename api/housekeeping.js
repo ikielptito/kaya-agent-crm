@@ -583,8 +583,13 @@ export default async function handler(req, res) {
         const r = await fetch(`${SUPABASE_URL}/rest/v1/${t}?select=*&limit=1`, { headers: sbHeaders });
         tables[t] = r.ok ? 'ok' : `missing (${r.status})`;
       }
-      const { refreshChannels, channels } = await import('../lib/staff-channel.js');
-      const modes = payload.refresh ? await refreshChannels(db) : await channels(db);
+      const { refreshChannels, channels, resetChannel } = await import('../lib/staff-channel.js');
+      if (payload.reset) {
+        const who = (await sbGet(`staff?name=eq.${encodeURIComponent(String(payload.reset))}&select=id&limit=1`))?.[0];
+        if (!who) return res.status(404).json({ error: 'no such staff member' });
+        await resetChannel(db, who.id, { hours: Number(payload.hours) || 24 });
+      }
+      const modes = (payload.refresh || payload.reset) ? await refreshChannels(db) : await channels(db);
       const { openAsks } = await import('../lib/asks.js');
       const staff = (await sbGet('staff?active=is.true&select=id,name,wa_num&limit=50')) || [];
       const people = [];
