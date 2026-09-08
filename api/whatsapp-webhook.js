@@ -1537,6 +1537,37 @@ ${e.message.slice(0, 200)}`); } catch { /* optional */ }
       }
     }
 
+    // ── A STAFF MEMBER FROM A NUMBER WE DO NOT KNOW ───────────────
+    // "Halo Maya, saya Putu" from an unknown number (the wa.me link Era
+    // forwards, or a housekeeper whose WhatsApp is on a different SIM) must
+    // not become a rental lead. If the name is on the active roster and the
+    // number is not, she is greeted as staff, the number is held for Era to
+    // confirm, and nothing else happens until Era says so — a stranger
+    // claiming a name must not be able to put themselves on the roster.
+    if (text && !mediaId) {
+      try {
+        const m = String(text).match(/^\s*(?:halo|hai|hi|hello)?[\s,]*(?:maya)?[\s,]*(?:ini|saya|aku|nama saya)\s+([A-Za-z][A-Za-z .'-]{1,30})\s*[.!🙏]*$/i);
+        if (m) {
+          const { listStaff } = await import('../lib/staff.js');
+          const said = m[1].trim().toLowerCase();
+          const people = (await listStaff(relayDb, { active_only: true })) || [];
+          const who = people.find(p => String(p.name || '').toLowerCase() === said || String(p.name || '').toLowerCase().split(' ')[0] === said.split(' ')[0]);
+          if (who && String(who.wa_num || '').replace(/\D/g, '') !== fromNum) {
+            const claim = await claimInbound(SUPABASE_URL, sbHeaders, { fromNum, waMessageId, content: extracted.dbContent || text, category: 'staff_claim' });
+            if (claim === 'duplicate') return res.status(200).end();
+            const { sendText } = await import('../lib/wa-interactive.js');
+            const first = String(who.name).split(' ')[0];
+            const mid = await sendText(relayWa, fromNum, `Halo ${first}! Ini Maya dari Samba 🙏 Terima kasih sudah menghubungi. Saya cek dulu dengan Era supaya nomor ini tercatat, sebentar ya. Setelah itu jadwal dan pesan dari saya masuk ke nomor ini.`);
+            await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'outbound', content: `Halo ${first}! … saya cek dulu dengan Era.`, wa_message_id: typeof mid === 'string' ? mid : null, timestamp: new Date().toISOString(), source: 'webhook', category: 'staff_claim', status: 'sent' }) }).catch(() => {});
+            const old = String(who.wa_num || '').replace(/\D/g, '');
+            await sendText(relayWa, ERA_WA_NUM, `Someone on +${fromNum} just wrote to me as "${who.name}" (roster has +${old}). If that is her, reply "update ${first}'s number to +${fromNum}" and I will switch the roster; if not, ignore this.`).catch(() => {});
+            try { await postToTelegram(`👤 <b>Staff number claim</b>: +${fromNum} says they are ${who.name} (roster +${old}). Era asked to confirm.`); } catch { /* optional */ }
+            return res.status(200).end();
+          }
+        }
+      } catch (e) { console.warn('staff claim check failed:', e.message); }
+    }
+
     // ── WHAT SHE IS REPLYING TO ───────────────────────────────────
     // WhatsApp lets a person quote an earlier message. When the quoted one is
     // a listing card, that card IS the subject: "Hi this one still available"
