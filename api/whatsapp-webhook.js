@@ -1546,7 +1546,7 @@ ${e.message.slice(0, 200)}`); } catch { /* optional */ }
     // claiming a name must not be able to put themselves on the roster.
     if (text && !mediaId) {
       try {
-        const m = String(text).match(/^\s*(?:halo|hai|hi|hello)?[\s,]*(?:maya)?[\s,]*(?:ini|saya|aku|nama saya)\s+([A-Za-z][A-Za-z .'-]{1,30})\s*[.!🙏]*$/i);
+        const m = String(text).match(/^\s*(?:halo|hai|hi|hello|hey)?[\s,]*(?:maya)?[\s,]*(?:ini|saya|aku|nama saya|this is|i am|i'm|it'?s)\s+([A-Za-z][A-Za-z .'-]{1,30}?)(?:\s+(?:dari|from)\s+[A-Za-z0-9 .'-]{1,40})?\s*[.!🙏]*$/i);
         if (m) {
           const { listStaff } = await import('../lib/staff.js');
           const said = m[1].trim().toLowerCase();
