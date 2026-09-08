@@ -2358,7 +2358,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       // Approve writes the owner's answer into the listing's extended_info —
       // the field Maya, the cards and the portal all read — reject drops it.
       const { resolveFact } = await import('../lib/relay.js');
-      const out = await resolveFact({ SUPABASE_URL, sbHeaders: headers }, Number(payload?.relayId), !!payload?.approve);
+      const out = await resolveFact({ SUPABASE_URL, sbHeaders: headers }, Number(payload?.relayId), !!payload?.approve, { kbFact: typeof payload?.kb_fact === 'string' ? payload.kb_fact : null });
       return res.status(out.ok ? 200 : 400).json(out);
 
     } else if (action === 'agent_memory') {
@@ -2425,10 +2425,10 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
     } else if (action === 'apply_maya_review') {
       // Console: Ikiel approved/rejected lessons + answered questions. This is
       // the ONLY path that changes Maya's live behaviour (merges the playbook).
-      const { approve = [], reject = [], answers = {}, staff_approve = [], staff_reject = [] } = payload || {};
+      const { approve = [], reject = [], answers = {}, staff_approve = [], staff_reject = [], edits = {} } = payload || {};
       const out = await applyDecisions(
         { SUPABASE_URL, headers, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
-        { approve, reject, answers, staff_approve, staff_reject }
+        { approve, reject, answers, staff_approve, staff_reject, edits: edits && typeof edits === 'object' ? edits : {} }
       );
       if (out?.error) return res.status(400).json(out);
       // A coaching escalation Ikiel approved goes to Era now, from Maya.

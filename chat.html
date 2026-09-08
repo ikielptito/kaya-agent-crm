@@ -720,6 +720,12 @@
   .rv-evidence { font-size: 11.5px; color: var(--wa-ink-2); margin-top: 7px; padding: 7px 9px; border-left: 2px solid var(--wa-rule);
     background: var(--wa-panel-2); border-radius: 0 6px 6px 0; font-style: italic; }
   .rv-toggle { display: flex; gap: 7px; margin-top: 11px; }
+  /* Rules, proposals and facts can be reworded in place before applying. */
+  .rv-edit { outline: none; border-radius: 6px; padding: 2px 4px; margin: -2px -4px; cursor: text; }
+  .rv-edit:hover { background: var(--wa-panel-2); }
+  .rv-edit:focus { background: var(--wa-panel-2); box-shadow: 0 0 0 2px var(--wa-accent); }
+  .rv-edit.changed { box-shadow: inset 3px 0 0 var(--wa-accent); padding-left: 8px; }
+  .rv-edithint { font-size: 11px; color: var(--wa-ink-2); margin-top: 3px; opacity: .8; }
   .rv-tbtn { flex: 1; border: 1px solid var(--wa-rule); background: #fff; color: var(--wa-ink-2); border-radius: 8px;
     padding: 7px; font-size: 12.5px; font-weight: 600; font-family: inherit; cursor: pointer; }
   .rv-tbtn.approve.on { background: #1e6b46; color: #fff; border-color: #1e6b46; }
@@ -3576,7 +3582,7 @@ async function loadSchedule() {
 // get_maya_review; Ikiel approves/rejects lessons + answers questions;
 // apply_maya_review merges the approved playbook into Maya's live prompt.
 // ════════════════════════════════════════════════════════════════════
-const reviewState = { pending: null, decisions: {}, answers: {} };
+const reviewState = { pending: null, decisions: {}, answers: {}, edits: {} };
 
 function openReview() {
   document.getElementById('reviewOverlay').style.display = 'flex';
@@ -3605,6 +3611,7 @@ async function loadReview() {
     reviewState.pending = d.pending;
     reviewState.decisions = {};
     reviewState.answers = {};
+    reviewState.edits = {};
     renderReview(d);
     renderPendingFacts(d.facts_pending || []);
   } catch (e) {
@@ -3622,14 +3629,17 @@ function renderPendingFacts(facts) {
   const rows = facts.map(f => `<div class="rv-item" id="fact-${f.id}" style="padding:10px 0;border-top:1px solid var(--border)">
       <div style="font-weight:600">${esc(f.property_name || f.rental_slug || '')}</div>
       <div style="font-size:.85rem;opacity:.8">Q: ${esc(f.question || '')}<br>A: ${esc(f.answer || '')}</div>
-      <div style="font-size:.85rem;margin-top:4px">Will be saved as: <b>${esc(f.kb_fact || '')}</b> <span style="opacity:.6">(${esc(f.contact_name || 'the villa contact')})</span></div>
+      <div style="font-size:.85rem;margin-top:4px">Will be saved as: <b class="rv-edit" id="factline-${f.id}" contenteditable="true" spellcheck="false" oninput="this.classList.toggle('changed', this.innerText.trim() !== this.dataset.original)" data-original="${esc(f.kb_fact || '')}">${esc(f.kb_fact || '')}</b> <span style="opacity:.6">(${esc(f.contact_name || 'the villa contact')})</span></div>
+      <div class="rv-edithint">Tap the line to correct it before saving.</div>
       <div style="margin-top:6px;display:flex;gap:6px"><button class="btn" onclick="decideFact(${f.id},true)">Save to listing</button><button class="btn" onclick="decideFact(${f.id},false)">Drop</button></div>
     </div>`).join('');
   body.insertAdjacentHTML('afterbegin', `<div id="rvFacts" style="margin-bottom:18px"><h3 style="margin:0 0 6px">Facts owners answered · ${facts.length} waiting</h3><div style="font-size:.8rem;opacity:.7;margin-bottom:6px">Each one came back through a relay. Saving writes it into the listing; Maya, the cards and the portal then agree.</div>${rows}</div>`);
 }
 async function decideFact(relayId, approve) {
   try {
-    const out = await api('resolve_fact', { relayId, approve });
+    const el = document.getElementById('factline-' + relayId);
+    const kb_fact = el ? el.innerText.replace(/\s+/g, ' ').trim() : null;
+    const out = await api('resolve_fact', { relayId, approve, ...(approve && kb_fact ? { kb_fact } : {}) });
     if (out && out.ok === false) throw new Error(out.error || 'failed');
     const el = document.getElementById('fact-' + relayId); if (el) el.remove();
   } catch (e) { alert('Could not save: ' + e.message); }
@@ -3658,7 +3668,8 @@ function renderReview(d) {
           <div class="rv-cardtop">
             <span class="rv-catchip sev-${esc(l.severity||'med')}">${esc(l.category||'')}</span>
           </div>
-          <div class="rv-rule">${esc(l.rule)}</div>
+          <div class="rv-rule rv-edit" contenteditable="true" spellcheck="false" data-original="${esc(l.rule)}" oninput="setEdit('${l.id}', this)">${esc(l.rule)}</div>
+          <div class="rv-edithint">Tap the rule to reword it; the edited text is what Maya learns.</div>
           ${l.rationale ? `<div class="rv-rationale">${esc(l.rationale)}</div>` : ''}
           ${l.evidence ? `<div class="rv-evidence">${esc(l.evidence)}</div>` : ''}
           <div class="rv-toggle">
@@ -3727,6 +3738,14 @@ function setAnswer(id, val) {
   reviewState.answers[id] = val;
   updateApplySummary();
 }
+// An in-place rewording of a rule or proposal. Only sent when it differs
+// from the original; the card marks the edited ones.
+function setEdit(id, el) {
+  const text = el.innerText.replace(/\s+/g, ' ').trim();
+  const changed = text !== (el.dataset.original || '').trim();
+  el.classList.toggle('changed', changed);
+  if (changed) reviewState.edits[id] = text; else delete reviewState.edits[id];
+}
 function updateApplySummary() {
   const decs = Object.values(reviewState.decisions);
   const approved = decs.filter(v => v === 'approve').length;
@@ -3768,11 +3787,12 @@ function renderStaffReview(st, d) {
     const TYPE = { vocab: 'word', example: 'example', coaching: 'coaching', timing: 'timing' };
     html += props.map(p => {
       let rule = '';
-      if (p.type === 'vocab') rule = `Add “${esc(p.word)}” to the <b>${esc(p.list)}</b> words`;
-      else if (p.type === 'example') rule = `Teach the classifier: “${esc(p.text)}” means <b>${esc(p.intent)}</b>`;
-      else if (p.type === 'coaching') rule = p.verdict === 'escalate' ? `Tell Era: ${esc(p.note)}` : `Reword the “${esc(p.key)}” tip to: “${esc(p.text)}”`;
+      const ed = (txt) => `<span class="rv-edit" contenteditable="true" spellcheck="false" data-original="${esc(txt)}" oninput="setEdit('${p.id}', this)">${esc(txt)}</span>`;
+      if (p.type === 'vocab') rule = `Add “${ed(p.word)}” to the <b>${esc(p.list)}</b> words`;
+      else if (p.type === 'example') rule = `Teach the classifier: “${ed(p.text)}” means <b>${esc(p.intent)}</b>`;
+      else if (p.type === 'coaching') rule = p.verdict === 'escalate' ? `Tell Era: ${ed(p.note)}` : `Reword the “${esc(p.key)}” tip to: “${ed(p.text)}”`;
       else if (p.type === 'timing') rule = `Move ${esc(p.person)}'s photo reminder to ${p.nudge_hour}:00`;
-      return `<div class="rv-card" id="rvc_${p.id}"><div class="rv-cardtop"><span class="rv-catchip sev-med">${esc(TYPE[p.type]||p.type)}</span></div><div class="rv-rule">${rule}</div>${p.why?`<div class="rv-rationale">${esc(p.why)}</div>`:''}${p.evidence?`<div class="rv-evidence">${esc(p.evidence)}</div>`:''}<div class="rv-toggle"><button class="rv-tbtn approve" onclick="setDecision('${p.id}','approve')">Approve</button><button class="rv-tbtn reject" onclick="setDecision('${p.id}','reject')">Reject</button></div></div>`;
+      return `<div class="rv-card" id="rvc_${p.id}"><div class="rv-cardtop"><span class="rv-catchip sev-med">${esc(TYPE[p.type]||p.type)}</span></div><div class="rv-rule">${rule}</div>${p.type !== 'timing' ? '<div class="rv-edithint">Tap the quoted text to reword it.</div>' : ''}${p.why?`<div class="rv-rationale">${esc(p.why)}</div>`:''}${p.evidence?`<div class="rv-evidence">${esc(p.evidence)}</div>`:''}<div class="rv-toggle"><button class="rv-tbtn approve" onclick="setDecision('${p.id}','approve')">Approve</button><button class="rv-tbtn reject" onclick="setDecision('${p.id}','reject')">Reject</button></div></div>`;
     }).join('');
   } else if (st && m) html += `<div class="rv-empty" style="padding:8px 0">No staff changes proposed this week.</div>`;
   if (learned && (Object.values(learned.lang||{}).some(l=>l.length) || (learned.examples||[]).length || Object.keys(learned.overrides||{}).length || Object.keys(learned.profiles||{}).length)) {
@@ -3805,7 +3825,9 @@ async function applyReview() {
   }
   btn.disabled = true; btn.textContent = 'Applying…';
   try {
-    const out = await api('apply_maya_review', { approve: lessonApprove, reject: reject.filter(id => !id.startsWith('s_')), answers, staff_approve, staff_reject });
+    const edits = {};
+    for (const id of approve) if (reviewState.edits[id]) edits[id] = reviewState.edits[id];
+    const out = await api('apply_maya_review', { approve: lessonApprove, reject: reject.filter(id => !id.startsWith('s_')), answers, staff_approve, staff_reject, edits });
     if (out?.error) throw new Error(out.error);
     const s = out.staff || {};
     const staffBits = [s.vocab ? `${s.vocab} word${s.vocab===1?'':'s'}` : '', s.examples ? `${s.examples} example${s.examples===1?'':'s'}` : '', s.timing ? `${s.timing} reminder hour${s.timing===1?'':'s'}` : '', s.coaching ? `${s.coaching} coaching` : ''].filter(Boolean).join(', ');
