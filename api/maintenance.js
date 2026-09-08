@@ -25,6 +25,7 @@
 //   maint_reporters {} / maint_reporter_patch {wa_num, name?, role?, active?}
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
+import { recordCorrection, correctingChange } from '../lib/corrections.js';
 import {
   listItems, getItem, createItem, patchItem, deleteItem,
   publishItem, approveItem, declineItem, completeItem, reopenItem,
@@ -102,8 +103,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, item });
     }
 
-    if (action === 'maint_patch')    return res.status(200).json(await patchItem(db, id, payload.fields || {}));
-    if (action === 'maint_delete')   return res.status(200).json(await deleteItem(db, id));
+    if (action === 'maint_patch') {
+      const before = (await sbGet(`maintenance_items?id=eq.${id}&select=slug,group_key,unit_label,status,title,category,photos&limit=1`).catch(() => []))?.[0] || null;
+      const out = await patchItem(db, id, payload.fields || {});
+      const change = correctingChange('maintenance_item', payload.fields || {}, before);
+      if (change) await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
+      return res.status(200).json(out);
+    }
+    if (action === 'maint_delete') {
+      const out = await deleteItem(db, id);
+      await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change: { deleted: { to: true } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
+      return res.status(200).json(out);
+    }
     if (action === 'maint_heads_up') {
       const { headsUpItem } = await import('../lib/maintenance.js');
       return res.status(200).json(await headsUpItem(db, id, { actor: payload.actor || 'admin' }));
@@ -125,7 +136,9 @@ export default async function handler(req, res) {
       const group = groups.find(g => (g.listing_slugs || []).includes(slug));
       if (!group) return res.status(400).json({ error: `no owner group holds ${slug}; add it under Properties first` });
       const { moveItem } = await import('../lib/maintenance.js');
+      const before = (await sbGet(`maintenance_items?id=eq.${id}&select=slug,group_key&limit=1`).catch(() => []))?.[0] || null;
       const moved = await moveItem(db, id, { slug, group_key: group.key, unit_label: payload.unit_label || null, by: payload.actor || 'admin' });
+      if (before && before.slug !== slug) await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change: { slug: { from: before.slug, to: slug }, group_key: { from: before.group_key, to: group.key } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
       return res.status(200).json(moved);
     }
     // Dry run of Era's status reply: what Maya would apply, without applying.
@@ -157,7 +170,11 @@ export default async function handler(req, res) {
     if (action === 'maint_complete') return res.status(200).json(await completeItem(db, id, {
       note: payload.note, actual_cost: payload.actual_cost, by: payload.by || 'admin',
     }));
-    if (action === 'maint_reopen')   return res.status(200).json(await reopenItem(db, id));
+    if (action === 'maint_reopen') {
+      const out = await reopenItem(db, id);
+      await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change: { reopened: { to: true } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
+      return res.status(200).json(out);
+    }
     if (action === 'maint_snooze')   return res.status(200).json(await snoozeItem(db, id, {
       untilDate: payload.until_date, note: payload.note, who: payload.who || 'era',
     }));
@@ -198,7 +215,9 @@ export default async function handler(req, res) {
     if (action === 'maint_photo_remove') {
       const { detachPhotoPaths } = await import('../lib/maintenance.js');
       // Detach only — the same stored file may be shared with another ticket.
-      return res.status(200).json(await detachPhotoPaths(db, id, [String(payload.path || '')]));
+      const out = await detachPhotoPaths(db, id, [String(payload.path || '')]);
+      await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change: { photos: { removed: String(payload.path || '') } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
+      return res.status(200).json(out);
     }
 
     if (action === 'maint_photo') {

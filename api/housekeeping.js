@@ -16,11 +16,16 @@
 //   hk_stats {days?}                  per-housekeeper counts for the last N days
 //   hk_calendar {months?}             everything for a calendar feed
 //   hk_schedule_preview {name|wa, text|texts[]}  dry run of the schedule parser
+//   hk_staff_review {days?, propose?}  the staff funnel (said → understood →
+//                                     recorded → right) and, with propose,
+//                                     what the review would put to Ikiel
+//   hk_staff_learned {}               the approved words/examples/tips/hours
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import { generateTasks, catalogNames, fetchStays, projectRounds, roundAnchors } from '../lib/housekeeping.js';
 import { runHousekeepingSweep, KIND_EN } from '../lib/housekeeping-sweep.js';
 import { standardFor, readinessForWindow, housekeeperStats } from '../lib/housekeeping-readiness.js';
+import { recordCorrection, correctingChange } from '../lib/corrections.js';
 
 const KINDS = ['turnover', 'regular', 'pre_arrival', 'inspection', 'deep_clean'];
 
@@ -173,6 +178,16 @@ export default async function handler(req, res) {
       return res.status(200).json(await previewSchedule(db, { person: p, texts }));
     }
 
+    if (action === 'hk_staff_review') {
+      const { stageStaffReview } = await import('../lib/staff-review.js');
+      const out = await stageStaffReview({ SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY }, { days: Number(payload.days) > 0 ? Number(payload.days) : 7, preview: true, propose: !!payload.propose });
+      return res.status(200).json(out);
+    }
+    if (action === 'hk_staff_learned') {
+      const { staffLearned } = await import('../lib/staff-review.js');
+      return res.status(200).json(await staffLearned(db));
+    }
+
     if (action === 'hk_patch') {
       const fields = {};
       for (const [k, v] of Object.entries(payload.fields || {})) if (PATCHABLE.has(k)) fields[k] = v;
@@ -187,10 +202,13 @@ export default async function handler(req, res) {
         fields.status = 'planned';
       }
       fields.updated_at = new Date().toISOString();
+      const before = (await sbGet(`housekeeping_tasks?id=eq.${id}&select=*&limit=1`).catch(() => []))?.[0] || null;
       const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_tasks?id=eq.${id}`, {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(fields),
       });
       if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      const change = correctingChange('housekeeping_task', fields, before);
+      if (change) await recordCorrection(db, { targetType: 'housekeeping_task', targetId: id, change, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
       return res.status(200).json({ ok: true, task: (await r.json())[0] || null });
     }
 
@@ -198,6 +216,8 @@ export default async function handler(req, res) {
       const status = ['planned', 'notified', 'confirmed', 'done', 'skipped'].includes(payload.status)
         ? payload.status : null;
       if (!status) return res.status(400).json({ error: 'unknown status' });
+      const before = (await sbGet(`housekeeping_tasks?id=eq.${id}&select=status&limit=1`).catch(() => []))?.[0] || null;
+      if (before && before.status !== status) await recordCorrection(db, { targetType: 'housekeeping_task', targetId: id, change: { status: { from: before.status, to: status } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
       await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_tasks?id=eq.${id}`, {
         method: 'PATCH', headers: sbHeaders,
         body: JSON.stringify({
@@ -219,19 +239,23 @@ export default async function handler(req, res) {
       // belong to) so the record can then be deleted.
       if (Array.isArray(payload.photos)) fields.photos = payload.photos.map(String).filter(Boolean);
       if (!Object.keys(fields).length) return res.status(400).json({ error: 'nothing to change' });
+      const before = (await sbGet(`housekeeping_inspections?id=eq.${id}&select=findings,photos,item_ids,task_id&limit=1`).catch(() => []))?.[0] || null;
       const r = await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, {
         method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=representation' }, body: JSON.stringify(fields),
       });
       if (!r.ok) return res.status(500).json({ error: (await r.text()).slice(0, 200) });
+      const change = correctingChange('housekeeping_inspection', fields, before);
+      if (change) await recordCorrection(db, { targetType: 'housekeeping_inspection', targetId: id, change, actor: payload.actor || 'admin', source: 'console', taskId: before?.task_id || null }).catch(() => {});
       return res.status(200).json({ ok: true, inspection: (await r.json())[0] || null });
     }
     // Remove an inspection record that holds nothing (no photos): a round
     // opened by a stray word, never walked.
     if (action === 'hk_inspection_delete') {
-      const row = (await sbGet(`housekeeping_inspections?id=eq.${id}&select=id,photos,item_ids&limit=1`))?.[0];
+      const row = (await sbGet(`housekeeping_inspections?id=eq.${id}&select=id,photos,item_ids,task_id,slug&limit=1`))?.[0];
       if (!row) return res.status(404).json({ error: 'no such inspection' });
       if ((row.photos || []).length || (row.item_ids || []).length) return res.status(409).json({ error: 'that record has photos or tickets; edit it instead' });
       await fetch(`${SUPABASE_URL}/rest/v1/housekeeping_inspections?id=eq.${id}`, { method: 'DELETE', headers: sbHeaders });
+      await recordCorrection(db, { targetType: 'housekeeping_inspection', targetId: id, change: { deleted: { to: true } }, actor: payload.actor || 'admin', source: 'console', taskId: row.task_id || null, note: row.slug }).catch(() => {});
       return res.status(200).json({ ok: true });
     }
     if (action === 'hk_inspections') {

@@ -2279,8 +2279,10 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
         const rr = await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.${key}&select=value`, { headers });
         return (await rr.json())?.[0]?.value ?? null;
       };
-      const [pending, log] = await Promise.all([get('maya_review_pending'), get('maya_review_log')]);
+      const [pending, log, staff_log] = await Promise.all([get('maya_review_pending'), get('maya_review_log'), get('staff_review_log')]);
       const playbook = await getPlaybook(env);
+      let staff_learned = null;
+      try { const { staffLearned } = await import('../lib/staff-review.js'); staff_learned = await staffLearned({ SUPABASE_URL, sbHeaders: headers }); } catch { /* optional */ }
       // Owner answers waiting to be written into their listing (relay.js
       // stages them; until now nothing in the console listed them).
       const { listPendingFacts } = await import('../lib/relay.js');
@@ -2293,6 +2295,8 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
           lessons: playbook.lessons, facts: playbook.facts },
         playbook_preview: renderPlaybookBlock(playbook),
         log: Array.isArray(log) ? log : [],
+        staff_log: Array.isArray(staff_log) ? staff_log : [],
+        staff_learned,
       });
 
     } else if (action === 'get_schedule') {
@@ -2421,12 +2425,24 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
     } else if (action === 'apply_maya_review') {
       // Console: Ikiel approved/rejected lessons + answered questions. This is
       // the ONLY path that changes Maya's live behaviour (merges the playbook).
-      const { approve = [], reject = [], answers = {} } = payload || {};
+      const { approve = [], reject = [], answers = {}, staff_approve = [], staff_reject = [] } = payload || {};
       const out = await applyDecisions(
         { SUPABASE_URL, headers, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY },
-        { approve, reject, answers }
+        { approve, reject, answers, staff_approve, staff_reject }
       );
       if (out?.error) return res.status(400).json(out);
+      // A coaching escalation Ikiel approved goes to Era now, from Maya.
+      const lines = out?.staff?.era_lines || [];
+      if (lines.length && process.env.META_WA_PHONE_ID && process.env.META_WA_TOKEN) {
+        try {
+          const { sendText } = await import('../lib/wa-interactive.js');
+          const era = String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
+          const body = `From the weekly review — habits that came back after my tip, for a word from you:\n${lines.map(l => `• ${l}`).join('\n')}`;
+          const mid = await sendText({ phoneId: process.env.META_WA_PHONE_ID, token: process.env.META_WA_TOKEN }, era, body).catch(() => null);
+          await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: { ...headers, Prefer: 'return=minimal' }, body: JSON.stringify({ wa_num: era, direction: 'outbound', content: body, wa_message_id: typeof mid === 'string' ? mid : null, timestamp: new Date().toISOString(), source: 'console', category: 'housekeeping', status: mid ? 'sent' : 'failed' }) }).catch(() => {});
+          out.staff.era_told = !!mid;
+        } catch { /* best effort */ }
+      }
       return res.status(200).json(out);
 
     } else if (action === 'remove_push_subscription') {

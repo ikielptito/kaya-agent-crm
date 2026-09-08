@@ -1473,7 +1473,13 @@ export async function nodeHandler(req, res) {
         // second delivery a no-op rather than a second ticket.
         const claim = await claimInbound(SUPABASE_URL, sbHeaders, { fromNum, waMessageId, content: extracted.dbContent || text, mediaType, mediaId, category: 'staff' });
         if (claim === 'duplicate') return res.status(200).end();
-        const logStaff = (category) => claim === 'claimed' && waMessageId
+        const staffCtx = { person, fromNum, text, mediaType, mediaId, waMessageId, replyTo: msg?.context?.id || null, buttonPayload: extracted.buttonPayload || null, trace: {} };
+        const staffReceivedAt = new Date().toISOString();
+        const logStaff = async (category) => {
+          try { const { recordTurn } = await import('../lib/staff-turns.js'); await recordTurn(relayDb, { ctx: staffCtx, category, receivedAt: staffReceivedAt }); } catch { /* the ledger is best effort */ }
+          return logStaffRow(category);
+        };
+        const logStaffRow = (category) => claim === 'claimed' && waMessageId
           ? fetch(`${SUPABASE_URL}/rest/v1/wa_messages?wa_message_id=eq.${encodeURIComponent(waMessageId)}`, { method: 'PATCH', headers: { ...sbHeaders, Prefer: 'return=minimal' }, body: JSON.stringify({ category }) }).catch(() => {})
           : fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'inbound', content: extracted.dbContent || text, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'webhook', category, media_type: mediaType || null, media_id: mediaId || null }) }).catch(() => {});
         try {
@@ -1511,11 +1517,9 @@ export async function nodeHandler(req, res) {
             if (await handlePhotoTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload })) { await logStaff('photo_assign'); return res.status(200).end(); }
           }
           const { dispatchStaffMessage, forwardUnmatched } = await import('../lib/staff-dispatch.js');
-          const category = await dispatchStaffMessage({
-            db: relayDb, wa: relayWa, person, fromNum, text, mediaType, mediaId, waToken: WA_TOKEN,
-            waMessageId, replyTo: msg?.context?.id || null, buttonPayload: extracted.buttonPayload || null, apiKey: ANTHROPIC_KEY,
-            staffSlugs: person.slugs || [],
-          });
+          const category = await dispatchStaffMessage(Object.assign(staffCtx, {
+            db: relayDb, wa: relayWa, waToken: WA_TOKEN, apiKey: ANTHROPIC_KEY, staffSlugs: person.slugs || [],
+          }));
           if (category) { await logStaff(category); return res.status(200).end(); }
           // Two days after the onboarding, anything unclaimed is a question.
           if (!mediaId && text) {

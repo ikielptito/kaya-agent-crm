@@ -3678,7 +3678,7 @@ function renderReview(d) {
         </div>`).join('');
     }
 
-    if (!p.lessons?.length && !p.questions?.length) {
+    if (!p.lessons?.length && !p.questions?.length && !(p.staff?.proposals?.length)) {
       html += `<div class="rv-empty">Clean week — Maya had no issues worth flagging.<br>Nothing to approve.</div>`;
     } else {
       document.getElementById('rvApplyBar').style.display = 'flex';
@@ -3688,6 +3688,8 @@ function renderReview(d) {
   }
 
   // Current playbook (what Maya has already learned)
+  html += renderStaffReview(p ? p.staff : null, d);
+
   if (pb.lessons?.length || pb.facts?.length) {
     html += `<div class="an-sec-label">Maya's playbook — v${pb.version||0} (${pb.lessons?.length||0} lessons, ${pb.facts?.length||0} facts)</div>`;
     html += `<div class="rv-card">`;
@@ -3730,7 +3732,63 @@ function updateApplySummary() {
   const approved = decs.filter(v => v === 'approve').length;
   const answered = Object.values(reviewState.answers).filter(v => v && v.trim()).length;
   const el = document.getElementById('rvApplySummary');
-  if (el) el.textContent = `${approved} lesson${approved===1?'':'s'} to teach · ${answered} answer${answered===1?'':'s'}`;
+  const staffN = Object.keys(reviewState.decisions).filter(id => id.startsWith('s_') && reviewState.decisions[id] === 'approve').length;
+  if (el) el.textContent = `${approved - staffN} lesson${approved - staffN===1?'':'s'} to teach · ${answered} answer${answered===1?'':'s'}${staffN ? ` · ${staffN} staff change${staffN===1?'':'s'}` : ''}`;
+}
+
+// ── The staff lane: the funnel, the trend, the proposals ──────────
+// What the housekeepers said → what Maya understood → what became a
+// record → what a person had to correct. Proposals are settings, not
+// prose: words for the rules, examples for the classifier, reworded tips,
+// a later reminder hour. Approve/Reject uses the same toggles as lessons.
+function renderStaffReview(st, d) {
+  const log = d.staff_log || [];
+  const learned = d.staff_learned || null;
+  if (!st && !log.length) return '';
+  let html = `<div class="an-sec-label">Housekeepers → records — this week's funnel</div>`;
+  const m = st?.metrics;
+  if (st?.error) html += `<div class="rv-card"><div class="rv-rationale">Staff lane failed: ${esc(st.error)}</div></div>`;
+  if (m) {
+    const f = m.funnel || {}, r = f.rates || {};
+    const step = (label, n, pctv, note) => `<div style="flex:1;min-width:110px;padding:8px 10px;border:1px solid var(--border);border-radius:8px"><div style="font-size:.72rem;opacity:.7">${esc(label)}</div><div style="font-size:1.25rem;font-weight:700">${n ?? '–'}${pctv != null ? `<span style="font-size:.8rem;font-weight:500;opacity:.7"> · ${pctv}%</span>` : ''}</div>${note ? `<div style="font-size:.72rem;opacity:.6">${esc(note)}</div>` : ''}</div>`;
+    html += `<div class="rv-card"><div style="display:flex;gap:8px;flex-wrap:wrap">${step('Said', f.said, null, `${f.by_kind?.text||0} text · ${f.by_kind?.photo||0} photos · ${f.by_kind?.tap||0} taps`)}${step('Understood', f.understood, r.understood, `${f.forwarded||0} forwarded to a person`)}${step('Recorded', f.recorded, r.recorded, `${f.by_outcome?.asked||0} asked back · ${f.by_outcome?.coached||0} tips`)}${step('Right', f.right, r.right, `${f.corrected||0} corrected by hand`)}</div>`;
+    const L = m.funnel?.by_layer || {};
+    const layers = Object.keys(L).sort((a,b)=>L[b].said-L[a].said);
+    if (layers.length) html += `<table class="an-table" style="margin-top:10px"><thead><tr><th>Decided by</th><th>Said</th><th>Recorded</th><th>Corrected</th><th>Forwarded</th></tr></thead><tbody>${layers.map(k=>`<tr><td>${esc(k)}</td><td>${L[k].said}</td><td>${L[k].recorded}</td><td>${L[k].corrected}</td><td>${L[k].forwarded}</td></tr>`).join('')}</tbody></table>`;
+    const v = m.visits || {}, a = m.asks || {}, c = m.coaching || {}, i = m.interventions || {};
+    html += `<div class="rv-rationale" style="margin-top:10px">Visits: ${v.done||0}/${(v.total||0)-(v.skipped||0)} done (${v.rates?.done ?? '–'}%), ${v.photos||0} with photos (${v.rates?.photos ?? '–'}%), ${v.unconfirmed||0} not confirmed, ${v.uncovered||0} not covered.<br>Asks: ${a.answered||0}/${a.sent||0} answered${a.median_minutes!=null?`, median ${Math.round(a.median_minutes)} min`:''}, ${a.ignored||0} ignored.<br>Tips sent: ${c.tips_sent||0}${(c.people||[]).filter(p=>p.verdict==='persisted').length?`, ${(c.people||[]).filter(p=>p.verdict==='persisted').length} pattern${(c.people||[]).filter(p=>p.verdict==='persisted').length===1?'':'s'} came back`:''}.<br>Era's hand: ${i.total||0} (${i.corrections||0} corrections, ${i.forwarded||0} forwards, ${i.writes_via_maya||0} writes via Maya).</div>`;
+    if ((m.people||[]).length) html += `<table class="an-table" style="margin-top:10px"><thead><tr><th>Person</th><th>Said</th><th>Understood</th><th>Recorded</th><th>Corrected</th><th>Writes at</th></tr></thead><tbody>${m.people.map(p=>`<tr><td>${esc(p.name)}</td><td>${p.said}</td><td>${p.understood}</td><td>${p.recorded}</td><td>${p.corrected}</td><td>${(p.busiest_hours||[]).map(h=>`${h.hour}:00`).join(', ')}</td></tr>`).join('')}</tbody></table>`;
+    if ((m.corrections||[]).length) html += `<details style="margin-top:8px"><summary style="cursor:pointer;font-size:.85rem">Corrections this week (${m.corrections.length})</summary>${m.corrections.map(x=>`<div class="rv-evidence">${esc(x.at.slice(0,10))} · ${esc(x.target)} · ${esc(x.by)} changed ${esc(Object.keys(x.change||{}).join(', '))}${x.turn_text?` — she wrote: “${esc(x.turn_text)}” (${esc(x.turn_layer||'')})`:''}</div>`).join('')}</details>`;
+    html += `</div>`;
+  }
+  if (st?.summary) html += `<div class="rv-card"><div class="rv-rationale">${esc(st.summary)}</div></div>`;
+  const props = (st?.proposals||[]).filter(p => !(st.approved||[]).includes(p.id) && !(st.rejected||[]).includes(p.id));
+  if (props.length) {
+    html += `<div class="an-sec-label">Proposed changes — approve to let Maya use them</div>`;
+    const TYPE = { vocab: 'word', example: 'example', coaching: 'coaching', timing: 'timing' };
+    html += props.map(p => {
+      let rule = '';
+      if (p.type === 'vocab') rule = `Add “${esc(p.word)}” to the <b>${esc(p.list)}</b> words`;
+      else if (p.type === 'example') rule = `Teach the classifier: “${esc(p.text)}” means <b>${esc(p.intent)}</b>`;
+      else if (p.type === 'coaching') rule = p.verdict === 'escalate' ? `Tell Era: ${esc(p.note)}` : `Reword the “${esc(p.key)}” tip to: “${esc(p.text)}”`;
+      else if (p.type === 'timing') rule = `Move ${esc(p.person)}'s photo reminder to ${p.nudge_hour}:00`;
+      return `<div class="rv-card" id="rvc_${p.id}"><div class="rv-cardtop"><span class="rv-catchip sev-med">${esc(TYPE[p.type]||p.type)}</span></div><div class="rv-rule">${rule}</div>${p.why?`<div class="rv-rationale">${esc(p.why)}</div>`:''}${p.evidence?`<div class="rv-evidence">${esc(p.evidence)}</div>`:''}<div class="rv-toggle"><button class="rv-tbtn approve" onclick="setDecision('${p.id}','approve')">Approve</button><button class="rv-tbtn reject" onclick="setDecision('${p.id}','reject')">Reject</button></div></div>`;
+    }).join('');
+  } else if (st && m) html += `<div class="rv-empty" style="padding:8px 0">No staff changes proposed this week.</div>`;
+  if (learned && (Object.values(learned.lang||{}).some(l=>l.length) || (learned.examples||[]).length || Object.keys(learned.overrides||{}).length || Object.keys(learned.profiles||{}).length)) {
+    html += `<div class="an-sec-label">What the staff side has learned</div><div class="rv-card">`;
+    for (const [k, words] of Object.entries(learned.lang||{})) if (words.length) html += `<div class="rv-pblesson"><b>${esc(k)}</b>: ${esc(words.join(', '))}</div>`;
+    for (const e of (learned.examples||[])) html += `<div class="rv-pblesson">“${esc(e.text)}” → ${esc(e.intent)}</div>`;
+    for (const [k, t] of Object.entries(learned.overrides||{})) html += `<div class="rv-pblesson"><b>${esc(k)}</b> tip: ${esc(t)}</div>`;
+    for (const [num, p] of Object.entries(learned.profiles||{})) if (p.nudge_hour) html += `<div class="rv-pblesson">${esc(num)}: reminder at ${p.nudge_hour}:00</div>`;
+    html += `</div>`;
+  }
+  if (log.length) {
+    html += `<div class="an-sec-label">Staff trend</div><table class="an-table"><thead><tr><th>Week</th><th>Said</th><th>Understood</th><th>Recorded</th><th>Right</th><th>Visits done</th><th>With photos</th><th>Era's hand</th></tr></thead><tbody>`;
+    html += log.map(r => `<tr><td>${esc(r.week_of||'')}</td><td>${r.said??''}</td><td>${r.understood!=null?r.understood+'%':''}</td><td>${r.recorded!=null?r.recorded+'%':''}</td><td>${r.right!=null?r.right+'%':''}</td><td>${r.visits_done!=null?r.visits_done+'%':''}</td><td>${r.visits_photos!=null?r.visits_photos+'%':''}</td><td>${r.interventions??''}</td></tr>`).join('');
+    html += `</tbody></table>`;
+  }
+  return html;
 }
 
 async function applyReview() {
@@ -3739,14 +3797,19 @@ async function applyReview() {
   const reject = Object.keys(reviewState.decisions).filter(id => reviewState.decisions[id] === 'reject');
   const answers = {};
   Object.keys(reviewState.answers).forEach(id => { if (reviewState.answers[id] && reviewState.answers[id].trim()) answers[id] = reviewState.answers[id].trim(); });
+  const staff_approve = approve.filter(id => id.startsWith('s_'));
+  const staff_reject = reject.filter(id => id.startsWith('s_'));
+  const lessonApprove = approve.filter(id => !id.startsWith('s_'));
   if (!approve.length && !Object.keys(answers).length) {
-    toast('Approve at least one lesson or answer a question first'); return;
+    toast('Approve at least one item or answer a question first'); return;
   }
   btn.disabled = true; btn.textContent = 'Applying…';
   try {
-    const out = await api('apply_maya_review', { approve, reject, answers });
+    const out = await api('apply_maya_review', { approve: lessonApprove, reject: reject.filter(id => !id.startsWith('s_')), answers, staff_approve, staff_reject });
     if (out?.error) throw new Error(out.error);
-    toast(`Taught Maya ${out.approved} lesson${out.approved===1?'':'s'}${out.answered?` + ${out.answered} fact${out.answered===1?'':'s'}`:''} (playbook v${out.playbook_version})`);
+    const s = out.staff || {};
+    const staffBits = [s.vocab ? `${s.vocab} word${s.vocab===1?'':'s'}` : '', s.examples ? `${s.examples} example${s.examples===1?'':'s'}` : '', s.timing ? `${s.timing} reminder hour${s.timing===1?'':'s'}` : '', s.coaching ? `${s.coaching} coaching` : ''].filter(Boolean).join(', ');
+    toast(`Taught Maya ${out.approved} lesson${out.approved===1?'':'s'}${out.answered?` + ${out.answered} fact${out.answered===1?'':'s'}`:''}${staffBits ? ` · staff: ${staffBits}${s.era_told ? ', Era told' : ''}` : ''} (playbook v${out.playbook_version})`);
     await loadReview();
     refreshReviewBadge();
   } catch (e) {
