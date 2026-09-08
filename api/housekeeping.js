@@ -24,7 +24,7 @@ import { standardFor, readinessForWindow, housekeeperStats } from '../lib/housek
 
 const KINDS = ['turnover', 'regular', 'pre_arrival', 'inspection', 'deep_clean'];
 
-const PATCHABLE = new Set(['assigned_staff_id', 'task_date', 'notes', 'status', 'next_followup_at']);
+const PATCHABLE = new Set(['assigned_staff_id', 'task_date', 'notes', 'status', 'next_followup_at', 'photos']);
 
 // Which templates Meta has approved, by name → true. Same source the cron
 // uses before sending anything.
