@@ -1,0 +1,16 @@
+import { yearsLeft, tenureBlock, TENURE } from '../lib/tenure.js';
+let pass = 0, fail = 0;
+const t = (name, got, expect) => { const ok = JSON.stringify(got) === JSON.stringify(expect); if (ok) { pass++; console.log(`  ok  ${name}`); } else { fail++; console.log(`  FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(expect)}`); } };
+const now = new Date('2026-09-09T00:00:00Z');
+t('Tropicana: 26.6 years left on 9 Sep 2026', yearsLeft(TENURE.tropicana_valley.end, now), 26.6);
+t('LaneHAUS: 26.2 years left', yearsLeft(TENURE.lanehaus.end, now), 26.2);
+t('a year later, a year less', yearsLeft(TENURE.tropicana_valley.end, new Date('2027-09-09T00:00:00Z')), 25.6);
+t('never negative', yearsLeft('2020-01-01', now), 0);
+t('no end, no number', yearsLeft(null, now), null);
+const b = tenureBlock(now);
+t('block names the years remaining and the end date', /Tropicana Valley: leasehold ends 21 April 2053 — about 26\.6 years remaining today/.test(b), true);
+t('LaneHAUS extension is the agreed 1.25B', /LaneHAUS Pererenan: .*IDR 1\.25 billion for all three units/.test(b), true);
+t('Clay House has no fixed extension', /The Clay House: 30-year leasehold per unit.*no fixed extension/.test(b), true);
+t('the rule is stated', /years remaining today and the end date, never the original term/.test(b), true);
+t('block does not carry today\'s date (cache-stable)', /2026-09-09|9 September 2026/.test(b), false);
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);

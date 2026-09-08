@@ -1,4 +1,5 @@
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, BROCHURES as FALLBACK_BROCHURES, MAYA_PERSONA } from '../lib/kb.js';
+import { tenureBlock } from '../lib/tenure.js';
 import { loadPlaybookBlock } from '../lib/maya-review.js';
 import { handbookDigest, handbookSection } from '../lib/handbook.js';
 import { forwardInbound, forwardMayaReply, postToTelegram } from '../lib/telegram.js';
@@ -3107,6 +3108,8 @@ ${handbookDigest('agent')}
 
 KAYA SALES PORTFOLIO (the single source of truth — Ikiel keeps this current via the Projects admin page):
 ${portfolio}
+
+${tenureBlock()}
 
 ${rentalsContext || ''}
 
