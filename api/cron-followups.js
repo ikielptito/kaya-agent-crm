@@ -1311,7 +1311,7 @@ async function loadCampaignsMap(url, headers) {
 // every template as "not approved yet", sending nothing and alerting nobody
 // (audit, 8 Sep 2026). Now a failed fetch falls back to the last good map
 // and posts one line to Telegram.
-async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
+export async function loadTemplatesMap(phoneId, waToken, supabaseUrl, sbHeaders) {
   const wabaId = process.env.META_WABA_ID;
   if (!wabaId || !waToken) return {};
   const db = { SUPABASE_URL: supabaseUrl, sbHeaders };

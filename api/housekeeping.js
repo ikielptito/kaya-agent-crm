@@ -590,6 +590,18 @@ export default async function handler(req, res) {
         preview: true, hour: payload.hour != null ? parseInt(payload.hour, 10) : null,
       }));
     }
+    // The morning messages, for real, on demand: when the 09:00 pass did not
+    // run (8 Sep 2026: no daily run logged, no templates sent) this sends
+    // today's visits now. Idempotent — a visit already notified is skipped.
+    if (action === 'hk_sweep_run') {
+      const { loadTemplatesMap } = await import('./cron-followups.js');
+      const templatesMap = await loadTemplatesMap(process.env.META_WA_PHONE_ID, process.env.META_WA_TOKEN, SUPABASE_URL, sbHeaders).catch(() => ({}));
+      if (!Object.keys(templatesMap).length) return res.status(503).json({ error: 'template list unavailable; not sending blind' });
+      return res.status(200).json(await runHousekeepingSweep({
+        SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN, WA_PHONE_ID: process.env.META_WA_PHONE_ID,
+        catalogNames: await catalogNames(db).catch(() => ({})), templatesMap, preview: false,
+      }));
+    }
     if (action === 'hk_sweep_preview') {
       return res.status(200).json(await runHousekeepingSweep({
         SUPABASE_URL, sbHeaders, WA_TOKEN: process.env.META_WA_TOKEN,
