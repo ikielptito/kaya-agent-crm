@@ -34,6 +34,10 @@ The webhook receives every inbound message and the first branch that claims it w
 - Housekeepers get their day at 09:00 WITA with three buttons, the week ahead on Mondays, the seven-photo check after a pre-guest clean, the fortnightly inspection round, a 17:00 chase for a visit not marked done, and answers to questions from the SOP. Era hears exceptions only.
 - Tukang get a job sheet link and answer accept, arrived, done; Era is told at every transition.
 
+## Project finance
+
+- The Tropicana Valley development as a whole lives in five tables (`project_ledger`, `project_commitments`, `project_receivables`, `project_loans`, `project_accounts`; migration 2026-09-09) behind the `finance_*` actions on `/api/statements`. The cockpit's Finance page (portal `/payouts#/finance`) reads and edits them; the portal adds the rent and expenses of the four unsold B units from the Hostex calendar and Era's statements and writes each closed month into the ledger as calendar rows (source `rental`). The headline is the loan that bought the land: loan outstanding, less the company account, plus the costs still to pay, less what the buyers still owe, and how many months of rent close the gap. Settings key `project_finance` (fx_usd, rental_group_key, rental_from, projection_months, units_unsold).
+
 ## Crons (all times UTC; Bali is UTC+8)
 
 - 01:00, 01:20, 01:40: the three morning waves (broadcasts, follow-ups, owner sweeps, maintenance and housekeeping notifications, delivery health).

@@ -52,7 +52,12 @@ export default async function handler(req, res) {
     { name: 'statement_lines table',   url: '/rest/v1/statement_lines?select=id&limit=1' },
     { name: 'statement_payments table', url: '/rest/v1/statement_payments?select=id&limit=1' },
     { name: 'statements.paid_total',   url: '/rest/v1/statements?select=paid_total&limit=1' },
-    { name: 'statement_groups.payout_account', url: '/rest/v1/statement_groups?select=payout_account&limit=1' }
+    { name: 'statement_groups.payout_account', url: '/rest/v1/statement_groups?select=payout_account&limit=1' },
+    { name: 'project_ledger table',      url: '/rest/v1/project_ledger?select=id&limit=1' },
+    { name: 'project_commitments table', url: '/rest/v1/project_commitments?select=id&limit=1' },
+    { name: 'project_receivables table', url: '/rest/v1/project_receivables?select=id&limit=1' },
+    { name: 'project_loans table',       url: '/rest/v1/project_loans?select=id&limit=1' },
+    { name: 'project_accounts table',    url: '/rest/v1/project_accounts?select=id&limit=1' }
   ];
 
   const results = [];

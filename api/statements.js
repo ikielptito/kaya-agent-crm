@@ -30,6 +30,11 @@
 //   statement_wa_login_code {wa_num, token}    deliver a tap-to-sign-in link on WhatsApp
 //   statement_groups {}                        registry list
 //   statement_group_patch {key, fields}        owner names/numbers/notify/active/payout_account
+//   finance_get {project_key?}                 project finance: ledger, commitments, receivables, loans, accounts, settings
+//   finance_put {table, row}                   insert (no id) or update (id) one row; whitelisted columns
+//   finance_delete {table, id}
+//   finance_rental_upsert {rows}               the portal writes closed rental months into the ledger
+//   finance_settings_patch {fields}            fx_usd, rental_group_key, rental_from, rental_account, projection_months, units_unsold
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import {
@@ -41,6 +46,7 @@ import {
   sheetDiff, amendFromSheet, dismissDiscrepancy, setRevisionChanges,
 } from '../lib/statements.js';
 import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
+import { financeGet, financePut, financeDelete, financeRentalUpsert, financeSettings, patchFinanceSettings } from '../lib/project-finance.js';
 
 // Line fields the editor may write, per kind. Everything else is derived.
 const EDITABLE = new Set(['unit_name', 'guest_name', 'stay_dates', 'platform', 'nights', 'amount', 'commission', 'nett', 'expense_date', 'description', 'position']);
@@ -396,6 +402,14 @@ export default async function handler(req, res) {
         waNum: payload.wa_num, slugs: payload.slugs || [], months: payload.months || 6,
       }));
     }
+
+    // ── Project finance (lib/project-finance.js) ─────────────────────
+    if (action === 'finance_get') return res.status(200).json(await financeGet(db, { project_key: payload.project_key }));
+    if (action === 'finance_put') return res.status(200).json(await financePut(db, { table: payload.table, row: payload.row || {}, project_key: payload.project_key }));
+    if (action === 'finance_delete') return res.status(200).json(await financeDelete(db, { table: payload.table, id: payload.id, project_key: payload.project_key }));
+    if (action === 'finance_rental_upsert') return res.status(200).json(await financeRentalUpsert(db, { rows: payload.rows || [], project_key: payload.project_key }));
+    if (action === 'finance_settings_patch') return res.status(200).json({ settings: await patchFinanceSettings(db, payload.fields || {}) });
+    if (action === 'finance_settings') return res.status(200).json({ settings: await financeSettings(db) });
 
     if (action === 'statement_groups') {
       return res.status(200).json({ groups: await listGroups(db, { activeOnly: false }) });
