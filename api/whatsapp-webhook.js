@@ -3703,7 +3703,9 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
 export async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
   const secret = process.env.LISTING_SYNC_SECRET;
   const ownerName = owner.name || 'there';
-  const listingsLine = listingSlugs.length ? listingSlugs.join(', ') : '(none yet — this owner has not listed a villa)';
+  const listingsLine = listingSlugs.length
+    ? `${listingSlugs.join(', ')} — to UPDATE one of these, submit with its slug; a villa with a DIFFERENT name is a NEW listing: submit it with slug null and its own name, never under an existing slug`
+    : '(none yet — this owner has not listed a villa)';
 
   // Prospects get the onboarding pitch appended (value props, pricing, promo,
   // media + optout actions). The agent-reach figure is fetched live so Maya
@@ -3964,7 +3966,7 @@ Use "report" to fetch real numbers before answering a performance question (set 
         // Reuse a slug we already know for this owner when Maya omits one —
         // otherwise a second intake creates a second listing.
         const listing = { ...parsed.listing };
-        if (!listing.slug && listingSlugs.length === 1) listing.slug = listingSlugs[0];
+        listing.slug = intakeSlugFor(listing, listingSlugs);
         const result = await submitOwnerIntake(owner, listing, secret);
         if (result.ok && db) {
           // Persist the slug on the owner row. Previously listing_slugs was
@@ -4104,6 +4106,24 @@ export function sanitizeOwnerEmail(raw) {
   return /^[^\s@]+@[^\s@,]+\.[a-z]{2,}$/.test(s) ? s : '';
 }
 
+// Which portal slug an intake goes to when Maya omits one. The owner's single
+// known slug is reused ONLY when the submitted name is that villa — the old
+// rule reused it unconditionally, so BAM's second villa (Berawa Loft, 9 Sep
+// 2026) was written OVER Villa Hawk, the first: one pending listing in admin
+// carrying the loft's name, price and rooms under the hawk's slug. A different
+// name is a new villa: no slug, and the portal's own same-owner-same-name
+// match still catches a true resubmission.
+const slugOfName = (n) => String(n || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+export function intakeSlugFor(listing, listingSlugs) {
+  const given = String(listing?.slug || '').trim();
+  if (given) return given;
+  if (!Array.isArray(listingSlugs) || listingSlugs.length !== 1) return '';
+  const known = listingSlugs[0];
+  const name = slugOfName(listing?.name);
+  if (!name) return known;                                   // an update with no name (photos only) can only mean the one villa
+  return name === known.replace(/-\d+$/, '') ? known : '';
+}
+
 async function submitOwnerIntake(owner, listing, secret) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
@@ -4154,6 +4174,11 @@ async function submitOwnerIntake(owner, listing, secret) {
       email
         ? `NOTE: it is linked to ${email} — tell them to sign in at ${PORTAL_BASE}/portal with that exact Google address to see it.`
         : 'NOTE: no portal email yet, so the owner cannot open their own listing — ask which Google address they want to sign in with.',
+      // Photos land in ONE folder per owner, so a second villa's listing points
+      // at a folder that also holds the first villa's shots.
+      !listing.slug && ownerFolder && !String(listing.photosLink || '').trim() && Array.isArray(owner.listing_slugs) && owner.listing_slugs.length
+        ? 'NOTE: this owner has more than one villa and their photos share one folder — tell them Ikiel will sort the photos to the right villa when he reviews it.'
+        : '',
     ].filter(Boolean);
     return { ok: true, slug: d.slug || '', email, message: notes.join(' ') };
   } catch (e) {

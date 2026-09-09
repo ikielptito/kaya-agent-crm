@@ -1,7 +1,7 @@
 // The prompt Maya sees: short cards for the whole portfolio, full detail only
 // for the villas in play, the agent's memory ahead of the thread, and the
 // judgement model on the turns that need it.
-import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel, setOpusSpentToday } from '../api/whatsapp-webhook.js';
+import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel, setOpusSpentToday, intakeSlugFor } from '../api/whatsapp-webhook.js';
 import { memoryDue, memoryBlock } from '../lib/agent-memory.js';
 
 let pass = 0, fail = 0;
@@ -61,5 +61,12 @@ t('month-old memory is due', memoryDue({ conversation_history: { total_messages:
 t('stale memory is due', memoryDue({ conversation_history: { total_messages: 66, memory: { text: 'x', at_total: 50 } } }), true);
 t('memory block renders', memoryBlock({ conversation_history: { memory: { text: 'Paul brings families.' } } }).includes('Paul brings families.'), true);
 t('no memory → empty block', memoryBlock({}), '');
+// owner intake: which slug a submission without one goes to (BAM, 9 Sep 2026)
+t('a second villa with its own name gets no slug (new listing)', intakeSlugFor({ name: 'Berawa Loft' }, ['villa-hawk']), '');
+t('the known villa resubmitted by name reuses its slug', intakeSlugFor({ name: 'Villa Hawk' }, ['villa-hawk']), 'villa-hawk');
+t('a numbered slug still matches its base name', intakeSlugFor({ name: 'Casa Suhana' }, ['casa-suhana-2']), 'casa-suhana-2');
+t('a nameless update (photos only) goes to the one known villa', intakeSlugFor({ photosLink: 'x' }, ['villa-hawk']), 'villa-hawk');
+t('a slug Maya gives is kept', intakeSlugFor({ slug: 'villa-hawk', name: 'Berawa Loft' }, ['villa-hawk']), 'villa-hawk');
+t('two known villas and no slug → new listing', intakeSlugFor({ name: 'Villa Hawk' }, ['villa-hawk', 'berawa-loft']), '');
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
