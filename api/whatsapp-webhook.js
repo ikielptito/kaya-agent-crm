@@ -4158,6 +4158,12 @@ export async function submitOwnerIntake(owner, listing, secret) {
       ...(mapLink ? { mapLink } : {}),
       features: Array.isArray(listing.features) ? listing.features.join('\n') : (listing.features || ''),
     };
+    // Optional extras the portal intake also understands (availability, the
+    // inclusion lists, the key facts). Sent only when given, so an ordinary
+    // Maya intake — which never sets them — keeps what the listing has.
+    for (const k of ['bookedRanges', 'inclusions', 'yearlyInclusions', 'locationHighlights']) if (Array.isArray(listing[k])) data[k] = listing[k];
+    for (const k of ['deposit', 'electricity', 'wifi', 'pool', 'minStay']) if (String(listing[k] || '').trim()) data[k] = String(listing[k]).trim();
+    if (typeof listing.petFriendly === 'boolean') data.petFriendly = listing.petFriendly;
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
