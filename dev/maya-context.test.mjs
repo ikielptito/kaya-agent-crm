@@ -1,7 +1,7 @@
 // The prompt Maya sees: short cards for the whole portfolio, full detail only
 // for the villas in play, the agent's memory ahead of the thread, and the
 // judgement model on the turns that need it.
-import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel, setOpusSpentToday, intakeSlugFor } from '../api/whatsapp-webhook.js';
+import { relevantRentalSlugs, needsJudgement, buildRentalsContext, buildRentalDetails, pickReplyModel, setOpusSpentToday, intakeSlugFor, chaseTargetSlug } from '../api/whatsapp-webhook.js';
 import { memoryDue, memoryBlock } from '../lib/agent-memory.js';
 
 let pass = 0, fail = 0;
@@ -68,5 +68,13 @@ t('a numbered slug still matches its base name', intakeSlugFor({ name: 'Casa Suh
 t('a nameless update (photos only) goes to the one known villa', intakeSlugFor({ photosLink: 'x' }, ['villa-hawk']), 'villa-hawk');
 t('a slug Maya gives is kept', intakeSlugFor({ slug: 'villa-hawk', name: 'Berawa Loft' }, ['villa-hawk']), 'villa-hawk');
 t('two known villas and no slug → new listing', intakeSlugFor({ name: 'Villa Hawk' }, ['villa-hawk', 'berawa-loft']), '');
+// chase answers name the villa (Bas, 10 Sep 2026)
+const twoVillas = { rental_slug: 'villa_hawk', question: '[Listing info] could you help me out?\n\n• Villa Hawk: deposit, wifi speed\n• Berawa Loft: deposit, minimum stay' };
+const byName = { 'villa hawk': 'villa_hawk', 'berawa loft': 'berawa_loft' };
+t('single-bullet round → the relay slug', chaseTargetSlug({ rental_slug: 'villa_rice', question: '[Listing info] x\n\n• Villa Rice: deposit' }, 'deposit 10jt', byName), 'villa_rice');
+t('two-villa round, answer names the second → that slug', chaseTargetSlug(twoVillas, 'Berawa loft, wifi speed 150 mbps, minimum stay 1 month', byName), 'berawa_loft');
+t('two-villa round, answer names the first → that slug', chaseTargetSlug(twoVillas, 'Villa Hawk: deposit one month', byName), 'villa_hawk');
+t('two-villa round, no villa named → manual entry', chaseTargetSlug(twoVillas, 'deposit is one month', byName), null);
+t('two-villa round, both named → manual entry', chaseTargetSlug(twoVillas, 'Villa Hawk and Berawa Loft both one month', byName), null);
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

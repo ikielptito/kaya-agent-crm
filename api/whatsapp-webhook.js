@@ -218,6 +218,26 @@ async function handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey }) {
   return true;
 }
 
+// Which listing a chase answer is about. One bullet → that relay's slug. A
+// multi-villa round used to be 'manual entry only' — but owners answer per
+// villa, naming it ("Villa Hawk, WiFi 250 Mbps…" — Bas, 10 Sep 2026), so an
+// answer that names exactly one of the villas asked maps to it.
+export function chaseTargetSlug(relay, answer, slugsByName = {}) {
+  const q = String(relay?.question || '');
+  const bullets = [...q.matchAll(/^•\s*([^:\n]+?):/gm)].map(m => m[1].trim());
+  if (bullets.length <= 1) return relay?.rental_slug || null;
+  const a = String(answer || '').toLowerCase();
+  const named = bullets.filter(b => a.includes(b.toLowerCase()));
+  if (named.length !== 1) return null;
+  return slugsByName[named[0].toLowerCase()] || null;
+}
+async function chaseSlugsByName(db) {
+  try {
+    const rows = await fetch(`${db.SUPABASE_URL}/rest/v1/rentals?select=slug,name&active=eq.true`, { headers: db.sbHeaders }).then(r => r.json());
+    return Object.fromEntries((Array.isArray(rows) ? rows : []).map(r => [String(r.name || '').toLowerCase(), r.slug]));
+  } catch { return {}; }
+}
+
 async function handleRelayReply({ db, wa, fromNum, text, apiKey, buttonPayload = null }) {
   if (buttonPayload) {
     const tapped = await handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey });
@@ -304,12 +324,12 @@ async function handleRelayReply({ db, wa, fromNum, text, apiKey, buttonPayload =
   // property family — a multi-listing answer (Era's round) can't be mapped to
   // one slug safely, so it stays recorded for manual entry.
   let applied = false;
-  if (chase && captured.relay.rental_slug
-      && (String(captured.relay.question).match(/•/g) || []).length <= 1) {
+  const targetSlug = chase ? chaseTargetSlug(captured.relay, captured.answer, await chaseSlugsByName(db)) : null;
+  if (targetSlug) {
     try {
       const facts = await extractListingFacts(apiKey, captured.answer);
       if (facts) {
-        const r = await applyFactsToListing(captured.relay.rental_slug, facts);
+        const r = await applyFactsToListing(targetSlug, facts);
         applied = !!r.ok;
         if (!r.ok) console.warn('applyFactsToListing failed:', r.reason);
       }
@@ -3715,8 +3735,20 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
 export async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
   const secret = process.env.LISTING_SYNC_SECRET;
   const ownerName = owner.name || 'there';
+  // Per-slug calendar state from the live feed, so "do you have an iCal?" is
+  // never asked of a villa that has one or whose owner keeps dates by hand.
+  let calState = {};
+  if (listingSlugs.length) {
+    try {
+      const { fetchPortalListings } = await import('../lib/rental-sync.js');
+      for (const l of await fetchPortalListings()) {
+        if (!listingSlugs.includes(l.slug)) continue;
+        calState[l.slug] = l.icalUrl ? 'calendar linked' : (l.manualDates ? 'dates kept by hand, do NOT ask for a calendar' : 'no calendar yet');
+      }
+    } catch { calState = {}; }
+  }
   const listingsLine = listingSlugs.length
-    ? `${listingSlugs.join(', ')} — to UPDATE one of these, submit with its slug; a villa with a DIFFERENT name is a NEW listing: submit it with slug null and its own name, never under an existing slug`
+    ? `${listingSlugs.map(sl => calState[sl] ? `${sl} (${calState[sl]})` : sl).join(', ')} — to UPDATE one of these, submit with its slug; a villa with a DIFFERENT name is a NEW listing: submit it with slug null and its own name, never under an existing slug`
     : '(none yet — this owner has not listed a villa)';
 
   // Prospects get the onboarding pitch appended (value props, pricing, promo,
@@ -3792,7 +3824,7 @@ RULES:
   · Booking.com: Rates & Availability → Sync calendars → "Export calendar" → copy the .ics link.
   · Hostex: Listings → your property → Calendar → iCal export.
   (These are the exact steps the owner portal gives — keep them identical so an owner is never told two different routes.)
-  A valid link ends in .ics. If they have no channel calendar, that is fine: tell them to leave it and Ikiel can mark booked dates manually. Never invent a link to fill the field.
+  A valid link ends in .ics. If they have no channel calendar, that is fine: tell them to leave it and Ikiel can mark booked dates manually — and submit the listing (with its slug) with "manualDates": true so nothing asks for a calendar again. Never invent a link to fill the field.
 - NEVER RE-ASK (hard rule): before asking for ANYTHING — the iCal especially — check OWNER NOTES and this conversation. If the owner already gave it, or already said they don't have it / don't use OTAs, that question is ANSWERED FOREVER unless they bring it up themselves. Asking again reads as not listening — one owner was asked about his calendar four times and got angry (Dony, 26 Aug 2026). "I don't have one" is a complete answer; acknowledge it once and move on for good.
 - Once a villa has a slug (see "their current listing slugs"), ALWAYS pass that slug when submitting a change to it. Submitting without the slug creates a duplicate listing.
 - ENQUIRY CONTACT: agents tap "Visit" on a villa to reach whoever runs it and arrange a viewing, and by default that is the owner on the number they are messaging you from. Ask who the enquiry should go to and what to call them — "Who should agents speak to about viewings, and what name should I put on the listing?" — and pass it as "contactName". A listing that shows a bare number with no name looks unmanaged next to the others. If they want viewings handled by a manager on a different number, say Ikiel will set that up.
@@ -3822,7 +3854,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
-  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [], "manualDates": null | true }
 }
 Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. ${booksPartner ? 'Use "books" to load the Tropicana Valley books before answering ANY question about the development\'s finances: the loan, cash, costs to pay, buyers, rent of the four units, ledger entries, categories, bank transfers (leave reply ""; set books_query to narrow the ledger). ' : ''}Use "login_link" when they ask for the portal link, cannot sign in, or lost their session (leave reply ""): a one-tap sign-in link goes to their WhatsApp and you are told whether it went; never promise a link without this action. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
@@ -4168,6 +4200,7 @@ export async function submitOwnerIntake(owner, listing, secret) {
     for (const k of ['bookedRanges', 'inclusions', 'yearlyInclusions', 'locationHighlights']) if (Array.isArray(listing[k])) data[k] = listing[k];
     for (const k of ['deposit', 'electricity', 'wifi', 'pool', 'minStay', 'coverPhotoId']) if (String(listing[k] || '').trim()) data[k] = String(listing[k]).trim();
     if (typeof listing.petFriendly === 'boolean') data.petFriendly = listing.petFriendly;
+    if (typeof listing.manualDates === 'boolean') data.manualDates = listing.manualDates;
     const r = await fetch(`${PORTAL_BASE}/api/portal?action=intake`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(secret ? { Authorization: `Bearer ${secret}` } : {}) },
@@ -4191,7 +4224,7 @@ export async function submitOwnerIntake(owner, listing, secret) {
       `Use slug "${d.slug}" for every future change to this villa — never submit it again without the slug or you will create a duplicate listing.`,
       icalRejected
         ? 'NOTE: the calendar link was rejected because it is not a real iCal export — ask the owner to send the proper export URL and do not guess one.'
-        : (ical ? '' : 'NOTE: this villa still has no availability calendar — ask the owner for their iCal export URL.'),
+        : (ical || listing.manualDates ? '' : 'NOTE: this villa still has no availability calendar — ask the owner for their iCal export URL once; if they have none, resubmit with manualDates true and never ask again.'),
       thin ? 'NOTE: the listing has little or no description — ask the owner what kind of guest it suits and what stands out, then submit again with the slug.' : '',
       email
         ? `NOTE: it is linked to ${email} — tell them to sign in at ${PORTAL_BASE}/portal with that exact Google address to see it.`
