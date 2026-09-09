@@ -6,7 +6,7 @@
 // relay marked delivered anyway. Each mechanism pinned here.
 import {
   sweepRelays, reaskExpired, pickReaskRelays, deliverAnswers, inSweepHours,
-  ANSWER_READY_TEMPLATE, VERBATIM_PREFIX,
+  ANSWER_READY_TEMPLATE, VERBATIM_PREFIX, inViewingHours,
 } from '../lib/relay.js';
 
 let pass = 0, fail = 0;
@@ -154,8 +154,10 @@ const answered = [{ id: 32, status: 'answered', agent_wa: '620006888', agent_id:
   t('…no contact card rides along', s.length, 1);
   t('…and the relay is marked delivered, not expired', calls.find(c => c.method === 'PATCH' && c.u.includes('/relays?id=eq.40'))?.body?.status, 'delivered');
 }
-t('05:17 WITA is outside the sweep window', inSweepHours(wita('2026-09-10T05:17:00')), false);
-t('08:05 WITA is inside it', inSweepHours(wita('2026-09-10T08:05:00')), true);
+t('05:17 WITA: a viewing reply waits for the morning', inViewingHours(wita('2026-09-10T05:17:00')), false);
+t('08:05 WITA: the sweep that delivers it is inside both windows', [inSweepHours(wita('2026-09-10T08:05:00')), inViewingHours(wita('2026-09-10T08:05:00'))], [true, true]);
+t('23:40 WITA: a late viewing reply still goes straight out', inViewingHours(wita('2026-09-10T23:40:00')), true);
+t('00:10 WITA: after midnight it waits', inViewingHours(wita('2026-09-11T00:10:00')), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

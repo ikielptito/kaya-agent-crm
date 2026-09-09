@@ -10,7 +10,7 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
-import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, VERBATIM_PREFIX, inSweepHours, isViewing, isListingInfo } from '../lib/relay.js';
+import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, VERBATIM_PREFIX, inViewingHours, isViewing, isListingInfo } from '../lib/relay.js';
 import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
 import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites, resolveWindowToIso, confirmViewingOnce } from '../lib/viewings.js';
 import webpush from 'web-push';
@@ -160,11 +160,12 @@ async function handleViewingButton({ db, wa, fromNum, buttonPayload, apiKey }) {
   };
   const tellAgent = async (body) => {
     if (!v?.agent_wa) return;
-    // The contact may tap at any hour; the agent hears in daytime. Outside the
-    // sweep window the line waits on the relay row (status answered, verbatim
-    // text) and the 08:05 WITA sweep's deliverAnswers sends it — window check
-    // included. Runs after relayDone, so this status is the one that sticks.
-    if (!inSweepHours()) {
+    // The contact may tap at any hour; the agent hears between 08:00 and
+    // midnight WITA. In the small hours the line waits on the relay row
+    // (status answered, verbatim text) and the 08:05 sweep's deliverAnswers
+    // sends it — window check included. Runs after relayDone, so this status
+    // is the one that sticks.
+    if (!inViewingHours()) {
       await fetch(`${db.SUPABASE_URL}/rest/v1/relays?id=eq.${relayId}`, {
         method: 'PATCH', headers: db.sbHeaders,
         body: JSON.stringify({ status: 'answered', answer: VERBATIM_PREFIX + body, answered_at: new Date().toISOString(), delivered_at: null }),
