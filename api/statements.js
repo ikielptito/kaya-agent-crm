@@ -36,7 +36,7 @@
 //   finance_rental_upsert {rows}               the portal writes closed rental months into the ledger
 //   finance_settings_patch {fields}            fx_usd, rental_group_key, rental_from, rental_account, projection_months, units_unsold
 
-import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
+import { consoleAuthorized, consoleScope, financeActionAllowed, setConsoleCors } from '../lib/auth.js';
 import {
   listGroups, syncGroup, syncAllGroups, reparseStatement, recomputeTotals,
   publishStatement, unpublishStatement, refreshSnapshot, markPaid, saveProofUpload, signProofUrl,
@@ -91,9 +91,11 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!consoleAuthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
-
   const { action, payload = {} } = req.body || {};
+  // Full console access, or the books app's key on the finance actions only.
+  if (!consoleAuthorized(req) && !(consoleScope(req) === 'finance' && financeActionAllowed(action))) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
   const id = payload.id != null ? parseInt(payload.id, 10) : null;
 
   try {
