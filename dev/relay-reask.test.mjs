@@ -6,7 +6,7 @@
 // relay marked delivered anyway. Each mechanism pinned here.
 import {
   sweepRelays, reaskExpired, pickReaskRelays, deliverAnswers, inSweepHours,
-  ANSWER_READY_TEMPLATE,
+  ANSWER_READY_TEMPLATE, VERBATIM_PREFIX,
 } from '../lib/relay.js';
 
 let pass = 0, fail = 0;
@@ -141,6 +141,21 @@ const answered = [{ id: 32, status: 'answered', agent_wa: '620006888', agent_id:
   t('open window: the answer goes as text', [n, s[0]?.body?.type], [1, 'text']);
   t('…and the relay is marked delivered', calls.find(c => c.method === 'PATCH' && c.u.includes('/relays?id=eq.32'))?.body?.status, 'delivered');
 }
+
+// ── 6. A viewing reply parked overnight goes word for word in the morning ──
+// (Era tapped "Can't this time" at 05:17 WITA; the agent heard at 05:17 — BAM, 10 Sep 2026)
+{
+  const line = "On Tropicana Valley – Unit B2 — the villa can't do Fri 11 Sep, 2pm. Want me to ask about a different time, or line up another villa?";
+  const parked = [{ id: 40, status: 'answered', agent_wa: '620006888', agent_id: 166, contact_wa: '6281246357778', contact_name: 'Era', property_name: 'Tropicana Valley – Unit B2', answer: VERBATIM_PREFIX + line }];
+  stub(); tables = { relays: parked, wa_messages: [{ id: 1 }] };
+  const n = await deliverAnswers(db, wa, '620006888');
+  const s = sends();
+  t('verbatim answer: sent exactly as composed', [n, s[0]?.body?.text?.body], [1, line]);
+  t('…no contact card rides along', s.length, 1);
+  t('…and the relay is marked delivered, not expired', calls.find(c => c.method === 'PATCH' && c.u.includes('/relays?id=eq.40'))?.body?.status, 'delivered');
+}
+t('05:17 WITA is outside the sweep window', inSweepHours(wita('2026-09-10T05:17:00')), false);
+t('08:05 WITA is inside it', inSweepHours(wita('2026-09-10T08:05:00')), true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
