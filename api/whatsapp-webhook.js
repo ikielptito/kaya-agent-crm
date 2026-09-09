@@ -10,6 +10,7 @@ import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
+import { villaFolders, uploadTargetFolder, routeInboxPhotos, rememberVillaFolder, portalSlug as portalSlugOf } from '../lib/owner-photos.js';
 import { openRelay, flushRelayQuestions, openRelaysForContact, captureRelayAnswer, recordAnswer, deliverAnswers, logRelayAck, VIEWING_PREFIX, VERBATIM_PREFIX, inViewingHours, isViewing, isListingInfo } from '../lib/relay.js';
 import { extractListingFacts, applyFactsToListing } from '../lib/listing-info.js';
 import { createViewing, updateViewing, viewingByRelay, viewingsForAgent, viewingsAwaitingOutcome, viewingsPromptBlock, sendViewingInvites, resolveWindowToIso, confirmViewingOnce } from '../lib/viewings.js';
@@ -3131,7 +3132,8 @@ export async function attachOwnerPhotos({ SUPABASE_URL, sbHeaders, ownerId, slug
   if (!owner) return { ok: false, error: 'owner not found' };
   if (!owner.drive_folder_id || /^pending:/.test(owner.drive_folder_id)) return { ok: false, error: 'owner has no photo folder' };
   const secret = process.env.LISTING_SYNC_SECRET;
-  return submitOwnerIntake(owner, { slug, photosLink: folderLink(owner.drive_folder_id), features: [] }, secret);
+  const known = (await villaFolders({ SUPABASE_URL, sbHeaders }, owner.id).catch(() => ({})))[portalSlugOf(slug)];
+  return submitOwnerIntake(owner, { slug, photosLink: folderLink(known?.id || owner.drive_folder_id), features: [] }, secret, { SUPABASE_URL, sbHeaders });
 }
 
 export async function previewAgentReply({ SUPABASE_URL, sbHeaders, ANTHROPIC_KEY, agent, inbound, mode, debug = false }) {
@@ -3617,8 +3619,22 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
           label: `${owner.name || fromNum} — villa photos`,
         });
         owner = { ...owner, drive_folder_id: folderId };
-        const { count } = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId });
-        inbound = `[The owner sent a photo. It was saved automatically to their villa photo folder${count ? ` — ${count} photo${count === 1 ? '' : 's'} collected so far` : ''} (${folderLink(folderId)}). Acknowledge naturally; if you have enough details plus photos, consider moving to submit the listing with photosLink set to that folder link.]${inbound && !/^\[/.test(inbound) ? ` Caption: "${inbound}"` : ''}`;
+        // One villa with its own folder → the photo goes straight in. Otherwise
+        // it lands in the inbox (the root) and Maya's `photos_for` routes the
+        // batch once the thread says which villa it is for (lib/owner-photos.js).
+        const folders = await villaFolders({ SUPABASE_URL, sbHeaders }, owner.id).catch(() => ({}));
+        const target = uploadTargetFolder({ owner, folders });
+        const { fileId, count } = await uploadWaImageToDrive({ mediaId, waToken: WA_TOKEN, folderId: target.folderId || folderId });
+        const slugsNow = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
+        const caption = inbound && !/^\[/.test(inbound) ? ` Caption: "${inbound}"` : '';
+        const coverHint = `If they ask to use this photo as the COVER, set "cover_photo_id" to "${fileId}" (and "photos_for" to the villa's slug when they have several).`;
+        if (target.villa) {
+          inbound = `[The owner sent a photo. It was saved to ${target.villa.name}'s photo folder (Drive file id ${fileId}${count ? `; ${count} photo${count === 1 ? '' : 's'} there now` : ''}). Acknowledge naturally. ${coverHint}]${caption}`;
+        } else if (slugsNow.length >= 2) {
+          inbound = `[The owner sent a photo (Drive file id ${fileId}). It is waiting in their photo INBOX because they have several villas (${slugsNow.join(', ')}). If this thread makes clear which villa the photo is for, set "photos_for" to that villa's slug — the whole batch moves into that villa's folder and its listing updates itself; do NOT submit a listing for that. If it is not clear, ask which villa before anything else. ${coverHint}]${caption}`;
+        } else {
+          inbound = `[The owner sent a photo (Drive file id ${fileId}). It was saved automatically to their villa photo folder${count ? ` — ${count} photo${count === 1 ? '' : 's'} collected so far` : ''} (${folderLink(folderId)}). Acknowledge naturally; if you have enough details plus photos, consider moving to submit the listing — leave photosLink empty, the photos follow the listing on their own. ${coverHint}]${caption}`;
+        }
       } catch (e) {
         console.error('drive upload failed:', e.message);
         inbound = `[The owner sent a photo but automatic saving failed (${e.message}). Acknowledge you received it and continue; Ikiel will collect the photos manually.]`;
@@ -3730,6 +3746,34 @@ export async function handleOwnerConversation({ SUPABASE_URL, sbHeaders, owner, 
     }
   }
   await patchOwner(SUPABASE_URL, sbHeaders, owner.id, patch);
+  if (ai.photos_for || ai.cover_photo_id) {
+    await applyPhotoDecisions({ SUPABASE_URL, sbHeaders }, owner, ai, listingSlugs).catch(e => console.warn('photo routing failed:', e.message));
+  }
+}
+
+// Maya said which villa a batch of inbox photos is for (and/or which photo is
+// the cover): move the batch into that villa's folder and point the listing at
+// it — no review round, no human sorting folders.
+export async function applyPhotoDecisions(db, owner, ai, listingSlugs = [], deps = {}) {
+  const slugs = (Array.isArray(listingSlugs) ? listingSlugs : []).map(portalSlugOf);
+  const slug = ai.photos_for ? portalSlugOf(ai.photos_for) : (slugs.length === 1 ? slugs[0] : null);
+  if (!slug || !slugs.includes(slug)) return { ok: false, reason: `no such listing for this owner: ${slug || '(none)'}` };
+  const route = deps.route || ((...a) => routeInboxPhotos(...a));
+  const submit = deps.submit || ((...a) => submitOwnerIntake(...a));
+  const nameOf = deps.nameOf || listingNameFor;
+  const known = (await villaFolders(db, owner.id))[slug];
+  const name = known?.name || (await nameOf(slug)) || slug;
+  const { folder, moved } = await route(db, owner, { slug, name, listingCount: slugs.length });
+  if (!folder) return { ok: false, reason: 'owner has no photo folder' };
+  const listing = { slug, photosLink: folderLink(folder.id), ...(ai.cover_photo_id ? { coverPhotoId: ai.cover_photo_id } : {}) };
+  const r = await submit(owner, listing, process.env.LISTING_SYNC_SECRET, db);
+  return { ok: !!r.ok, slug, folder: folder.id, moved: moved.length, cover: ai.cover_photo_id || null, message: r.message };
+}
+async function listingNameFor(slug) {
+  try {
+    const { fetchPortalListings } = await import('../lib/rental-sync.js');
+    return (await fetchPortalListings()).find(l => l.slug === slug)?.name || null;
+  } catch { return null; }
 }
 
 export async function generateOwnerReply(apiKey, owner, inbound, thread, listingSlugs, db = null) {
@@ -3816,7 +3860,7 @@ RULES:
 - NEVER invent an overview or a feature. Everything you write must come from the owner, or from an "import" of their own listing page. If you have neither, ask — two friendly questions ("what kind of guest does she suit best?", "what are the three things people always comment on?") get you a better overview than anything you could make up.
 - Imported details FILL GAPS ONLY. Anything the owner told you directly wins over the scraped page: their villa name, their bedroom count, their area. If an import disagrees with the owner on a number, do NOT silently pick one — ask them which is right ("Airbnb has it as 2 bedrooms, you said 3 — which should agents see?").
 - When asking for photos, ask for the ORIGINAL photos one by one, not collages or edited combinations: two photos pasted side by side show up tiny and cropped on the listing and on the WhatsApp cards agents receive (Vila Lestari, 23 Aug 2026). If what arrives looks like a collage, say so kindly and ask for the individual originals.
-- If photos were saved automatically to their villa photo folder (see thread), use that folder link as photosLink — never ask them for a Drive link they already effectively gave you by sending photos.
+- PHOTOS: photos the owner sends are saved automatically (see the markers in the thread) — never ask for a Drive link. Leave "photosLink" empty on an intake; a new listing gets its own folder with the photos sent for it. When an owner with SEVERAL villas sends photos, they wait in an inbox until you say which villa: set "photos_for" to that slug as soon as the thread makes it clear (they named the villa, or they are mid-way through listing it) — the batch moves into that villa's folder by itself. If it is not clear, ask which villa first. COVER: when they ask to use a photo as the cover/main/hero image, set "cover_photo_id" to that photo's Drive file id from its marker (and "photos_for" to the villa when they have several) — it is applied at once, no review, so confirm it is done rather than promising to pass it on.
 - MAP PIN ("mapLink") — agents need to find the villa to show it, so a listing with no location is one they cannot act on. Whenever the owner sends a Google Maps / maps.app.goo.gl / share.google location link at ANY point in the thread — including in their very first message or pasted inside a marketing blurb — carry it straight through as mapLink. Do not let it slip past because you were asking about something else at the time (Vila Lestari's owner sent his pin in his opening message and it never reached the listing). If you reach the point of submitting and still have no pin, ask for it in one short line.
 - Gather photos AND the availability calendar BEFORE the first "intake" wherever you can. Submitting the moment you have a price means the listing goes to Ikiel half-empty. If the owner still owes you photos or a calendar, ask for them first and submit once.
 - CALENDAR (iCal) — you CANNOT derive one. A link to an Airbnb/Booking listing page is NOT a calendar, and you must NEVER construct, guess, or "pull" an .ics URL from a listing URL. Only ever pass an icalUrl the owner literally sent you. If they send a listing link, thank them, say it's useful for the description, and then ask for the export URL in their own words:
@@ -3854,7 +3898,9 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "report_slug": null | "one of their listing slugs",
   "import_url": null | "the Airbnb/Booking.com URL the owner sent",${prospect ? `
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
-  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [], "manualDates": null | true }
+  "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [], "manualDates": null | true },
+  "photos_for": null | "one of their listing slugs — the villa the photos just sent are for (see PHOTOS)",
+  "cover_photo_id": null | "the Drive file id from a photo marker in this thread — when the owner asks to use that photo as the cover"
 }
 Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. ${booksPartner ? 'Use "books" to load the Tropicana Valley books before answering ANY question about the development\'s finances: the loan, cash, costs to pay, buyers, rent of the four units, ledger entries, categories, bank transfers (leave reply ""; set books_query to narrow the ledger). ' : ''}Use "login_link" when they ask for the portal link, cannot sign in, or lost their session (leave reply ""): a one-tap sign-in link goes to their WhatsApp and you are told whether it went; never promise a link without this action. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
@@ -4011,7 +4057,7 @@ Use "report" to fetch real numbers before answering a performance question (set 
         // otherwise a second intake creates a second listing.
         const listing = { ...parsed.listing };
         listing.slug = intakeSlugFor(listing, listingSlugs);
-        const result = await submitOwnerIntake(owner, listing, secret);
+        const result = await submitOwnerIntake(owner, listing, secret, db);
         if (result.ok && db) {
           // Persist the slug on the owner row. Previously listing_slugs was
           // only ever written by lib/rental-sync.js AFTER Ikiel approved in
@@ -4042,7 +4088,11 @@ Use "report" to fetch real numbers before answering a performance question (set 
       if (parsed.action === 'optout') {
         return { action: 'optout', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd };
       }
-      return { action: parsed.action === 'auto' ? 'auto' : 'escalate', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd };
+      return {
+        action: parsed.action === 'auto' ? 'auto' : 'escalate', reply: parsed.reply || '', llm_calls: llmCalls, cost_usd: costUsd,
+        photos_for: typeof parsed.photos_for === 'string' && parsed.photos_for.trim() ? parsed.photos_for.trim() : null,
+        cover_photo_id: /^[A-Za-z0-9_-]{10,}$/.test(String(parsed.cover_photo_id || '')) ? String(parsed.cover_photo_id) : null,
+      };
     }
     return { action: 'escalate', reply: '', llm_calls: llmCalls, cost_usd: costUsd };
   } catch (e) {
@@ -4168,7 +4218,7 @@ export function intakeSlugFor(listing, listingSlugs) {
   return name === known.replace(/-\d+$/, '') ? known : '';
 }
 
-export async function submitOwnerIntake(owner, listing, secret) {
+export async function submitOwnerIntake(owner, listing, secret, db = null) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
   const email = sanitizeOwnerEmail(listing.ownerEmail) || sanitizeOwnerEmail(owner.email);
@@ -4176,11 +4226,21 @@ export async function submitOwnerIntake(owner, listing, secret) {
   // photosLink empty the listing would go to review with "no photos" (Vila
   // Lestari, 23 Aug 2026 — 13 photos saved, none on the listing). Fall back.
   const ownerFolder = owner.drive_folder_id && !/^pending:/.test(String(owner.drive_folder_id)) ? folderLink(owner.drive_folder_id) : '';
-  // The owner-folder fallback is for a NEW listing only. An update carries a
-  // slug, and sending the fallback with it re-pointed Villa Hawk's gallery
-  // from its own subfolder back to the owner's root the moment Bas sent a
-  // map pin (10 Sep 2026); left empty, the portal keeps the folder it has.
-  const photosLink = String(listing.photosLink || '').trim() || (listing.slug ? '' : ownerFolder);
+  // A NEW listing gets its OWN folder under the owner's root, with the photos
+  // sent for it moved in (lib/owner-photos.js); the root is only the inbox.
+  // Before this every listing of an owner pointed at the root, so a second
+  // villa showed the first one's photos (BAM, 10 Sep 2026). An update carries
+  // a slug and sends no folder unless told one — the portal keeps what it has.
+  let photosLink = String(listing.photosLink || '').trim();
+  let villaFolder = null;
+  if (!photosLink && !listing.slug && db && driveConfigured() && ownerFolder) {
+    try {
+      const listingCount = Array.isArray(owner.listing_slugs) ? owner.listing_slugs.length : 0;
+      const routed = await routeInboxPhotos(db, owner, { slug: '', name: listing.name, listingCount });
+      if (routed.folder) { villaFolder = routed.folder; photosLink = folderLink(routed.folder.id); }
+    } catch (e) { console.warn('villa folder setup failed:', e.message); }
+    if (!photosLink) photosLink = ownerFolder;
+  }
   try {
     // Only pass a map link that really is a URL — the portal stores `location`
     // solely when it looks like one, and a stray phrase would be dropped
@@ -4217,6 +4277,7 @@ export async function submitOwnerIntake(owner, listing, secret) {
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) return { ok: false, slug: '', email, message: `failed: ${d.error || `HTTP ${r.status}`}` };
+    if (villaFolder && d.slug && db) await rememberVillaFolder(db, owner.id, d.slug, villaFolder).catch(() => {});
     const thin = !String(listing.overview || '').trim()
       || (Array.isArray(listing.features) ? listing.features.length : 0) < 2;
     const notes = [
@@ -4229,11 +4290,6 @@ export async function submitOwnerIntake(owner, listing, secret) {
       email
         ? `NOTE: it is linked to ${email} — tell them to sign in at ${PORTAL_BASE}/portal with that exact Google address to see it.`
         : 'NOTE: no portal email yet, so the owner cannot open their own listing — ask which Google address they want to sign in with.',
-      // Photos land in ONE folder per owner, so a second villa's listing points
-      // at a folder that also holds the first villa's shots.
-      !listing.slug && ownerFolder && !String(listing.photosLink || '').trim() && Array.isArray(owner.listing_slugs) && owner.listing_slugs.length
-        ? 'NOTE: this owner has more than one villa and their photos share one folder — tell them Ikiel will sort the photos to the right villa when he reviews it.'
-        : '',
     ].filter(Boolean);
     return { ok: true, slug: d.slug || '', email, message: notes.join(' ') };
   } catch (e) {

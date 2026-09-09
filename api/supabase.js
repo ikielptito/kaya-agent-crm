@@ -383,7 +383,7 @@ export default async function handler(req, res) {
       if (ownerId == null || !listing) return res.status(400).json({ error: 'ownerId and listing required' });
       const owner = (await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${parseInt(ownerId, 10)}&select=*`, { headers }).then(x => x.json()).catch(() => []))?.[0];
       if (!owner) return res.status(404).json({ error: 'owner not found' });
-      const result = await submitOwnerIntake(owner, listing, process.env.LISTING_SYNC_SECRET);
+      const result = await submitOwnerIntake(owner, listing, process.env.LISTING_SYNC_SECRET, { SUPABASE_URL, sbHeaders: headers });
       if (result.ok && result.slug) {
         const known = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
         const merged = Array.from(new Set([...known, result.slug]));
