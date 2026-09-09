@@ -412,6 +412,10 @@ export default async function handler(req, res) {
     if (action === 'finance_rental_upsert') return res.status(200).json(await financeRentalUpsert(db, { rows: payload.rows || [], project_key: payload.project_key }));
     if (action === 'finance_settings_patch') return res.status(200).json({ settings: await patchFinanceSettings(db, payload.fields || {}) });
     if (action === 'finance_settings') return res.status(200).json({ settings: await financeSettings(db) });
+    if (action === 'finance_feedback') {
+      const { recordAppFeedback } = await import('../lib/product-feedback.js');
+      return res.status(200).json(await recordAppFeedback(db, { who: payload.actor || 'Oli', text: payload.text, images: payload.images || [], page: payload.page || null, app: 'Tropicana Valley Books' }));
+    }
 
     if (action === 'statement_groups') {
       return res.status(200).json({ groups: await listGroups(db, { activeOnly: false }) });
