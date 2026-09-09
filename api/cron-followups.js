@@ -3005,11 +3005,11 @@ function diffImprovements(prev, properties) {
     const prior = prev[p.id];
     const meta = propMeta(p);
     if (!prior) {
-      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'new', summary: `New: ${p.name}${meta ? ` (${meta})` : ''}${p.monthly ? ' — ' + p.monthly + '/mo' : ''}` });
+      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'new', summary: `New: ${p.name}${meta ? ` (${meta})` : ''}${p.monthly ? ' — ' + p.monthly + '/mo' : (p.yearly ? ' — ' + p.yearly + '/yr (yearly only)' : '')}` });
       continue;
     }
     if (!prior.availableToday && p.availability?.availableToday) {
-      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'now_available', summary: `${p.name}${meta ? ` (${meta})` : ''} just opened — ${p.monthly || 'ask Era'}/mo` });
+      items.push({ propId: p.id, slug: p.slug, name: p.name, reason: 'now_available', summary: `${p.name}${meta ? ` (${meta})` : ''} just opened — ${p.monthly ? p.monthly + '/mo' : (p.yearly ? p.yearly + '/yr (yearly only)' : 'ask Era')}` });
       continue;
     }
     if (p.availability?.nextLongWindowFrom && prior.nextLongWindowFrom) {
@@ -3138,14 +3138,14 @@ function propMeta(p) {
 
 function formatAvailableLine(p) {
   const meta = propMeta(p);
-  const price = p.monthly ? `${p.monthly}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}` : 'ask Era';
+  const price = p.monthly ? `${p.monthly}/mo${p.yearly ? ' · ' + p.yearly + '/yr' : ''}` : (p.yearly ? `${p.yearly}/yr (yearly only)` : 'ask Era');
   return `*${p.name}*${meta ? ` (${meta})` : ''} — ${price}`;
 }
 
 function formatOpeningLine(p) {
   const meta = propMeta(p);
   const when = formatShortDate(p.availability.nextLongWindowFrom);
-  const price = p.monthly ? `${p.monthly}/mo` : 'price TBC';
+  const price = p.monthly ? `${p.monthly}/mo` : (p.yearly ? `${p.yearly}/yr (yearly only)` : 'price TBC');
   return `*${p.name}*${meta ? ` (${meta})` : ''} — opens ${when} (${price})`;
 }
 

@@ -22,6 +22,18 @@ t('slug form is recognised', relevantRentalSlugs(rentals, { inbound: 'is lanehau
 t('brief pulls in fits under budget with enough beds', relevantRentalSlugs(rentals, { brief: { budget_max_month: '27jt', beds: '2', area: 'Pererenan' } }), ['lanehaus-1']);
 t('budget in raw IDR works too', relevantRentalSlugs(rentals, { brief: { budget_max_month: '40000000', beds: '1' } }).sort(), ['haus-1', 'lanehaus-1', 'villa_saturno']);
 t('nothing in play → nothing', relevantRentalSlugs(rentals, { thread: 'hi' }), []);
+// The villa under discussion outranks the card burst (Villa Bissli, 9 Sep 2026)
+const many = Array.from({ length: 8 }, (_, i) => ({ slug: `unit_${i}`, name: `Unit ${i}`, area: 'Canggu', beds: 1, monthly_rate_idr: 20e6, property_type: 'Apartment' }));
+const bissli = { slug: 'villa_bissli', name: 'Villa Bissli', area: 'Umalas', beds: 3, yearly_rate_idr: 300e6, property_type: 'Villa', maps_url: 'https://maps.example/bissli' };
+const burst = 'Maya: [Sent 8 listing cards: Unit 0, Unit 1, Unit 2, Unit 3, Unit 4, Unit 5, Unit 6, Unit 7]\nAgent: how much is villa bissli?\nMaya: Villa Bissli is 300M/year';
+t('latest-mentioned villa survives the cap', relevantRentalSlugs([...many, bissli], { thread: burst, inbound: 'ada lokasinya kak?' })[0], 'villa_bissli');
+t('a villa named in the inbound ranks first', relevantRentalSlugs([...many, bissli], { thread: burst, inbound: 'is unit 3 free?' })[0], 'unit_3');
+t('cap still holds', relevantRentalSlugs([...many, bissli], { thread: burst }).length, 6);
+// yearly-only rate is a rate, not a gap
+const yo = buildRentalsContext([bissli]);
+t('yearly-only short card quotes the yearly figure', yo.includes('IDR 300M/year') && yo.includes('YEARLY ONLY') && !yo.includes('rate TBC'), true);
+t('yearly-only detail block carries the map link', buildRentalDetails([bissli], ['villa_bissli']).includes('map: https://maps.example/bissli'), true);
+t('no rate at all still reads TBC', buildRentalsContext([{ slug: 'x', name: 'Villa X' }]).includes('rate TBC'), true);
 // cards vs detail
 const head = buildRentalsContext(rentals);
 t('short cards carry the rate and beds', head.includes('3 bed') && head.includes('IDR 35M/month'), true);

@@ -579,10 +579,20 @@ async function loadRentals(supabaseUrl, sbHeaders) {
 }
 
 // One villa, in full — used only for the villas actually in play this turn.
+// The rate line Maya quotes from. A yearly-only villa (no monthly figure —
+// Villa Bissli, 9 Sep 2026) used to read "rate TBC" here, so she told the
+// agent the rate was not in her data while 300M/year sat in the row.
+function rentalRateLine(p) {
+  const m = p.monthly_rate_idr ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` : '';
+  const y = p.yearly_rate_idr ? `IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year` : '';
+  if (m && y) return `${m} (or ${y})`;
+  if (m) return m;
+  if (y) return `${y} — YEARLY ONLY (no monthly rate; the yearly figure IS the rate, quote it)`;
+  return 'rate TBC — say "let me check with Ikiel"';
+}
+
 function rentalDetailBlock(p, i) {
-  const rate = p.monthly_rate_idr
-    ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` + (p.yearly_rate_idr ? ` (or IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year)` : '')
-    : 'rate TBC — say "let me check with Ikiel"';
+  const rate = rentalRateLine(p);
   const badge = p.badge ? ` [${String(p.badge).toUpperCase()}]` : '';
   const capacity = [p.beds && `${p.beds} bed`, p.baths && `${p.baths} bath`, p.max_guests && `sleeps ${p.max_guests}`].filter(Boolean).join(', ');
   const occ = p.occupancy_pct ? `${p.occupancy_pct}% recent occupancy` : null;
@@ -610,13 +620,26 @@ function rentalDetailBlock(p, i) {
 function relevantRentalSlugs(rentals, { thread = '', inbound = '', brief = null, cap = 6 } = {}) {
   if (!Array.isArray(rentals)) return [];
   const hay = `${thread}\n${inbound}`.toLowerCase();
-  const hits = new Set();
+  // Name hits ranked by the LAST mention, latest first, so the villa the agent
+  // is asking about now outranks the dozen named in an earlier card burst or
+  // digest. Before this the cap kept the first six in portfolio order, and
+  // Villa Bissli (order 99) fell out of play mid-conversation — Maya then had
+  // only its short card, no map link, and told the agent the location was
+  // not in her data (9 Sep 2026).
+  const lastMention = new Map();
   for (const p of rentals) {
     // Whole-word matches only: "lanehaus 1" must not light up "haus 1".
     const names = [p.name, p.slug, p.slug && p.slug.replace(/[-_]+/g, ' ')].filter(Boolean).map(x => String(x).toLowerCase().replace(/\s*[–-]\s*/g, ' '));
     const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*[–-]?\\s*');
-    if (names.some(n => n.length >= 4 && new RegExp(`(^|[^a-z0-9])${esc(n)}(?![a-z0-9])`, 'i').test(hay))) hits.add(p.slug);
+    let last = -1;
+    for (const n of names) {
+      if (n.length < 4) continue;
+      const re = new RegExp(`(^|[^a-z0-9])${esc(n)}(?![a-z0-9])`, 'ig');
+      let m; while ((m = re.exec(hay))) last = Math.max(last, m.index);
+    }
+    if (last >= 0) lastMention.set(p.slug, last);
   }
+  const hits = new Set([...lastMention.entries()].sort((a, b) => b[1] - a[1]).map(([slug]) => slug));
   if (brief && typeof brief === 'object') {
     const budget = Number(String(brief.budget_max_month || '').replace(/[^0-9.]/g, '')) || 0;
     const budgetIdr = budget ? (budget < 1000 ? budget * 1e6 : budget) : 0;   // "35" / "35jt" → 35M
@@ -649,9 +672,7 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     // Samba rentals are long-term — quote monthly IDR only. Nightly fields exist
     // in the schema for short-term Airbnb scenarios but are NOT surfaced to Maya
     // by default to prevent her quoting them when agents expect monthly.
-    const rate = p.monthly_rate_idr
-      ? `IDR ${(p.monthly_rate_idr / 1e6).toFixed(0)}M/month` + (p.yearly_rate_idr ? ` (or IDR ${(p.yearly_rate_idr / 1e6).toFixed(0)}M/year)` : '')
-      : 'rate TBC — say "let me check with Ikiel"';
+    const rate = rentalRateLine(p);
     // Manual marketing badge from the portal admin ("Price drop", "New") —
     // a live selling point Maya should mention when pitching this villa.
     const badge = p.badge ? ` [${String(p.badge).toUpperCase()}]` : '';
@@ -677,7 +698,7 @@ Samba Realty manages a portfolio of monthly rental properties across Canggu, Per
     return lines.join('\n');
   });
   return `SAMBA REALTY RENTAL PORTFOLIO (current, live from DB — short cards; the villas in play this turn appear in full further down):\n\n${blocks.join('\n\n')}\n\nSAMBA RENTAL HARD RULES (zero exceptions):
-1. ALWAYS quote MONTHLY IDR rates. Never quote nightly USD or nightly IDR rates unless the agent explicitly asks for short-term/Airbnb pricing.
+1. ALWAYS quote MONTHLY IDR rates. Never quote nightly USD or nightly IDR rates unless the agent explicitly asks for short-term/Airbnb pricing. A villa marked YEARLY ONLY has no monthly rate by design: its yearly figure IS the rate — quote it, say the villa is let yearly only, and never call the rate missing or check with anyone for it.
 2. NEVER invent prices, bedroom counts, locations, property types, or amenities. Every fact you state must be present in the data block above.
 3. If an agent asks about a property and a field isn't in the DB, do not guess: ask the listed contact via ask_owner and tell the agent you are checking with the villa (see THE LISTED CONTACT HANDLES THE VILLA).
 4. If asked for PHOTOS → share the property's photos_url (Google Drive). If asked for LOCATION → share the property's maps_url (Google Maps). If neither is in the data, say you'll get it from Ikiel.

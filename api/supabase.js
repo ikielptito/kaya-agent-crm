@@ -1195,11 +1195,11 @@ export default async function handler(req, res) {
         : FALLBACK_PORTFOLIO;
       const rentalsCtx = rentals?.length > 0
         ? `SAMBA RENTAL PORTFOLIO (live, monthly IDR only):\n${rentals.map((r,i) => {
-            const rate = r.monthly_rate_idr ? `IDR ${(r.monthly_rate_idr/1e6).toFixed(0)}M/month` : 'rate TBC';
+            const rate = r.monthly_rate_idr ? `IDR ${(r.monthly_rate_idr/1e6).toFixed(0)}M/month` : (r.yearly_rate_idr ? `IDR ${(r.yearly_rate_idr/1e6).toFixed(0)}M/year (yearly only)` : 'rate TBC');
             const cap = [r.beds && `${r.beds}BR`, r.max_guests && `sleeps ${r.max_guests}`].filter(Boolean).join(', ');
             const links = [r.photos_url && `photos: ${r.photos_url}`, r.maps_url && `map: ${r.maps_url}`].filter(Boolean).join(' · ');
             return `${i+1}. ${r.name} (${r.area || '?'}) -- ${r.property_type || 'Property'}${cap ? ', ' + cap : ''} -- ${rate}${links ? ' -- ' + links : ''}`;
-          }).join('\n')}\n\nSAMBA HARD RULES: Quote MONTHLY IDR only. Never nightly USD. Never invent prices, beds, locations, types. Missing field → "let me check with Ikiel". Photos → share photos_url. Location → share maps_url.`
+          }).join('\n')}\n\nSAMBA HARD RULES: Quote MONTHLY IDR only (a yearly-only villa: quote its yearly figure, that is its rate). Never nightly USD. Never invent prices, beds, locations, types. Missing field → "let me check with Ikiel". Photos → share photos_url. Location → share maps_url.`
         : '';
 
       // Live availability summary from the Samba portal digest (best-effort).
