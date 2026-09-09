@@ -4144,7 +4144,11 @@ export async function submitOwnerIntake(owner, listing, secret) {
   // photosLink empty the listing would go to review with "no photos" (Vila
   // Lestari, 23 Aug 2026 — 13 photos saved, none on the listing). Fall back.
   const ownerFolder = owner.drive_folder_id && !/^pending:/.test(String(owner.drive_folder_id)) ? folderLink(owner.drive_folder_id) : '';
-  const photosLink = String(listing.photosLink || '').trim() || ownerFolder;
+  // The owner-folder fallback is for a NEW listing only. An update carries a
+  // slug, and sending the fallback with it re-pointed Villa Hawk's gallery
+  // from its own subfolder back to the owner's root the moment Bas sent a
+  // map pin (10 Sep 2026); left empty, the portal keeps the folder it has.
+  const photosLink = String(listing.photosLink || '').trim() || (listing.slug ? '' : ownerFolder);
   try {
     // Only pass a map link that really is a URL — the portal stores `location`
     // solely when it looks like one, and a stray phrase would be dropped
