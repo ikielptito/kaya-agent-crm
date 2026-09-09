@@ -28,7 +28,7 @@ import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import { recordCorrection, correctingChange } from '../lib/corrections.js';
 import {
   listItems, getItem, createItem, patchItem, deleteItem,
-  publishItem, approveItem, declineItem, completeItem, reopenItem,
+  publishItem, approveItem, declineItem, ownerDecideItem, completeItem, reopenItem,
   snoozeItem, savePhoto, publicItem, ownerItems,
   listReporters, upsertReporter,
 } from '../lib/maintenance.js';
@@ -166,6 +166,8 @@ export default async function handler(req, res) {
       actor: payload.actor || 'admin',
     }));
     if (action === 'maint_approve')  return res.status(200).json(await approveItem(db, id, { by: payload.by || 'owner' }));
+    // The owner is in the cockpit: their own decision, nobody asked.
+    if (action === 'maint_owner_decide') return res.status(200).json(await ownerDecideItem(db, id, { decision: payload.decision, by: payload.by || 'owner', estimated_cost: payload.estimated_cost, note: payload.note }));
     if (action === 'maint_decline')  return res.status(200).json(await declineItem(db, id, { note: payload.note, by: payload.by || 'owner' }));
     if (action === 'maint_complete') return res.status(200).json(await completeItem(db, id, {
       note: payload.note, actual_cost: payload.actual_cost, by: payload.by || 'admin',
