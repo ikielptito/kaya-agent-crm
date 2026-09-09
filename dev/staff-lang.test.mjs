@@ -68,5 +68,22 @@ t('"saturno pump" still matches', pickProperty(GROUPS, 'saturno pump replacement
 t('"haus unit 5 chairs" matches the unit', pickProperty(GROUPS, 'haus unit 5 chairs broken')?.slug, 'haus-5');
 t('"tropicana ac rusak" without a unit matches nothing (needs the unit)', pickProperty(GROUPS, 'tropicana ac rusak')?.slug || null, null);
 
+
+// A caption that names the villa is not a report (ticket #27, 9 Sep 2026).
+import { isNoiseCaption } from '../lib/staff-lang.js';
+import { looksLikeMaintenance } from '../lib/maintenance-intake.js';
+t('"Ini unit 1 ya buk" is a label', isNoiseCaption('Ini unit 1 ya buk'), true);
+t('"B3" is a label', isNoiseCaption('B3'), true);
+t('"Foto A5 kak" is a label', isNoiseCaption('Foto A5 kak'), true);
+t('"Tropicana A5" is a label', isNoiseCaption('Tropicana A5'), true);
+t('"Haus 2 🙏" is a label', isNoiseCaption('Haus 2 🙏'), true);
+t('"Ok terimakasih" is noise', isNoiseCaption('Ok terimakasih'), true);
+t('"kran bocor" is not', isNoiseCaption('kran bocor'), false);
+t('"unit 1 kran bocor" is not', isNoiseCaption('unit 1 kran bocor'), false);
+t('"Sarung bantal masih di cuci" is not', isNoiseCaption('Sarung bantal di luar unit 1 masih di cuci ya'), false);
+t('with a photo, a label is still not a report', looksLikeMaintenance('Ini unit 1 ya buk', true), false);
+t('with a photo, a fault word still is', looksLikeMaintenance('unit 1 kran bocor', true), true);
+t('with a photo, a long non-fault sentence still counts (nothing open)', looksLikeMaintenance('yang ini di kamar belakang sebelah kanan', true), true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
