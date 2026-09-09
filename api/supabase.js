@@ -14,7 +14,7 @@ import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderIm
 import webpush from 'web-push';
 import { handleIcsGet, sendViewingInvites } from '../lib/viewings.js';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
-import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread, handleOwnerConversation } from './whatsapp-webhook.js';
+import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread, handleOwnerConversation, submitOwnerIntake } from './whatsapp-webhook.js';
 import { isOwnerCatchupCandidate, windowOpen, catchupOutcome } from '../lib/owner-catchup.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
@@ -370,6 +370,28 @@ export default async function handler(req, res) {
     } else if (action === 'get_owners') {
       r = await fetch(SUPABASE_URL + '/rest/v1/owners?select=*&order=last_inbound_at.desc.nullslast', { headers });
       return res.status(r.status).json(await r.json());
+
+    } else if (action === 'owner_intake') {
+      // Console: submit (or repair) a listing on an owner's behalf through the
+      // SAME path Maya's intake uses — pending_review, owner-linked, photos
+      // from the owner's folder. payload: { ownerId, listing } where listing
+      // is the intake shape (slug?, name, area, unitType, bedrooms, bathrooms,
+      // monthly, yearly, overview, features[], photosLink, icalUrl, mapLink,
+      // contactName, ownerEmail). Built for the BAM repair (10 Sep 2026):
+      // a second villa overwrote the first and the record had to be put back.
+      const { ownerId, listing } = payload || {};
+      if (ownerId == null || !listing) return res.status(400).json({ error: 'ownerId and listing required' });
+      const owner = (await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${parseInt(ownerId, 10)}&select=*`, { headers }).then(x => x.json()).catch(() => []))?.[0];
+      if (!owner) return res.status(404).json({ error: 'owner not found' });
+      const result = await submitOwnerIntake(owner, listing, process.env.LISTING_SYNC_SECRET);
+      if (result.ok && result.slug) {
+        const known = Array.isArray(owner.listing_slugs) ? owner.listing_slugs : [];
+        const merged = Array.from(new Set([...known, result.slug]));
+        const fields = { listing_slugs: merged };
+        if (result.email && result.email !== owner.email) fields.email = result.email;
+        await fetch(`${SUPABASE_URL}/rest/v1/owners?id=eq.${owner.id}`, { method: 'PATCH', headers, body: JSON.stringify(fields) }).catch(() => {});
+      }
+      return res.status(result.ok ? 200 : 502).json(result);
 
     } else if (action === 'get_owner_messages') {
       const { ownerId } = payload || {};

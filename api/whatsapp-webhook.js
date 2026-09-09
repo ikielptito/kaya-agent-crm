@@ -4124,7 +4124,7 @@ export function intakeSlugFor(listing, listingSlugs) {
   return name === known.replace(/-\d+$/, '') ? known : '';
 }
 
-async function submitOwnerIntake(owner, listing, secret) {
+export async function submitOwnerIntake(owner, listing, secret) {
   const ical = sanitizeIcalUrl(listing.icalUrl);
   const icalRejected = !!String(listing.icalUrl || '').trim() && !ical;
   const email = sanitizeOwnerEmail(listing.ownerEmail) || sanitizeOwnerEmail(owner.email);
