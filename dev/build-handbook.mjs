@@ -62,6 +62,7 @@ add('staff.guide', 'Panduan Housekeeper Samba (Indonesian, full text)', ['staff'
 add('era.guide', 'Panduan Kesiapan Villa — Era’s readiness guide (full text)', ['era', 'system'], read('portal', 'docs/handbook/era-readiness-guide.md'));
 add('system.portal', 'How sambarentals.com is built and wired', ['system', 'era'], read('portal', 'docs/handbook/system-portal.md'));
 add('system.crm', 'How Maya is built and wired', ['system', 'era'], read('crm', 'docs/handbook/system-crm.md'));
+add('books.guide', 'The Tropicana Valley Books — how the page and the model work (Ikiel and Oli)', ['era', 'system'], read('crm', 'docs/handbook/books-guide.md'));
 add('whatsnew', 'What is new on Samba, by audience and date (the changelog)', ['owner', 'agent', 'staff', 'era', 'system'], read('crm', 'docs/handbook/changelog.md'));
 
 // Public pages, stripped to text.

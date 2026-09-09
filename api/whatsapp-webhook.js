@@ -1632,6 +1632,19 @@ ${e.message.slice(0, 200)}`); } catch { /* optional */ }
       return res.status(200).end();
     }
 
+    // ── THE BOOKS: onboarding walkthrough on the first reply to the ping ─
+    // Oli (or Ikiel) replied to Maya's "the books are live" alert: the
+    // three-message walkthrough goes out now that the window is open. A
+    // bare acknowledgement stops here; anything else carries on below.
+    try {
+      const { booksOnboardIfDue } = await import('../lib/books.js');
+      const briefed = await booksOnboardIfDue({ db: { SUPABASE_URL, sbHeaders }, fromNum, sendText: (to, body) => sendText(WA_PHONE_ID, WA_TOKEN, to, body) });
+      if (briefed) {
+        await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: sbHeaders, body: JSON.stringify({ agent_id: null, wa_num: fromNum, direction: 'outbound', content: '[Maya sent the Tropicana Valley books walkthrough, 3 messages]', timestamp: new Date().toISOString(), source: 'webhook', category: 'books_onboard' }) }).catch(() => {});
+        if (isBareAck(text) || String(text || '').trim().length < 12) return res.status(200).end();
+      }
+    } catch (e) { /* never let onboarding break the line */ }
+
     // ── PRODUCT FEEDBACK (Oli shaping the payroll feature) ──────────
     // A screenshot or a change request from a designated number goes to
     // Ikiel's Telegram with the picture, and is acknowledged. Ordinary
@@ -3690,6 +3703,11 @@ export async function generateOwnerReply(apiKey, owner, inbound, thread, listing
   // stays on Sonnet. Ikiel, 24 Aug 2026.
   const ownerModel = (prospect && isColdProspect(owner)) ? 'claude-opus-5' : 'claude-sonnet-4-6';
 
+  // A partner in PT Double Eight Realty (Ikiel, Oli): the Tropicana Valley
+  // books are theirs to ask about, loaded live with action "books".
+  let booksPartner = null;
+  if (db?.SUPABASE_URL) { try { booksPartner = await (await import('../lib/books.js')).partnerOf(db, owner.wa_num); } catch { booksPartner = null; } }
+
   // An owner who is also one of our agents (Dony Bambang) gets told so, so a
   // fee or villa question from the agent side is answered here too.
   let dualRole = '';
@@ -3711,7 +3729,7 @@ ${String(owner.notes).trim()}
 
 WHAT YOU DO FOR OWNERS:
 1. Answer questions about how their listing is performing — views, enquiries, agents reached, occupancy, this week vs last. NEVER quote numbers from memory: request a live report first (action "report" with report_slug).
-1b. For MANAGED-villa owners: answer questions about their monthly statements — payouts, what has been paid and what is still owed, the management fee, every expense line, the bookings and nights behind a month, amendments, carried-forward deficits. NEVER from memory: request the statements first (action "statements"). Then answer from that data exactly as it reads — cite the month, the line, the amount. You may add lines up (e.g. total laundry across months) but never recompute a payout or predict one. A statement marked REVISED was corrected after publishing: when the owner asks why it changed or why the number is different from what they saw, explain from the revision record — the date, the payout before and after, and exactly which lines were added, removed or changed — in plain words (e.g. "an expense of IDR 1,250,000 dated 1 July was added, so the payout went from 9,035,250 to 7,785,250"). Never guess at a reason the record does not give; if they ask WHY that line exists, say Era recorded it and offer to have Ikiel confirm. Some expense lines carry "[what this is: …]" — that explanation is authoritative: use it, in your own words, whenever the owner asks about that line. Escalate only a genuine dispute ("that expense is wrong", "I was never paid this") that the data cannot settle.
+${booksPartner ? `1c. THE TROPICANA VALLEY BOOKS: this person is ${booksPartner === 'ikiel' ? 'Ikiel' : 'Oli'}, a partner in PT Double Eight Realty, the developer of Tropicana Valley (14 units, 10 sold, B2/B3/B5/B6 kept and rented). They have their own finance page, the Tropicana Valley Books (tropicana-books.vercel.app), which you can read live. Answer ANY question about the development's finances — the loan from Oli's mother-in-law and what is left to pay after cash, costs and buyers; what is in the company account; the costs still to pay; what each buyer still owes; the loans; the rent and expenses of the four units month by month; any ledger entry, category total or bank transfer; the rows still needing review — NEVER from memory: request the books first (action "books"; set books_query to a word, name, key, unit or year when they ask about specific entries, e.g. "wildan", "B3", "2026-04", "review", "nagar"). Then answer from that data exactly as it reads, citing amounts and dates. You may add lines up and explain how the headline is computed (the formula is in the data); never invent a figure. For how the page and the model WORK (sign-in, tabs, keys, categories, calendar rows vs bank rows, what still needs confirming), use action "handbook" with handbook_key "books.guide". These two partners edit the books themselves; if they say a figure is wrong, tell them which tab to fix it on, and offer to pass a note to Ikiel.\n` : ''}1b. For MANAGED-villa owners: answer questions about their monthly statements — payouts, what has been paid and what is still owed, the management fee, every expense line, the bookings and nights behind a month, amendments, carried-forward deficits. NEVER from memory: request the statements first (action "statements"). Then answer from that data exactly as it reads — cite the month, the line, the amount. You may add lines up (e.g. total laundry across months) but never recompute a payout or predict one. A statement marked REVISED was corrected after publishing: when the owner asks why it changed or why the number is different from what they saw, explain from the revision record — the date, the payout before and after, and exactly which lines were added, removed or changed — in plain words (e.g. "an expense of IDR 1,250,000 dated 1 July was added, so the payout went from 9,035,250 to 7,785,250"). Never guess at a reason the record does not give; if they ask WHY that line exists, say Era recorded it and offer to have Ikiel confirm. Some expense lines carry "[what this is: …]" — that explanation is authoritative: use it, in your own words, whenever the owner asks about that line. Escalate only a genuine dispute ("that expense is wrong", "I was never paid this") that the data cannot settle.
 2. Help them LIST a new villa or UPDATE one by gathering the details in conversation, then submitting (action "intake"). New/updated listings go to Ikiel for review before they appear publicly — always say so.
 3. General help. Ikiel oversees everything and steps in when needed.
 
@@ -3763,7 +3781,7 @@ ${handbookDigest('owner')}
 
 Respond with ONLY a JSON object (no markdown, no prose):
 {
-  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "bookings" | "handbook" | "login_link" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''},
+  "action": "auto" | "escalate" | "report" | "statements" | "housekeeping" | "maintenance" | "bookings" | "handbook" | "login_link" | "import" | "intake"${prospect ? ' | "media" | "optout"' : ''}${booksPartner ? ' | "books"' : ''},${booksPartner ? '\n  "books_query": "optional word, key, unit or year to narrow the ledger rows (action books only)",' : ''}
   "handbook_key": null | "<a key from HANDBOOK SECTIONS>",
   "reply": "message to the owner; leave \\"\\" when action is report, import or intake",
   "report_slug": null | "one of their listing slugs",
@@ -3771,7 +3789,7 @@ Respond with ONLY a JSON object (no markdown, no prose):
   "media_key": null | "agent_portal" | "branded_share" | "villa_mobile" | "network",` : ''}
   "listing": null | { "slug": null | "existing-slug", "name": "", "area": "", "unitType": "", "bedrooms": 0, "bathrooms": 0, "monthly": "", "yearly": "", "overview": "", "photosLink": "", "icalUrl": "", "mapLink": "", "ownerEmail": "", "contactName": "", "features": [] }
 }
-Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. Use "login_link" when they ask for the portal link, cannot sign in, or lost their session (leave reply ""): a one-tap sign-in link goes to their WhatsApp and you are told whether it went; never promise a link without this action. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
+Use "report" to fetch real numbers before answering a performance question (set report_slug, leave reply ""). Use "statements" to load their monthly statements before answering ANY question about payouts, expenses, bookings, fees or payment status (leave reply ""). Use "housekeeping" (managed villas) to load the cleaning log before answering ANY question about when the villa was cleaned, checked or inspected, what was flagged, or when the next clean, inspection or deep clean is (leave reply ""). Use "maintenance" (managed villas) to load their repair tickets before answering ANY question about a repair, a ticket, a claim, an approval, a cost, a "View details" link, or where the photos of a problem are (leave reply ""). Use "bookings" (managed villas) to load the booking calendar before answering who is staying, who arrives or leaves and when, how many nights, or whether the villa is free on some dates (leave reply ""); for a marketplace villa the owner runs their own calendar, so say so instead. ${booksPartner ? 'Use "books" to load the Tropicana Valley books before answering ANY question about the development\'s finances: the loan, cash, costs to pay, buyers, rent of the four units, ledger entries, categories, bank transfers (leave reply ""; set books_query to narrow the ledger). ' : ''}Use "login_link" when they ask for the portal link, cannot sign in, or lost their session (leave reply ""): a one-tap sign-in link goes to their WhatsApp and you are told whether it went; never promise a link without this action. Use "handbook" (set handbook_key, leave reply "") when they ask how something works — the portal, sign-in, pricing and billing, refunds, terms, what a statement line means, viewings, the cleaning standard, the guide — and the facts block is not enough; answer from the section that comes back. Use "import" to read an Airbnb/Booking.com page the owner linked (set import_url, leave reply ""). Use "intake" once you have enough to create or update a listing (set listing, leave reply ""). ${prospect ? 'Use "media" to send one curated image (set media_key AND a short caption in reply). Use "optout" if they clearly want to be left alone. ' : ''}Otherwise use "auto" (a normal reply) or "escalate".`;
 
   const messages = [{ role: 'user', content: `The owner just sent: "${inbound}"\n\nRecent thread (oldest → newest):\n${thread || '(no prior messages)'}` }];
   let llmCalls = 0, costUsd = 0;
@@ -3834,6 +3852,20 @@ Use "report" to fetch real numbers before answering a performance question (set 
         messages.push({ role: 'user', content: sec
           ? `Handbook section "${sec.key}" — ${sec.title}:\n${sec.text}\n\nNow answer the owner from this, in plain friendly WhatsApp language (JSON, action "auto"). Quote figures and policy exactly; do not add anything the section does not say.`
           : `No handbook section named "${parsed.handbook_key}". Answer from the facts you have (JSON, action "auto"), or escalate.` });
+        continue;
+      }
+      if (parsed.action === 'books' && booksPartner && hop < MAX - 1) {
+        // The live books, the same pack the page shows, from the portal's
+        // finance feed (rent from the calendar + Era's statements + the maths).
+        let block = '(the books are unavailable right now)';
+        try {
+          const { loadBooks, booksContext } = await import('../lib/books.js');
+          const pack = await loadBooks({ as: 'Maya' });
+          block = booksContext(pack, { query: parsed.books_query || '' });
+        } catch (e) { block = `(the books are unavailable: ${e.message})`; }
+        const guide = handbookSection('books.guide', 'system');
+        messages.push({ role: 'assistant', content: raw });
+        messages.push({ role: 'user', content: `The Tropicana Valley books, live:\n${block}\n\n${guide ? `How the page and the model work (for explaining, not for figures):\n${guide.text.slice(0, 6000)}\n\n` : ''}Now answer from this data only — cite the exact amounts, dates and rows, in plain friendly WhatsApp language (JSON, action "auto"). Show your arithmetic when you add things up. If what they asked is not in this data, say so plainly and tell them where on the page it would be entered, or offer to pass a note to Ikiel (action "escalate" with a helpful reply).` });
         continue;
       }
       if (parsed.action === 'login_link' && hop < MAX - 1) {

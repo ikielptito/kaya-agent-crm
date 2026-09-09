@@ -47,6 +47,7 @@ import {
 } from '../lib/statements.js';
 import { statementToken, inviteToken, previewToken } from '../lib/tokens.js';
 import { financeGet, financePut, financeDelete, financeRentalUpsert, financeSettings, patchFinanceSettings } from '../lib/project-finance.js';
+import { sendWaLoginLink } from '../lib/wa-login-link.js';
 
 // Line fields the editor may write, per kind. Everything else is derived.
 const EDITABLE = new Set(['unit_name', 'guest_name', 'stay_dates', 'platform', 'nights', 'amount', 'commission', 'nett', 'expense_date', 'description', 'position']);
@@ -353,36 +354,10 @@ export default async function handler(req, res) {
         const known = groups.some(g => (g.owner_wa_nums || []).some(n => String(n).replace(/\D/g, '') === to));
         if (!known) return res.status(403).json({ error: 'Number not registered to any property' });
       }
-      const WA_TOKEN = process.env.META_WA_TOKEN;
-      const WA_PHONE_ID = process.env.META_WA_PHONE_ID;
-      if (!WA_TOKEN || !WA_PHONE_ID) return res.status(500).json({ error: 'WhatsApp env not configured' });
-      // A first contact gets the welcome template (who Maya is, what the
-      // portal shows, one tap to open) when Meta has approved it; the plain
-      // sign-in template otherwise, and always for a self-service login.
-      let name = 'samba_owner_login_link', components = [
-        { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
-      ];
-      if (payload.welcome?.first && payload.welcome?.villa) {
-        try {
-          const wabaId = process.env.META_WABA_ID;
-          const t = await fetch(`https://graph.facebook.com/v24.0/${wabaId}/message_templates?fields=name,status&name=samba_owner_welcome_v1&limit=5`, { headers: { Authorization: 'Bearer ' + WA_TOKEN } });
-          const ok = ((await t.json()).data || []).some(x => x.name === 'samba_owner_welcome_v1' && x.status === 'APPROVED');
-          if (ok) {
-            name = 'samba_owner_welcome_v1';
-            components = [
-              { type: 'body', parameters: [{ type: 'text', text: String(payload.welcome.first).slice(0, 40) }, { type: 'text', text: String(payload.welcome.villa).replace(/[\r\n\t]+/g, ' ').slice(0, 60) }] },
-              { type: 'button', sub_type: 'url', index: '0', parameters: [{ type: 'text', text: tok }] },
-            ];
-          }
-        } catch { /* fall back to the sign-in template */ }
-      }
-      const r = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template: { name, language: { code: 'en' }, components } }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) return res.status(502).json({ error: d.error?.message || 'WhatsApp send failed' });
+      let sent;
+      try { sent = await sendWaLoginLink(db, { to, tok, welcome: payload.welcome || null }); }
+      catch (e) { return res.status(/env/.test(e.message) ? 500 : 502).json({ error: e.message }); }
+      const name = sent.template, d = { messages: [{ id: sent.message_id }] };
       // Logged as the words she saw, on her owner record, so the thread in
       // the chat console shows the first contact rather than a placeholder.
       const ownerRow = (await fetch(`${SUPABASE_URL}/rest/v1/owners?wa_num=eq.${to}&select=id&limit=1`, { headers: sbHeaders }).then(x => x.json()).catch(() => []))?.[0];
@@ -412,6 +387,43 @@ export default async function handler(req, res) {
     if (action === 'finance_rental_upsert') return res.status(200).json(await financeRentalUpsert(db, { rows: payload.rows || [], project_key: payload.project_key }));
     if (action === 'finance_settings_patch') return res.status(200).json({ settings: await patchFinanceSettings(db, payload.fields || {}) });
     if (action === 'finance_settings') return res.status(200).json({ settings: await financeSettings(db) });
+    // The books app's WhatsApp sign-in: who a number is (ikiel / oli), and
+    // the tap-to-sign-in template carrying the app's own token (prefix tv-,
+    // routed by the portal to tropicana-books.vercel.app).
+    if (action === 'finance_wa_who') {
+      const { partnerOf } = await import('../lib/books.js');
+      return res.status(200).json({ who: await partnerOf(db, payload.wa_num) });
+    }
+    if (action === 'finance_wa_login') {
+      const { partnerOf } = await import('../lib/books.js');
+      const to = String(payload.wa_num || '').replace(/\D/g, '');
+      const tok = String(payload.token || '').replace(/[^a-f0-9-]/gi, '');
+      if (!to || !/^tv-/.test(tok) || tok.replace(/-/g, '').length < 24) return res.status(400).json({ error: 'wa_num and a tv- token required' });
+      if (!(await partnerOf(db, to))) return res.status(403).json({ error: 'That number is not a partner on the books' });
+      try {
+        const sent = await sendWaLoginLink(db, { to, tok });
+        await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' }, body: JSON.stringify({ wa_num: to, direction: 'outbound', content: 'Here is your secure sign-in link for the Tropicana Valley books. [Open my portal]', timestamp: new Date().toISOString(), wa_message_id: sent.message_id, source: 'console', category: 'books_login', template_name: sent.template, status: 'sent' }) }).catch(() => {});
+        return res.status(200).json({ ok: true, message_id: sent.message_id });
+      } catch (e) { return res.status(502).json({ error: e.message }); }
+    }
+    // Arm Maya's onboarding for a partner and send the ping; the walkthrough
+    // goes out the first time they reply.
+    if (action === 'finance_onboard') {
+      const { partnerOf, booksOnboardArm } = await import('../lib/books.js');
+      const to = String(payload.wa_num || '').replace(/\D/g, '');
+      const who = await partnerOf(db, to);
+      if (!who) return res.status(403).json({ error: 'That number is not a partner on the books' });
+      await booksOnboardArm(db, to);
+      const WA_TOKEN = process.env.META_WA_TOKEN, WA_PHONE_ID = process.env.META_WA_PHONE_ID;
+      const topic = String(payload.topic || 'the Tropicana Valley books, your new finance page').slice(0, 120);
+      const r = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'template', template: { name: 'maya_team_alert', language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: topic }] }] } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, { method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' }, body: JSON.stringify({ wa_num: to, direction: 'outbound', content: `Maya here with a team alert regarding ${topic}.\n\nSomething came up that needs your attention. Reply OK and I will send you the full details right away.`, timestamp: new Date().toISOString(), wa_message_id: d.messages?.[0]?.id || null, source: 'console', category: 'books_onboard', template_name: 'maya_team_alert', status: r.ok ? 'sent' : 'failed' }) }).catch(() => {});
+      return res.status(r.ok ? 200 : 502).json({ ok: r.ok, who, armed: true, message_id: d.messages?.[0]?.id || null, error: r.ok ? undefined : (d.error?.message || 'WhatsApp send failed') });
+    }
     if (action === 'finance_feedback') {
       const { recordAppFeedback } = await import('../lib/product-feedback.js');
       return res.status(200).json(await recordAppFeedback(db, { who: payload.actor || 'Oli', text: payload.text, images: payload.images || [], page: payload.page || null, app: 'Tropicana Valley Books' }));
