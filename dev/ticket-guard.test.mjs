@@ -6,7 +6,7 @@
 //                a duplicate of #28 "Sofa zipper repair".
 //   6 Sep 2026   "#4 patio chairs done… #A5 glass estimate 15,000/pcs" →
 //                four new tickets under the wrong villa.
-import { looksLikeCompletion, similarOpen, subjectTokens } from '../lib/ticket-guard.js';
+import { looksLikeCompletion, similarOpen, subjectTokens, describeActions } from '../lib/ticket-guard.js';
 import { looksLikeStatusReply } from '../lib/maintenance-backlog-reply.js';
 
 let pass = 0, fail = 0;
@@ -87,6 +87,23 @@ eq('different fault, same villa → null', similarOpen(open, { title: 'Bathroom 
 eq('same fault, other villa → null', similarOpen(open, { title: 'Sofa zipper repair', text: 'A5 sofa zipper broken', slug: 'tropicana-a5' }), null);
 eq('wall vs wallpaper are different words', similarOpen(open, { title: 'Wall paint touch up', text: 'A4 wall needs paint touch up', slug: 'tropicana-a4' }), null);
 eq('empty subject → null', similarOpen(open, { title: 'Maintenance issue', text: 'unit A4', slug: 'tropicana-a4' }), null);
+
+console.log('describeActions — the read-back Era confirms before anything changes');
+const items = [
+  { id: 28, status: 'new', title: 'Sofa zipper repair', unit_label: 'A4', group_key: 'tropicana-a4', statement_groups: { name: 'Tropicana Valley' }, estimated_cost: null },
+  { id: 15, status: 'scheduled', title: 'Replace glassware', unit_label: 'A4', group_key: 'tropicana-a4', statement_groups: { name: 'Tropicana Valley' }, estimated_cost: 85000 },
+  { id: 9, status: 'pending_approval', title: 'Pool pump', unit_label: null, group_key: 'villa-saturno', statement_groups: { name: 'Villa Saturno' }, estimated_cost: null },
+];
+const desc = describeActions([
+  { id: 28, action: 'done', note: 'repaired' },
+  { id: 15, action: 'note', note: 'tukang comes Friday', estimated_cost: 150000 },
+  { id: 9, action: 'done', note: 'done' },
+  { id: 999, action: 'done', note: 'ghost' },
+], items);
+eq('three lines, the ghost ticket dropped', desc.length, 3);
+eq('a new ticket closing says the owner hears it', desc[0].startsWith('✅ #28 Sofa zipper repair — Tropicana Valley (A4) → *done* (the owner hears'), true);
+eq('a note keeps its price only when the ticket has none', desc[1].includes('estimate'), false);
+eq('pending approval cannot be closed from chat', desc[2].startsWith('⏳ #9'), true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
