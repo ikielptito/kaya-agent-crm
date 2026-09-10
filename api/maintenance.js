@@ -141,6 +141,31 @@ export default async function handler(req, res) {
       if (before && before.slug !== slug) await recordCorrection(db, { targetType: 'maintenance_item', targetId: id, change: { slug: { from: before.slug, to: slug }, group_key: { from: before.group_key, to: group.key } }, actor: payload.actor || 'admin', source: 'console' }).catch(() => {});
       return res.status(200).json(moved);
     }
+    // Dry run of the ticket guard: how a message from Era, Ikiel or a
+    // housekeeper would be read against the open tickets at the villa it
+    // names — completion? which ticket? done / update / same / new — and
+    // what the guard would do. Nothing is written or sent.
+    if (action === 'maint_guard_preview') {
+      const { readAgainstOpen, looksLikeCompletion, isTeamNumber } = await import('../lib/ticket-guard.js');
+      const { matchProperty } = await import('../lib/maintenance.js');
+      const { looksLikeMaintenance } = await import('../lib/maintenance-intake.js');
+      const text = String(payload.text || '');
+      const fromNum = String(payload.from || process.env.ERA_WA_NUM || '').replace(/\D/g, '');
+      const matched = payload.slug
+        ? await (async () => { const gs = (await sbGet(`statement_groups?active=is.true&select=key,name,listing_slugs`)) || []; const g = gs.find(x => (x.listing_slugs || []).includes(payload.slug)); return g ? { group_key: g.key, slug: payload.slug, unit_label: payload.slug, group: g } : null; })()
+        : await matchProperty(db, text);
+      const read = matched && !matched.ambiguous ? await readAgainstOpen({ db, text, matched, who: payload.who || (isTeamNumber(fromNum) ? 'Era' : 'a housekeeper') }) : null;
+      const team = isTeamNumber(fromNum);
+      const would = !matched ? 'no villa matched — the report parser would decline or ask'
+        : matched.ambiguous ? 'villa ambiguous — Maya asks which'
+        : !read ? 'n/a'
+        : read.target
+          ? (team ? (read.relation === 'done' ? `close #${read.target.id} (with Undo)` : read.relation === 'update' ? `apply the update to #${read.target.id}` : `ask: Update #${read.target.id} / New ticket / Ignore`)
+                  : `note on #${read.target.id}, tell Era${read.relation === 'done' ? ' with Mark done / Keep open' : ''}`)
+          : read.completion ? (team ? 'no ticket: ask File as new / Log as done / Ignore, nothing filed' : 'no ticket: thank, tell Era, nothing filed')
+          : looksLikeMaintenance(text, false) ? 'file a NEW ticket' : 'not a report by vocabulary — falls through';
+      return res.status(200).json({ text, from: fromNum, team, matched: matched ? { group_key: matched.group_key, slug: matched.slug, ambiguous: !!matched.ambiguous } : null, completion: looksLikeCompletion(text), open: (read?.open || []).map(i => ({ id: i.id, status: i.status, title: i.title })), similar: read?.similar ? { id: read.similar.item.id, score: read.similar.score } : null, model: read?.model || null, target: read?.target?.id || null, relation: read?.relation || null, would });
+    }
     // Dry run of Era's status reply: what Maya would apply, without applying.
     if (action === 'maint_backlog_reply_preview') {
       const { parseStatusReply } = await import('../lib/maintenance-backlog-reply.js');

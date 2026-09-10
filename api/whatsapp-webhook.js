@@ -1416,6 +1416,15 @@ export async function nodeHandler(req, res) {
       // reply into four new tickets under the wrong villa.
       if (!mediaId) {
         try {
+          // The ticket guard's own buttons: File as new / Update #n /
+          // Ignore, and Era's Mark done / Keep open on a staff report.
+          if (String(extracted.buttonPayload || '').startsWith('mt:')) {
+            const { handleTicketTap } = await import('../lib/ticket-guard.js');
+            if (await handleTicketTap({ db: relayDb, wa: relayWa, fromNum, buttonPayload: extracted.buttonPayload, who: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', apiKey: ANTHROPIC_KEY })) {
+              await logTeam('maintenance_status');
+              return res.status(200).end();
+            }
+          }
           const { handleBacklogReply, handleBacklogUndo } = await import('../lib/maintenance-backlog-reply.js');
           if (await handleBacklogUndo({ db: relayDb, wa: relayWa, fromNum, text, buttonPayload: extracted.buttonPayload || null })
               || await handleBacklogReply({ db: relayDb, wa: relayWa, fromNum, text, who: fromNum === ERA_WA_NUM ? 'Era' : 'Ikiel', apiKey: ANTHROPIC_KEY })) {

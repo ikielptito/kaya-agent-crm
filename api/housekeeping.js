@@ -479,7 +479,8 @@ export default async function handler(req, res) {
       const body = realText(payload.text || '');
       const work = await openWork(db, person);
       const ref = await resolveReference(db, { replyTo: payload.reply_to || null, buttonPayload: payload.button || null, person, work }).catch(e => ({ error: e.message }));
-      const rules = { ack: isAck(body), done: isDone(body), all_fine: isAllFine(body), greeting: isGreeting(body), question: isQuestion(body), avail: isAvail(body), restock: isRestock(body), schedule_word: SCHEDULE_WORD_RE.test(body) };
+      const { looksLikeCompletion } = await import('../lib/ticket-guard.js');
+      const rules = { ack: isAck(body), done: isDone(body), all_fine: isAllFine(body), ticket_completion: !isDone(body) && !isAllFine(body) && looksLikeCompletion(body) && work.tickets?.length > 0, greeting: isGreeting(body), question: isQuestion(body), avail: isAvail(body), restock: isRestock(body), schedule_word: SCHEDULE_WORD_RE.test(body) };
       const deterministic = Object.entries(rules).filter(([, v]) => v).map(([k]) => k);
       const cls = body && !deterministic.length ? await classifyStaffText({ body, person, work, names: await catalogNames(db).catch(() => ({})) }).catch(e => ({ error: e.message })) : null;
       const brief = { tasks: work.tasks.map(t => ({ id: t.id, slug: t.slug, kind: t.kind, date: t.task_date, status: t.status })), round: work.round?.id || null, check: work.check?.id || null, recent: work.recent.map(t => t.id), asks: work.asks.map(a => ({ id: a.id, kind: a.kind, targets: a.target_ids })) };
