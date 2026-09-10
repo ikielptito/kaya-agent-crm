@@ -150,7 +150,7 @@ export default async function handler(req, res) {
       const { matchProperty } = await import('../lib/maintenance.js');
       const { looksLikeMaintenance } = await import('../lib/maintenance-intake.js');
       const text = String(payload.text || '');
-      const fromNum = String(payload.from || process.env.ERA_WA_NUM || '').replace(/\D/g, '');
+      const fromNum = String(payload.from || process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
       const matched = payload.slug
         ? await (async () => { const gs = (await sbGet(`statement_groups?active=is.true&select=key,name,listing_slugs`)) || []; const g = gs.find(x => (x.listing_slugs || []).includes(payload.slug)); return g ? { group_key: g.key, slug: payload.slug, unit_label: payload.slug, group: g } : null; })()
         : await matchProperty(db, text);
