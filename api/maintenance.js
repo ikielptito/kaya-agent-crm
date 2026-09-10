@@ -160,7 +160,7 @@ export default async function handler(req, res) {
         : matched.ambiguous ? 'villa ambiguous — Maya asks which'
         : !read ? 'n/a'
         : read.target
-          ? (team ? (read.relation === 'done' ? `close #${read.target.id} (with Undo)` : read.relation === 'update' ? `apply the update to #${read.target.id}` : `ask: Update #${read.target.id} / New ticket / Ignore`)
+          ? (team ? (read.relation === 'done' ? `propose: close #${read.target.id} — applied on Yes (Undo after)` : read.relation === 'update' ? `propose: update #${read.target.id} — applied on Yes` : `ask: Update #${read.target.id} / New ticket / Ignore`)
                   : `note on #${read.target.id}, tell Era${read.relation === 'done' ? ' with Mark done / Keep open' : ''}`)
           : read.completion ? (team ? 'no ticket: ask File as new / Log as done / Ignore, nothing filed' : 'no ticket: thank, tell Era, nothing filed')
           : looksLikeMaintenance(text, false) ? 'file a NEW ticket' : 'not a report by vocabulary — falls through';
