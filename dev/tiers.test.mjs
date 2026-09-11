@@ -82,6 +82,8 @@ console.log(`\n${pass} passed, ${fail} failed`); if (fail) process.exit(1);
   t2('three buttons, each ≤ 25 chars', INTRO_QUESTION_BUTTONS.map(b => b.length <= 25), [true, true, true]);
   t2('23 days after the intro → asked', introQuestionDue(intro(1, 23), qcfg, now), true);
   t2('6 days after → not yet', introQuestionDue(intro(2, 6), qcfg, now), false);
+  t2('digest 3 days ago → the question waits for the gap', introQuestionDue(intro(30, 40, { intro_digests: 1, last_intro_digest_at: ago(3) }), qcfg, now), false);
+  t2('digest 14 days ago → asked', introQuestionDue(intro(31, 40, { intro_digests: 1, last_intro_digest_at: ago(14) }), qcfg, now), true);
   t2('already asked → never again', introQuestionDue(intro(3, 40, { intro_question_at: ago(10) }), qcfg, now), false);
   t2('daily cap, oldest first', pickIntroQuestions([intro(10, 20), intro(11, 40), intro(12, 30)], { intro_question_daily_cap: 2 }, now).map(a => a.id), [11, 12]);
   t2('cap 0 switches it off', pickIntroQuestions([intro(10, 20)], { intro_question_daily_cap: 0 }, now).length, 0);
