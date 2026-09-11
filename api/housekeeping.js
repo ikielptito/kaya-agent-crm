@@ -21,6 +21,7 @@
 //                                     what the review would put to Ikiel
 //   hk_staff_learned {}               the approved words/examples/tips/hours
 //   hk_photos_move {name|wa, slug, which?, day?}  move a day's photo batch to the villa it was of
+//   hk_era_message {text}             a message from Maya to Era, by hand
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import { generateTasks, catalogNames, fetchStays, projectRounds, roundAnchors } from '../lib/housekeeping.js';
@@ -535,6 +536,25 @@ export default async function handler(req, res) {
         body: JSON.stringify({ wa_num: to, direction: 'outbound', content: text, timestamp: new Date().toISOString(), source: 'console', category: 'staff_help', wa_message_id: d.messages?.[0]?.id || null, status: 'sent' }),
       }).catch(() => {});
       return res.status(200).json({ ok: true, to: p.name });
+    }
+    // A message from Maya to Era, by hand from the console: Era is not on
+    // the staff roster, so hk_staff_message cannot reach her.
+    if (action === 'hk_era_message') {
+      const text = String(payload.text || '').trim();
+      if (!text) return res.status(400).json({ error: 'text required' });
+      const to = String(process.env.ERA_WA_NUM || '6281246357778').replace(/\D/g, '');
+      const r = await fetch(`https://graph.facebook.com/v24.0/${process.env.META_WA_PHONE_ID}/messages`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + process.env.META_WA_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return res.status(502).json({ error: 'WhatsApp refused', detail: d });
+      await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
+        method: 'POST', headers: { ...sbHeaders, Prefer: 'return=minimal' },
+        body: JSON.stringify({ wa_num: to, direction: 'outbound', content: text, timestamp: new Date().toISOString(), source: 'console', category: 'housekeeping', wa_message_id: d.messages?.[0]?.id || null, status: 'sent' }),
+      }).catch(() => {});
+      return res.status(200).json({ ok: true, to: 'Era', id: d.messages?.[0]?.id || null });
     }
     if (action === 'hk_onboard_status') {
       const { onboardingStatus } = await import('../lib/staff-onboarding.js');
