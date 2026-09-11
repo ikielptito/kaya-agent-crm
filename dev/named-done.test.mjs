@@ -1,0 +1,16 @@
+import { namedDone } from '../lib/named-done.js';
+let pass = 0, fail = 0;
+const t = (name, got, expect) => { const ok = JSON.stringify(got) === JSON.stringify(expect); if (ok) { pass++; console.log(`  ok  ${name}`); } else { fail++; console.log(`  FAIL ${name}\n       got  ${JSON.stringify(got)}\n       want ${JSON.stringify(expect)}`); } };
+const B = ['tropicana-b2', 'tropicana-b3', 'tropicana-b5', 'tropicana-b6'];
+const cleans = [{ id: 1, slug: 'tropicana-b3', status: 'notified' }, { id: 2, slug: 'tropicana-b5', status: 'confirmed' }, { id: 3, slug: 'tropicana-b2', status: 'done' }];
+const ids = (l) => l.map(x => x.id);
+t("Gede, 10 Sep: 'tugas bersihka kamar b3 dan b5 sudah selesai,,'", ids(namedDone('tugas bersihka kamar b3 dan b5 sudah selesai,,', cleans, B)), [1, 2]);
+t('one villa', ids(namedDone('B5 sudah beres', cleans, B)), [2]);
+t('a villa already done is not re-closed', ids(namedDone('b2 sudah selesai', cleans, B)), []);
+t('a repair completion is not a visit', ids(namedDone('resleting sofa b3 sudah diperbaiki', cleans, B)), []);
+t('a fault word is not a visit', ids(namedDone('b3 sudah selesai tapi keran bocor', cleans, B)), []);
+t('not yet is not done', ids(namedDone('b3 belum selesai', cleans, B)), []);
+t('a question is not done', ids(namedDone('b3 sudah selesai?', cleans, B)), []);
+t('no villa named = nothing here (the plain done rule handles it)', ids(namedDone('sudah selesai', cleans, B)), []);
+t('a villa she does not cover', ids(namedDone('a4 sudah selesai', cleans, B)), []);
+console.log(`\n${pass} passed, ${fail} failed`); process.exit(fail ? 1 : 0);
