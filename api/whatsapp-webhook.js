@@ -3457,6 +3457,7 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
   // One availability check and one handbook lookup at most, then the reply.
   const MAX_LLM_CALLS = 3;
   let availabilityUsed = false, handbookUsed = false;
+  let retriedEmpty = false;
 
   try {
     for (let hop = 0; hop < MAX_LLM_CALLS; hop++) {
@@ -3477,7 +3478,21 @@ Set "notify_team" to null unless the TEAM ALERTS or GUEST SUPPORT rules above ap
         }))
       });
       llmCalls++;
-      const data = await res.json();
+      // The body is read as text first: on 11 Sep 2026 the API answered
+      // Paul's feedback with an empty body, `res.json()` threw "Unexpected
+      // end of JSON input", and that string became the draft. An empty or
+      // non-JSON body on a 5xx/overload is retried once after a pause; the
+      // error names the HTTP status, not the parser.
+      const bodyText = await res.text().catch(() => '');
+      let data = null;
+      try { data = bodyText ? JSON.parse(bodyText) : null; } catch { data = null; }
+      if (!data && (res.status >= 500 || res.status === 429 || res.status === 529 || res.ok) && !retriedEmpty) {
+        retriedEmpty = true;
+        console.warn(`generateReply: empty/non-JSON body (HTTP ${res.status}), retrying once`);
+        await new Promise(r => setTimeout(r, 1500));
+        hop--; continue;
+      }
+      if (!data) data = { type: 'error', error: { message: `HTTP ${res.status}, ${bodyText ? 'non-JSON body' : 'empty body'} from the API` } };
       // API-level failure (credit exhaustion, auth, rate limit, 5xx): the body
       // is an error envelope, not a message. Surface it as a distinct failure —
       // the handler turns aiResult.error into a loud draft marker + alert —
