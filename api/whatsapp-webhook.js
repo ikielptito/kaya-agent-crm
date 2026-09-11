@@ -6,7 +6,8 @@ import { forwardInbound, forwardMayaReply, postToTelegram } from '../lib/telegra
 import { stopAllPending, mostRecentEngagement } from '../lib/engagement.js';
 import { createAgentRow } from '../lib/agents.js';
 import { patchAgent, applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
-import { resolveListingCards, sendListingCardMessage, cardMarker } from '../lib/listing-cards.js';
+import { resolveListingCards, sendListingCardMessage, cardMarker, fetchPortalCards } from '../lib/listing-cards.js';
+import { classifyIntroButton, onIntroLadder, introTapPatch, introTapReply, pickOpeningCards } from '../lib/intro-question.js';
 import { transcribeWaAudio } from '../lib/transcribe.js';
 import { isProspect, isColdProspect, isOptOut, buildOnboardingPitch, fetchAgentReach, fetchFoundingState, ONBOARD_MEDIA, sendOwnerImage } from '../lib/owner-onboarding.js';
 import { driveConfigured, createOwnerFolder, folderLink, uploadWaImageToDrive } from '../lib/drive-upload.js';
@@ -2035,6 +2036,44 @@ ${e.message.slice(0, 200)}`); } catch { /* optional */ }
     const stopResult = stopAllPending(agent.campaign_engagement, timestamp);
     if (stopResult.changed) {
       patch.campaign_engagement = stopResult.value;
+    }
+
+    // INTRO QUESTION TAPS — an introduced contact answering "are you a rental
+    // agent?" with a button. Each tap has one deterministic outcome; none of
+    // them reaches Maya's reply model (a "Not now" must never read as consent,
+    // and a "Yes" deserves the cards immediately, not a draft).
+    if (extracted.buttonPayload && onIntroLadder(agent)) {
+      const tap = classifyIntroButton(extracted.buttonPayload, extracted.textForClaude);
+      if (tap) {
+        Object.assign(patch, introTapPatch(agent, tap, new Date(timestamp)));
+        if (tap === 'yes') patch.engagement_tier = 'new';
+        await patchAgent(SUPABASE_URL, sbHeaders, agent.id, patch);
+        const reply = introTapReply(agent, tap);
+        if (WA_TOKEN && WA_PHONE_ID && reply) {
+          const mid = await sendText(WA_PHONE_ID, WA_TOKEN, fromNum, reply);
+          await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, reply, mid, 'intro_question_reply');
+          if (tap === 'yes') {
+            try {
+              const all = await fetchPortalCards();
+              const resolved = await resolveListingCards(all.map(c => c.slug), 12);
+              for (const card of pickOpeningCards(resolved, 3)) {
+                const sent = await sendListingCardMessage({ PHONE_ID: WA_PHONE_ID, TOKEN: WA_TOKEN }, fromNum, card);
+                await logOutbound(SUPABASE_URL, sbHeaders, agent.id, fromNum, cardMarker(card), sent.waMessageId || null, 'listing_card');
+              }
+            } catch (e) { console.warn('intro yes cards failed:', e.message); }
+          }
+        }
+        await fetch(`${SUPABASE_URL}/rest/v1/maya_updates`, {
+          method: 'POST', headers: sbHeaders,
+          body: JSON.stringify({
+            agent_id: agent.id, field: 'campaign_engagement.samba.status', new_value: patch.campaign_engagement?.samba?.status || '',
+            reason: `Intro question tap: ${tap}`, evidence: extracted.textForClaude || extracted.buttonPayload,
+            by_maya: false, created_at: new Date().toISOString(),
+          }),
+        }).catch(() => {});
+        if (reply) forwardMayaReply(agent, reply).catch(() => {});
+        return res.status(200).end();
+      }
     }
 
     // Cold contact answering their first-contact intro → real opt-in. The

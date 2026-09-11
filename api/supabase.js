@@ -1615,6 +1615,12 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       // (introduced, silent, past the gap, under the cap) and who would be
       // parked as stalled tonight. Read-only.
       const { pickIntroFollowUps, introStallDue, introFollowConfig } = await import('../lib/intro-follow.js');
+      const { pickIntroQuestions, introQuestionConfig, INTRO_QUESTION_TEMPLATE } = await import('../lib/intro-question.js');
+      let questionLive = false;
+      try {
+        const cached = (await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.wa_templates_cache&select=value`, { headers }).then(r => r.json()).catch(() => []))?.[0]?.value;
+        questionLive = !!cached?.map?.[INTRO_QUESTION_TEMPLATE];
+      } catch { /* preview only */ }
       const cfg = (await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.samba_availability&select=value`, { headers }).then(r => r.json()).catch(() => []))?.[0]?.value || {};
       const caps = (await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.marketing_caps&select=value`, { headers }).then(r => r.json()).catch(() => []))?.[0]?.value || {};
       const rows = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,wa_num,samba_alerts_opt_out,dead_number,automation_override,is_test,last_inbound_at,last_availability_alert_at,campaign_engagement&wa_num=not.is.null`, { headers }).then(r => r.json()).catch(() => []);
@@ -1626,11 +1632,13 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const conf = introFollowConfig(cfg);
       const brief = a => ({ id: a.id, name: a.name, agency: a.agency, intro_at: a.campaign_engagement?.samba?.intro_at, digests: a.campaign_engagement?.samba?.intro_digests || 0 });
       const introduced = agents.filter(a => a.campaign_engagement?.samba?.status === 'intro_sent');
+      const briefQ = a => ({ ...brief(a), asked_at: a.campaign_engagement?.samba?.intro_question_at || null });
       return res.status(200).json({
-        as_of: now.toISOString(), config: conf,
+        as_of: now.toISOString(), config: { ...conf, ...introQuestionConfig(cfg) }, question_template_live: questionLive,
         introduced_silent: introduced.length, gated_out: introduced.filter(a => !gate(a)).length,
-        next_digest: pickIntroFollowUps(agents, cfg, now, gate).map(brief),
-        stall_tonight: agents.filter(a => introStallDue(a, conf, now)).map(brief),
+        next_question: pickIntroQuestions(agents, cfg, now, gate).map(briefQ),
+        next_digest: pickIntroFollowUps(agents, cfg, now, gate, { questionLive }).map(briefQ),
+        stall_tonight: agents.filter(a => introStallDue(a, conf, now, { questionLive })).map(briefQ),
       });
     } else if (action === 'delivery_health') {
       // On-demand delivery health: the same snapshot the nightly pass logs,

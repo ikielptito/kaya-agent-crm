@@ -30,6 +30,7 @@ import { noteNewArrivals } from '../lib/listing-live.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { runTierBackfill } from '../lib/tiers.js';
 import { pickIntroFollowUps, stampIntroFollow, runIntroStall } from '../lib/intro-follow.js';
+import { INTRO_QUESTION_TEMPLATE, INTRO_QUESTION_CATEGORY, pickIntroQuestions, stampIntroQuestion } from '../lib/intro-question.js';
 import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
@@ -749,6 +750,22 @@ export default async function handler(req, res) {
       } catch (e) { introSweep = { error: e.message }; }
     }
 
+    // ── INTRO QUESTION (rung two: "are you a rental agent?") ────────
+    // Introduced-but-silent contacts, 13+ days after the carousel, get one
+    // question with three buttons. Capped per day, never on Mondays, only
+    // once the template is approved. Taps are handled in the webhook.
+    let introQuestion = null;
+    if (!previewMode) {
+      try {
+        introQuestion = await runIntroQuestionSweep({
+          now, sbHeaders, supabaseUrl: SUPABASE_URL,
+          agents, templatesMap,
+          waToken: WA_TOKEN, waPhoneId: WA_PHONE_ID,
+          results,
+        });
+      } catch (e) { introQuestion = { error: e.message }; }
+    }
+
     // ── VIEWINGS PASS (expiry sync, day-of reminders, outcome asks) ──
     let viewingsCron = null;
     if (!previewMode) {
@@ -959,7 +976,7 @@ export default async function handler(req, res) {
       catch (e) { tierBackfill = { error: e.message }; }
       try {
         const cfg = await loadSetting(SUPABASE_URL, sbHeaders, 'samba_availability') || {};
-        introStall = await runIntroStall({ SUPABASE_URL, sbHeaders }, agents, cfg, now);
+        introStall = await runIntroStall({ SUPABASE_URL, sbHeaders }, agents, cfg, now, { questionLive: !!templatesMap[INTRO_QUESTION_TEMPLATE] });
       } catch (e) { introStall = { error: e.message }; }
     }
 
@@ -1252,6 +1269,7 @@ export default async function handler(req, res) {
         health_alerts: deliveryHealth?.alerts?.length || 0,
         tiers_backfilled: tierBackfill?.applied || 0,
         intros_stalled: introStall?.stalled || 0,
+        intro_questions: introQuestion?.sent || 0,
         spend: +(+todaySpend).toFixed(2),
       });
     }
@@ -1745,7 +1763,7 @@ function pickCarousel(templatesMap, fullIntro, firstName) {
   if (templatesMap[CAROUSEL_DIGEST_V2]) return { name: CAROUSEL_DIGEST_V2, intro: fullIntro };
   return { name: CAROUSEL_DIGEST, intro: firstName };
 }
-const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro', 'availability_intro_follow'];
+const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro', 'availability_intro_question', 'availability_intro_follow'];
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
@@ -1964,7 +1982,7 @@ export async function runAvailabilityNotifications(ctx) {
   // that gate keeps them out of the daily stream, which still holds.
   const introFollowCamp = isMonday ? await resolveCampaign(campDb, 'intro_follow') : null;
   const introFollow = (isMonday && !isCampaignPaused(introFollowCamp))
-    ? pickIntroFollowUps(agents, config, now, a => passesSambaBaseGate(a, config) && !isMarketingCapped(a, config))
+    ? pickIntroFollowUps(agents, config, now, a => passesSambaBaseGate(a, config) && !isMarketingCapped(a, config), { questionLive: !!templatesMap[INTRO_QUESTION_TEMPLATE] })
     : [];
   const introFollowIds = new Set(introFollow.map(a => a.id));
   if (isMonday) summary.intro_follow_due = introFollow.length;
@@ -2470,6 +2488,72 @@ export async function runIntroSweep(ctx) {
   await noteRun({ SUPABASE_URL: supabaseUrl, sbHeaders }, introSweepCamp, {
     sent: summary.sent, failed: summary.errors.length,
     summary: { sent: summary.sent, queue: summary.queue, remaining: summary.remaining, errors: summary.errors.length },
+  });
+  return summary;
+}
+
+// ── INTRO QUESTION SWEEP ─────────────────────────────────────────────
+// Rung two of the introduction ladder (lib/intro-question.js): one bilingual
+// question with three quick replies to contacts the carousel introduced and
+// who never answered. Oldest intro first, capped per day, not on Mondays,
+// stamped once per contact (samba.intro_question_at). The webhook turns the
+// tap into opted_in / declined_not_agent / intro_stalled.
+export async function runIntroQuestionSweep(ctx) {
+  const { now, sbHeaders, supabaseUrl, agents, templatesMap, waToken, waPhoneId, results } = ctx;
+  const summary = { enabled: false, sent: 0, queue: 0, errors: [] };
+  const config = await loadSetting(supabaseUrl, sbHeaders, 'samba_availability') || {};
+  config.marketingCaps = await loadSetting(supabaseUrl, sbHeaders, 'marketing_caps') || {};
+  if (!config.enabled) { summary.skipped_reason = 'samba_availability.enabled = false'; return summary; }
+  if (now.getUTCDay() === 1) { summary.skipped_reason = 'Monday (digest day)'; return summary; }
+  if (!templatesMap[INTRO_QUESTION_TEMPLATE]) { summary.skipped_reason = `${INTRO_QUESTION_TEMPLATE} not approved yet`; return summary; }
+  const camp = await resolveCampaign({ SUPABASE_URL: supabaseUrl, sbHeaders }, 'intro_question');
+  if (isCampaignPaused(camp)) { summary.skipped_reason = 'campaign paused (command center)'; return summary; }
+  summary.enabled = true;
+
+  const today = now.toISOString().slice(0, 10);
+  const gate = (a) => passesSambaBaseGate(a, config) && !isMarketingCapped(a, config)
+    && !String(a.last_availability_alert_at || '').startsWith(today);
+  const queue = pickIntroQuestions(agents, config, now, gate);
+  summary.queue = queue.length;
+
+  for (const agent of queue) {
+    const firstName = firstNameOf(agent.name);
+    let metaErr = null, waMessageId = null;
+    try {
+      const r = await fetch(`${GRAPH}/${waPhoneId}/messages`, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + waToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messaging_product: 'whatsapp', to: agent.wa_num, type: 'template',
+          template: { name: INTRO_QUESTION_TEMPLATE, language: { code: 'en' }, components: [{ type: 'body', parameters: [{ type: 'text', text: firstName }] }] },
+        }),
+      });
+      if (r.ok) waMessageId = (await r.json()).messages?.[0]?.id;
+      else { const d = await r.json().catch(() => ({})); metaErr = d?.error?.message || `HTTP ${r.status}`; }
+    } catch (e) { metaErr = e.message; }
+    if (metaErr) { summary.errors.push(`agent ${agent.id}: ${metaErr}`); continue; }
+
+    const rendered = (templatesMap[INTRO_QUESTION_TEMPLATE]?.body || '').replace(/\{\{1\}\}/g, firstName)
+      + '\n\n[Buttons: Yes, send them · Not an agent · Not now]';
+    await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
+      method: 'POST', headers: sbHeaders,
+      body: JSON.stringify({
+        agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
+        content: rendered, timestamp: now.toISOString(),
+        source: 'cron', category: INTRO_QUESTION_CATEGORY, template_name: INTRO_QUESTION_TEMPLATE,
+        campaign_id: camp?.id || null, wa_message_id: waMessageId, status: 'sent',
+      }),
+    }).catch(() => {});
+    await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
+      method: 'PATCH', headers: sbHeaders,
+      body: JSON.stringify({ last_availability_alert_at: now.toISOString(), campaign_engagement: stampIntroQuestion(agent, now) }),
+    }).catch(() => {});
+    summary.sent++;
+    results.push({ availability: true, agent: agent.name || agent.id, kind: 'intro_question', template: INTRO_QUESTION_TEMPLATE });
+  }
+  await noteRun({ SUPABASE_URL: supabaseUrl, sbHeaders }, camp, {
+    sent: summary.sent, failed: summary.errors.length,
+    summary: { sent: summary.sent, queue: summary.queue, errors: summary.errors.length },
   });
   return summary;
 }
