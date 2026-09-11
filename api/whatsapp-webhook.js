@@ -2048,7 +2048,7 @@ ${e.message.slice(0, 200)}`); } catch { /* optional */ }
     // An agency's auto-responder ("Thank you for contacting BAM…") is not a
     // person saying yes — it used to promote the contact to opted_in and
     // start the daily stream on the strength of a bot reply.
-    if (introStatus === 'intro_sent' && !AUTO_REPLY_RE.test(String(text || ''))) {
+    if ((introStatus === 'intro_sent' || introStatus === 'intro_stalled') && !AUTO_REPLY_RE.test(String(text || ''))) {
       const base = patch.campaign_engagement || agent.campaign_engagement || {};
       patch.campaign_engagement = {
         ...base,

@@ -28,6 +28,8 @@ import { getSpendAllowance } from '../lib/spend.js';
 import { sendNewArrivals } from '../lib/new-arrivals.js';
 import { noteNewArrivals } from '../lib/listing-live.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
+import { runTierBackfill } from '../lib/tiers.js';
+import { pickIntroFollowUps, stampIntroFollow, runIntroStall } from '../lib/intro-follow.js';
 import { isColdProspect } from '../lib/owner-onboarding.js';
 import crypto from 'node:crypto';
 import { consoleAuthHeaders } from '../lib/auth.js';
@@ -945,6 +947,22 @@ export default async function handler(req, res) {
       } catch (e) { deliveryHealth = { error: e.message }; }
     }
 
+    // ── TIER BACKFILL + INTRO STALL ──────────────────────────────────
+    // Rows Maya never tiered get one from reply recency (empty cells only;
+    // her judgment is never overwritten) and the hot/cold aliases become
+    // canonical, so every tier count adds up. Then introduced contacts who
+    // had every rung of the follow-through and stayed silent are parked as
+    // stalled — out of every sweep, still promoted by a reply.
+    let tierBackfill = null, introStall = null;
+    if (!previewMode) {
+      try { tierBackfill = await runTierBackfill({ SUPABASE_URL, sbHeaders }, { now }); }
+      catch (e) { tierBackfill = { error: e.message }; }
+      try {
+        const cfg = await loadSetting(SUPABASE_URL, sbHeaders, 'samba_availability') || {};
+        introStall = await runIntroStall({ SUPABASE_URL, sbHeaders }, agents, cfg, now);
+      } catch (e) { introStall = { error: e.message }; }
+    }
+
     // ── COLD-INTRO DRIP ──────────────────────────────────────────────
     // The screenshot pipeline, fully automatic: Ikiel imports a listing
     // screenshot → prospect row ('agreed', cold). Each 9am pass sends the
@@ -1232,6 +1250,8 @@ export default async function handler(req, res) {
         // number that proves (or indicts) the 31 Aug cadence change.
         digest_silent_skips: availabilityResult?.skipped_silent_digest || 0,
         health_alerts: deliveryHealth?.alerts?.length || 0,
+        tiers_backfilled: tierBackfill?.applied || 0,
+        intros_stalled: introStall?.stalled || 0,
         spend: +(+todaySpend).toFixed(2),
       });
     }
@@ -1725,7 +1745,7 @@ function pickCarousel(templatesMap, fullIntro, firstName) {
   if (templatesMap[CAROUSEL_DIGEST_V2]) return { name: CAROUSEL_DIGEST_V2, intro: fullIntro };
   return { name: CAROUSEL_DIGEST, intro: firstName };
 }
-const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro'];
+const AVAILABILITY_CATEGORIES = ['availability_alert', 'availability_digest', 'availability_intro', 'availability_intro_follow'];
 const ALERT_V2_SLOTS = 3;
 const DIGEST_AVAIL_SLOTS = 4;
 const DIGEST_SOON_SLOTS = 3;
@@ -1937,7 +1957,18 @@ export async function runAvailabilityNotifications(ctx) {
   }
 
   // ── Recipient filter ────────────────────────────────────────────
-  const eligible = agents.filter(a => isAvailabilityEligible(a, config));
+  // Mondays also carry the intro follow-through: introduced-but-silent
+  // contacts get the digest as their second and third hello, a fortnight
+  // apart and capped per Monday, then they are parked as stalled (see
+  // lib/intro-follow.js). They are not in isAvailabilityEligible on purpose —
+  // that gate keeps them out of the daily stream, which still holds.
+  const introFollowCamp = isMonday ? await resolveCampaign(campDb, 'intro_follow') : null;
+  const introFollow = (isMonday && !isCampaignPaused(introFollowCamp))
+    ? pickIntroFollowUps(agents, config, now, a => passesSambaBaseGate(a, config) && !isMarketingCapped(a, config))
+    : [];
+  const introFollowIds = new Set(introFollow.map(a => a.id));
+  if (isMonday) summary.intro_follow_due = introFollow.length;
+  const eligible = agents.filter(a => isAvailabilityEligible(a, config)).concat(introFollow);
 
   // Staggered runs send to this wave's cohort only; bare runs send to everyone.
   const cohort = waveCount > 1 ? eligible.filter(a => a.id % waveCount === wave) : eligible;
@@ -2071,7 +2102,9 @@ export async function runAvailabilityNotifications(ctx) {
       ? (now.getTime() - new Date(agent.last_inbound_at).getTime()) / 8.64e7
       : Infinity;
     const monthlyCadence = freq === 'monthly' || (isMonday && silentDays > DIGEST_SILENT_DAYS);
-    if (isMonday && monthlyCadence) {
+    // Follow-through contacts pace themselves (gap + rung count); the silent-
+    // digest gate would otherwise hold them to one touch a month.
+    if (isMonday && monthlyCadence && !introFollowIds.has(agent.id)) {
       if (!agent.last_availability_alert_at) {
         // Never had one — let it through, then the 27-day gate applies.
       } else {
@@ -2123,7 +2156,7 @@ export async function runAvailabilityNotifications(ctx) {
       params = [firstName, isMonday ? digestBody : alertBody, trackedUrl];
     }
     const category = isMonday
-      ? 'availability_digest'
+      ? (introFollowIds.has(agent.id) ? 'availability_intro_follow' : 'availability_digest')
       : (isFirstSend && useName === ALERT_INTRO_V3 ? 'availability_intro' : 'availability_alert');
 
     // Inline the send so we can capture the Meta error body — sendTemplate
@@ -2208,7 +2241,9 @@ export async function runAvailabilityNotifications(ctx) {
         renderedPreview = renderedPreview.replace(new RegExp(`\\{\\{${i + 1}\\}\\}`, 'g'), p);
       });
     }
-    const rowCamp = category === 'availability_intro' ? introCamp : (isMonday ? digestCamp : alertCamp);
+    const rowCamp = category === 'availability_intro' ? introCamp
+      : category === 'availability_intro_follow' ? introFollowCamp
+      : (isMonday ? digestCamp : alertCamp);
     await fetch(`${supabaseUrl}/rest/v1/wa_messages`, {
       method: 'POST', headers: sbHeaders,
       body: JSON.stringify({
@@ -2222,17 +2257,23 @@ export async function runAvailabilityNotifications(ctx) {
         wa_message_id: waMessageId, status: 'sent',
       }),
     }).catch(() => {});
+    const touchPatch = { last_availability_alert_at: now.toISOString() };
+    if (introFollowIds.has(agent.id)) touchPatch.campaign_engagement = stampIntroFollow(agent, now);
     await fetch(`${supabaseUrl}/rest/v1/agents?id=eq.${agent.id}`, {
       method: 'PATCH', headers: sbHeaders,
-      body: JSON.stringify({ last_availability_alert_at: now.toISOString() }),
+      body: JSON.stringify(touchPatch),
     }).catch(() => {});
 
-    if (isMonday) summary.weekly_digest_sent++;
+    if (introFollowIds.has(agent.id)) { summary.intro_follow_sent = (summary.intro_follow_sent || 0) + 1; summary.weekly_digest_sent++; }
+    else if (isMonday) summary.weekly_digest_sent++;
     else if (isFirstSend && useName === ALERT_INTRO_V3) { summary.event_alerts_sent++; summary.intro_sent = (summary.intro_sent || 0) + 1; }
     else summary.event_alerts_sent++;
     results.push({ availability: true, agent: agent.name || agent.id,
-      kind: isMonday ? 'weekly_digest' : (isFirstSend && useName === ALERT_INTRO_V3 ? 'intro_alert' : 'event_alert'),
+      kind: introFollowIds.has(agent.id) ? 'intro_follow_digest' : isMonday ? 'weekly_digest' : (isFirstSend && useName === ALERT_INTRO_V3 ? 'intro_alert' : 'event_alert'),
       template: useName });
+  }
+  if (introFollowCamp && summary.intro_follow_sent && !previewMode) {
+    await noteRun(campDb, introFollowCamp, { sent: summary.intro_follow_sent, summary: { sent: summary.intro_follow_sent, due: summary.intro_follow_due } });
   }
 
   // Persist the new snapshot only after a successful send pass — if Supabase
@@ -2949,6 +2990,8 @@ function isIntroEligible(agent, config) {
   if (isMarketingCapped(agent, config)) return false;
   if (!passesSambaBaseGate(agent, config)) return false;
   // Already introduced and waiting on a reply — don't send a second one.
+  // (The follow-through digests are the second hello; a contact who had them
+  // all and stayed silent is 'intro_stalled', which the base gate rejects.)
   const status = String(agent.campaign_engagement?.samba?.status || '').toLowerCase().trim();
   if (status === INTRO_SENT_STATUS) return false;
   return true;

@@ -2,6 +2,7 @@ import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, isWithinWitaHour
 import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
+import { tierSplit, normTier } from '../lib/tiers.js';
 import { baseAgentFields, createAgentRow, sendWelcomeTemplate } from '../lib/agents.js';
 import { getPlaybook, renderPlaybookBlock, applyDecisions, runReview, buildReviewKbContext } from '../lib/maya-review.js';
 import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
@@ -1598,6 +1599,39 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       });
       return res.status(200).json({ success: true, count: next.length });
 
+    } else if (action === 'tier_backfill') {
+      // Tier hygiene on demand: {dry_run:true} shows the plan (empty cells
+      // inferred from reply recency, hot/cold aliases canonicalised), without
+      // it the plan is applied and logged to maya_updates. Same code the
+      // nightly pass runs. Also returns the audience split that adds up.
+      const { runTierBackfill, tierSplit } = await import('../lib/tiers.js');
+      const db = { SUPABASE_URL, sbHeaders: headers };
+      const result = await runTierBackfill(db, { dryRun: !!payload?.dry_run });
+      const rows = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=engagement_tier,is_test,campaign_engagement&campaign_engagement=not.is.null`, { headers }).then(r => r.json()).catch(() => []);
+      const enrolled = (Array.isArray(rows) ? rows : []).filter(a => !a.is_test && a.campaign_engagement?.samba);
+      return res.status(200).json({ ...result, audience: tierSplit(enrolled) });
+    } else if (action === 'intro_follow_preview') {
+      // Who the next Monday digest would carry as an intro follow-through
+      // (introduced, silent, past the gap, under the cap) and who would be
+      // parked as stalled tonight. Read-only.
+      const { pickIntroFollowUps, introStallDue, introFollowConfig } = await import('../lib/intro-follow.js');
+      const cfg = (await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.samba_availability&select=value`, { headers }).then(r => r.json()).catch(() => []))?.[0]?.value || {};
+      const caps = (await fetch(`${SUPABASE_URL}/rest/v1/settings?key=eq.marketing_caps&select=value`, { headers }).then(r => r.json()).catch(() => []))?.[0]?.value || {};
+      const rows = await fetch(`${SUPABASE_URL}/rest/v1/agents?select=id,name,agency,wa_num,samba_alerts_opt_out,dead_number,automation_override,is_test,last_inbound_at,last_availability_alert_at,campaign_engagement&wa_num=not.is.null`, { headers }).then(r => r.json()).catch(() => []);
+      const agents = (Array.isArray(rows) ? rows : []).filter(a => !a.is_test);
+      const gate = a => !a.samba_alerts_opt_out && !a.dead_number && !['paused', 'off'].includes(a.automation_override)
+        && a.campaign_engagement?.service_type !== 'leasehold'
+        && !(caps[String(a.wa_num).replace(/\D/g, '')]?.until && Date.parse(caps[String(a.wa_num).replace(/\D/g, '')].until) > Date.now());
+      const now = payload?.as_of ? new Date(payload.as_of) : new Date();
+      const conf = introFollowConfig(cfg);
+      const brief = a => ({ id: a.id, name: a.name, agency: a.agency, intro_at: a.campaign_engagement?.samba?.intro_at, digests: a.campaign_engagement?.samba?.intro_digests || 0 });
+      const introduced = agents.filter(a => a.campaign_engagement?.samba?.status === 'intro_sent');
+      return res.status(200).json({
+        as_of: now.toISOString(), config: conf,
+        introduced_silent: introduced.length, gated_out: introduced.filter(a => !gate(a)).length,
+        next_digest: pickIntroFollowUps(agents, cfg, now, gate).map(brief),
+        stall_tonight: agents.filter(a => introStallDue(a, conf, now)).map(brief),
+      });
     } else if (action === 'delivery_health') {
       // On-demand delivery health: the same snapshot the nightly pass logs,
       // computed fresh, plus the stored history for trend. Read-only — no
@@ -1669,14 +1703,16 @@ GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked 
       const by_format = Object.entries(fmt).sort((a, b) => b[1].sent - a[1].sent)
         .map(([k, v]) => ({ format: k, sent: v.sent, tracked: v.tracked, read_rate: v.tracked ? Math.round(v.read / v.tracked * 100) : null }));
 
-      const tiers = {}; let optedOut = 0;
-      enrolled.forEach(a => { const t = a.engagement_tier || 'unset'; tiers[t] = (tiers[t] || 0) + 1; if (a.samba_alerts_opt_out) optedOut++; });
+      const tierSplitAll = tierSplit(enrolled);
+      const tiers = { ...tierSplitAll.tiers, introduced_no_reply: tierSplitAll.introduced, introduced_stalled: tierSplitAll.stalled };
+      let optedOut = 0;
+      enrolled.forEach(a => { if (a.samba_alerts_opt_out) optedOut++; });
 
       // Hot/cold: enrolled agents ranked by engagement (reply recency + clicks)
       const agentRows = enrolled.map(a => {
         const p = pStats[a.id] || {};
         const daysSinceReply = a.last_inbound_at ? Math.floor((Date.now() - new Date(a.last_inbound_at).getTime()) / 86400000) : null;
-        return { id: a.id, name: nameOf[a.id], tier: a.engagement_tier || 'unset', last_reply_days: daysSinceReply, clicks: p.clicks || 0, enquiries: p.enquiries || 0, read: readSet.has(a.id) };
+        return { id: a.id, name: nameOf[a.id], tier: normTier(a.engagement_tier) || 'unset', last_reply_days: daysSinceReply, clicks: p.clicks || 0, enquiries: p.enquiries || 0, read: readSet.has(a.id) };
       }).sort((x, y) => (y.clicks + y.enquiries * 3) - (x.clicks + x.enquiries * 3) || ((x.last_reply_days ?? 999) - (y.last_reply_days ?? 999)));
 
       // ── Campaign performance ─────────────────────────────────────────
@@ -2340,7 +2376,7 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
       // Broadcast audience = everyone on WhatsApp who hasn't opted out (the Monday
       // digest goes to all of them; per-thread paused takeovers are excluded live).
       const audience = A.filter(a => !a.samba_alerts_opt_out).length;
-      const dormant = A.filter(a => ['dormant', 'cold'].includes(a.engagement_tier)).length;
+      const dormant = A.filter(a => normTier(a.engagement_tier) === 'dormant').length;
       const mode = automation?.mode || 'draft';
 
       // Next daily run = next 01:00 UTC (9am WITA); waves follow at :20/:40.

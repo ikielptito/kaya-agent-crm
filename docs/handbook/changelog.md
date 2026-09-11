@@ -28,6 +28,11 @@ The running record of features people were told about, newest first. Maya reads 
 
 **Era.** Maintenance backlog nudges through the day, answered in the chat ("#4 done, #15 estimate 85,000"); the Records library and shareable record PDFs; the villa standard sheet; the calendar feed.
 
+## 11 Sep 2026 — every agent counted, every introduced agent followed up
+- The morning briefing's audience line adds up to the enrolled total: one tier vocabulary (hot and cold fold into active and dormant), untagged agents counted, introduced-but-silent contacts shown as their own stage. Maya quotes the whole line or none of it.
+- Agents Maya never tiered get a tier overnight from reply recency; her own tier choices are never overwritten. On 11 Sep that was 37 untagged rows and 36 alias rows.
+- The introduction now has a ladder: cold carousel, then the Monday digest twice as a second and third hello, a fortnight apart and capped at 25 per Monday, then parked as stalled. Before this, 51 agents introduced on 19 Aug had heard nothing since. A reply at any rung opts the agent in; `intro_follow_weekly_cap: 0` switches the rung off.
+
 ## 8 Sep 2026 — one door for staff messages
 - Housekeeper replies are routed by the message they answer (tap or quoted reply → the recorded ask), then by deterministic word rules, then by one classifier that sees her open visits, round, check and asks. Acknowledgements ("siap", "ok") never change a record; "sudah selesai" closes exactly one thing or asks which.
 - Photos have a fourth home: proof of the day's visit, on the visit itself. Readiness checks keep only photos, "selesai" and restock lines; inspection rounds keep photos and findings, never acknowledgements or day-off notes.
