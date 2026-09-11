@@ -20,6 +20,7 @@
 //                                     recorded → right) and, with propose,
 //                                     what the review would put to Ikiel
 //   hk_staff_learned {}               the approved words/examples/tips/hours
+//   hk_photos_move {name|wa, slug, which?, day?}  move a day's photo batch to the villa it was of
 
 import { consoleAuthorized, setConsoleCors } from '../lib/auth.js';
 import { generateTasks, catalogNames, fetchStays, projectRounds, roundAnchors } from '../lib/housekeeping.js';
@@ -182,6 +183,19 @@ export default async function handler(req, res) {
       const { stageStaffReview } = await import('../lib/staff-review.js');
       const out = await stageStaffReview({ SUPABASE_URL, headers: sbHeaders, ANTHROPIC_KEY: process.env.ANTHROPIC_API_KEY }, { days: Number(payload.days) > 0 ? Number(payload.days) : 7, preview: true, propose: !!payload.propose });
       return res.status(200).json(out);
+    }
+    // Move a day's photo batch to the villa it was really of, by hand:
+    // {name|wa, slug, which: first|second|third|last|all, day: YYYY-MM-DD}.
+    if (action === 'hk_photos_move') {
+      const { listStaff } = await import('../lib/staff.js');
+      const { movePhotos } = await import('../lib/photo-correction.js');
+      const people = await listStaff(db, { active_only: false });
+      const p = people.find(x => x.name === payload.name || String(x.wa_num || '').replace(/\D/g, '') === String(payload.wa || '').replace(/\D/g, ''));
+      if (!p) return res.status(404).json({ error: 'no such staff member' });
+      if (!payload.slug) return res.status(400).json({ error: 'slug required' });
+      const names = await catalogNames(db).catch(() => ({}));
+      const out = await movePhotos(db, { person: p, slug: String(payload.slug), which: payload.which || 'last', day: /^\d{4}-\d{2}-\d{2}$/.test(String(payload.day || '')) ? payload.day : null, names });
+      return res.status(200).json({ ok: true, who: p.name, ...out });
     }
     if (action === 'hk_staff_learned') {
       const { staffLearned } = await import('../lib/staff-review.js');
