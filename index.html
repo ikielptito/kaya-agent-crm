@@ -2783,7 +2783,10 @@ async function callClaude(systemPrompt, userPrompt) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      // Was claude-sonnet-4-20250514, retired by the API (404 on 12 Sep 2026):
+      // every ✦ Generate / Summarise / Next-step button in this console had
+      // been failing silently. Same model the server-side Maya helpers use.
+      model: 'claude-sonnet-4-6',
       max_tokens: 1000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }]

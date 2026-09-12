@@ -15,6 +15,7 @@
 // Each follow-up gets progressively softer in tone.
 
 import { PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, pickWelcomeTemplate } from '../lib/kb.js';
+import { sendTextWithButtons, executeReplySideEffects } from './whatsapp-webhook.js';
 import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { pendingEngagements, setEngagement } from '../lib/engagement.js';
 import { postToTelegram, telegramEnabled } from '../lib/telegram.js';
@@ -500,30 +501,41 @@ export default async function handler(req, res) {
           continue;
         }
 
-        // REGENERATE the reply fresh using the canonical Maya prompt path
-        let freshReply = null, freshCost = COST_PER_REPLY_USD;
+        // REGENERATE through Maya's real pipeline (suggest_reply now returns
+        // the webhook's own contract). Two things the old block got wrong:
+        // it sent the text alone, so the listing cards, contact card and
+        // team alerts Maya attached were lost; and it sent every draft,
+        // including the ones Maya had ESCALATED to a human — in autopilot
+        // that is the one judgement she is trusted to make (12 Sep 2026).
+        let fresh = null, freshCost = COST_PER_REPLY_USD;
         try {
           const sgRes = await fetch(`${selfOrigin}/api/supabase`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
-            body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: agent.id } })
+            body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: agent.id, mode: 'autopilot' } })
           });
-          if (sgRes.ok) {
-            const sgData = await sgRes.json();
-            freshReply = (sgData?.reply || '').trim();
-            if (typeof sgData?.cost_usd === 'number') freshCost = sgData.cost_usd;
-          }
+          if (sgRes.ok) { fresh = await sgRes.json(); if (typeof fresh?.cost_usd === 'number') freshCost = fresh.cost_usd; }
         } catch (e) { /* fall through to skip */ }
-
-        if (!freshReply || freshReply.startsWith('[')) {
+        const freshReply = String(fresh?.reply || '').trim();
+        if (!fresh || fresh.error || !freshReply || freshReply.startsWith('[')) {
           // Regeneration failed — DO NOT fall back to the stale draft. Skip and
           // surface so Ikiel can review manually. Better silent than wrong.
           results.push({ agent: agent.name || agent.id, action: 'draft_skipped', reason: 'regeneration_failed' });
           continue;
         }
         todaySpend += freshCost;
+        if (fresh.action === 'escalate') {
+          // Maya wants a human on this one: the draft is refreshed (cards and
+          // side effects attached as markers) and left for review.
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agent.id}`, {
+            method: 'PATCH', headers: sbHeaders, body: JSON.stringify({ suggested_reply: fresh.draft || freshReply })
+          }).catch(() => {});
+          results.push({ agent: agent.name || agent.id, action: 'draft_kept', reason: 'escalated' });
+          continue;
+        }
 
-        const sendOk = await sendText(WA_PHONE_ID, WA_TOKEN, agent.wa_num, freshReply);
-        if (!sendOk) {
+        const buttons = Array.isArray(fresh.reply_buttons) ? fresh.reply_buttons : [];
+        const sendMid = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, agent.wa_num, freshReply, buttons).catch(() => null);
+        if (!sendMid) {
           results.push({ agent: agent.name || agent.id, action: 'draft_send_failed' });
           continue;
         }
@@ -531,9 +543,11 @@ export default async function handler(req, res) {
           method: 'POST', headers: sbHeaders,
           body: JSON.stringify({
             agent_id: agent.id, wa_num: agent.wa_num, direction: 'outbound',
-            content: freshReply, timestamp: now.toISOString(), source: 'cron'
+            content: freshReply, timestamp: now.toISOString(), source: 'cron', status: 'sent',
+            wa_message_id: typeof sendMid === 'string' ? sendMid : null,
           })
         }).catch(() => {});
+        await executeReplySideEffects({ SUPABASE_URL, sbHeaders, WA_PHONE_ID, WA_TOKEN, agent, toNum: agent.wa_num, actions: { send_cards: fresh.send_cards || [] }, evidence: '' }).catch(() => {});
         await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agent.id}`, {
           method: 'PATCH', headers: sbHeaders,
           body: JSON.stringify({ suggested_reply: '', unread_count: 0 })
