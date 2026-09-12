@@ -851,7 +851,7 @@ body { font-family: 'Satoshi', sans-serif; background: var(--sand); color: var(-
       <span id="rentalsCount" style="font-size:11px;color:var(--ink3)"></span>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <button onclick="syncRentalsFromPortal()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif" title="Live-fetch latest rentals from sambarentals.vercel.app and upsert"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Sync from portal</button>
+      <button onclick="syncRentalsFromPortal()" style="font-size:11px;padding:5px 10px;border:1px solid var(--sand3);border-radius:6px;background:white;color:var(--ink3);cursor:pointer;font-family:Satoshi,sans-serif" title="Live-fetch latest rentals from sambarentals.com and upsert"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg> Sync from portal</button>
       <button onclick="openRentalEditor(null)" style="font-size:12px;padding:6px 12px;border:none;border-radius:6px;background:var(--samba);color:white;cursor:pointer;font-family:Satoshi,sans-serif;font-weight:500">+ New rental</button>
     </div>
   </div>
@@ -1325,7 +1325,7 @@ const KAYA_MSG = name => {
 
 const SAMBA_MSG = name => {
   const n = name && name.trim() ? name.trim() : 'there';
-  return `Hey ${n}, hope you're well!\n\nI'm Ikiel from Samba Realty -- we manage a portfolio of 14 villas and apartments across Canggu, Pererenan, and Seminyak. We work with agents on 10% commission per booking.\n\nWe have a live availability checker you can use anytime to see what's free and share directly with clients: https://sambarentals.vercel.app\n\nInterested in sending clients our way?`;
+  return `Hey ${n}, hope you're well!\n\nI'm Ikiel from Samba Realty -- we manage a portfolio of ${rentalCount() ? rentalCount() + ' ' : ''}villas and apartments across ${rentalAreas()}. We work with agents on 10% commission per booking.\n\nWe have a live availability checker you can use anytime to see what's free and share directly with clients: https://sambarentals.com\n\nInterested in sending clients our way?`;
 };
 
 const AREA_QUERIES = {
@@ -2565,7 +2565,7 @@ const KAYA_MESSAGES = {
   'reengagement': {
     label: 'Re-engagement',
     statuses: ['Contacted'],
-    text: (n) => `Hey ${n}, just following up on my message from a few weeks back about listing our KAYA Developments projects.\n\nThings have moved on quite a bit -- Clay House is now 75% complete with July delivery, and Palem Kembar is at 85% with finishing resumed. Would love to get you the latest info if you're interested.`
+    text: (n) => `Hey ${n}, just following up on my message from a few weeks back about listing our KAYA Developments projects.\n\nThings have moved on quite a bit since then -- happy to send the latest construction status and materials if you're interested.`
   },
   'listing_nudge': {
     label: 'Listing nudge',
@@ -2588,17 +2588,17 @@ const SAMBA_MESSAGES = {
   'initial': {
     label: 'Initial outreach',
     statuses: ['Not contacted'],
-    text: (n) => `Hey ${n}, hope you're well!\n\nI'm Ikiel from Samba Realty -- we manage 14 villas and apartments across Canggu, Pererenan and Seminyak. We work with agents on 10% commission per booking.\n\nYou can check live availability and all property details anytime here: sambarentals.vercel.app -- everything you need to send clients is right there. Interested?`
+    text: (n) => `Hey ${n}, hope you're well!\n\nI'm Ikiel from Samba Realty -- we manage ${rentalCount() ? rentalCount() + ' ' : ''}villas and apartments across ${rentalAreas()}. We work with agents on 10% commission per booking.\n\nYou can check live availability and all property details anytime here: sambarentals.com -- everything you need to send clients is right there. Interested?`
   },
   'reengagement': {
     label: 'Re-engagement',
     statuses: ['Contacted'],
-    text: (n) => `Hey ${n}, just following up on my earlier message about Samba Realty.\n\nWe have great availability right now -- you can check it live here: sambarentals.vercel.app\n\n10% commission per booking, and everything you need to list is already on the portal.`
+    text: (n) => `Hey ${n}, just following up on my earlier message about Samba Realty.\n\nWe have great availability right now -- you can check it live here: sambarentals.com\n\n10% commission per booking, and everything you need to list is already on the portal.`
   },
   'checkin': {
     label: 'Active agent check-in',
     statuses: ['Active', 'Responded', 'Agreement sent'],
-    text: (n) => `Hey ${n}! Just checking in -- any clients looking for villas at the moment?\n\nHere's the live availability link in case you need it: sambarentals.vercel.app`
+    text: (n) => `Hey ${n}! Just checking in -- any clients looking for villas at the moment?\n\nHere's the live availability link in case you need it: sambarentals.com`
   },
 };
 
@@ -2698,45 +2698,66 @@ function closeMsgOutside(e) { if (e.target === document.getElementById('msgOverl
 
 // ── CLAUDE MESSAGE GENERATOR ─────────────────────────────────────────
 
-const PORTFOLIO_CONTEXT = `KAYA Developments portfolio (current):
+// The portfolio the AI buttons reason over. Until 12 Sep 2026 this was a
+// hand-typed block ("14 villas", "Clay House 75% complete", the old
+// vercel.app portal address) that nobody updated. It is now a placeholder
+// that callClaude fills from the live projects and rentals tables — the
+// same data Maya reads — so these buttons cannot drift from the truth again.
+const PORTFOLIO_CONTEXT = '{{LIVE_PORTFOLIO}}';
+const PORTAL_URL = 'https://sambarentals.com';
+let liveCtx = { projects: null, rentals: null, at: 0 };
+async function ensureLiveContext() {
+  if (liveCtx.projects && liveCtx.rentals && Date.now() - liveCtx.at < 5 * 60e3) return liveCtx;
+  const get = async (action) => {
+    try {
+      const r = await fetch('/api/supabase', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action, payload: {} }) });
+      const d = await r.json(); return Array.isArray(d) ? d : [];
+    } catch { return []; }
+  };
+  const [projects, rentals] = await Promise.all([get('get_projects'), get('get_rentals')]);
+  liveCtx = { projects, rentals, at: Date.now() };
+  return liveCtx;
+}
+const liveRentals = () => (liveCtx.rentals || []).filter(r => r.active !== false);
+function rentalCount() { return liveRentals().length || null; }
+function rentalAreas() {
+  const seen = []; for (const r of liveRentals()) { const a = String(r.area || '').split(/[,(·]/)[0].trim(); if (a && !seen.includes(a)) seen.push(a); }
+  return seen.length ? (seen.length > 1 ? seen.slice(0, -1).join(', ') + ' and ' + seen[seen.length - 1] : seen[0]) : 'Canggu and around';
+}
+function livePortfolioContext() {
+  const projects = (liveCtx.projects || []).filter(p => p.active !== false);
+  const usd = (n) => n ? `$${Math.round(n / 1000)}K USD` : null;
+  const proj = projects.map((p, i) => {
+    const units = (p.units || []).map(u => `   - ${u.code || u.name || 'unit'}: ${[u.beds && `${u.beds} bed`, u.baths && `${u.baths} bath`, u.sqm && `${u.sqm} sqm`].filter(Boolean).join(', ')} -- ${usd(u.price_usd) || (u.price_idr ? `IDR ${(u.price_idr / 1e9).toFixed(2)}B` : 'TBC')}${u.availability && u.availability !== 'Available' ? ` -- ${String(u.availability).toUpperCase()}` : ''}`).join('\n');
+    return [
+      `${i + 1}. ${String(p.name || '').toUpperCase()}${p.area ? ' -- ' + p.area : ''}`,
+      p.tagline ? `   ${p.tagline}` : null,
+      (p.property_type || p.tenure) ? `   Type: ${[p.property_type, p.tenure_details || p.tenure, p.furnished].filter(Boolean).join(', ')}` : null,
+      units ? `   Units:\n${units}` : null,
+      (p.construction_status || p.delivery_date) ? `   Status: ${[p.construction_status, p.delivery_date].filter(Boolean).join(' -- ')}` : null,
+      p.payment_plan ? `   Payment plan: ${p.payment_plan}` : null,
+      p.features ? `   Features: ${p.features}` : null,
+    ].filter(Boolean).join('\n');
+  }).join('\n\n');
+  const rent = liveRentals().map((r, i) => {
+    const rate = r.monthly_rate_idr ? `IDR ${(r.monthly_rate_idr / 1e6).toFixed(0)}M/month` : r.yearly_rate_idr ? `IDR ${(r.yearly_rate_idr / 1e6).toFixed(0)}M/year (yearly only)` : 'rate TBC';
+    return `${i + 1}. ${r.name} (${r.area || '?'}) -- ${r.property_type || 'Property'}${r.beds ? `, ${r.beds}BR` : ''} -- ${rate}`;
+  }).join('\n');
+  const n = rentalCount();
+  return `KAYA Developments portfolio (live from the projects table):
 
-1. THE CLAY HOUSE — Cepaka (8 min from Pererenan)
-   Type: Boutique luxury studio apartments, 30-year leasehold, fully furnished
-   Unit types:
-   - Type A1/A2: 1 bed, 1 bath, workspace, 47 sqm, 2nd floor — IDR 2.18B (~$130K USD)
-   - Type B1: 1 bed, 1 bath, 45.5 sqm, ground floor — IDR 1.66B (~$100K USD)
-   Availability: 4 units left (Units 1-3 at IDR 2.18B, Unit 5 at IDR 1.66B). Construction ~75% complete.
-   ROI: 60% occ = 12.5%, 70% occ = 14.55%, 80% occ = 16.95% net. ADR ~$100.
-   Features: Western construction standards, passive cooling, resort-style pool, shared rooftop terrace.
-
-2. TROPICAL TOWNHOUSES — Buduk (5 min from Pererenan)
-   Type: 1BR two-level townhouses with private plunge pool, 28-year leasehold, fully furnished, 75 sqm
-   Pricing: Units B2/B3 $125,000 USD | Units B5/B6 (garden view) $135,000 USD
-   Availability: 4 units left. Move-in ready.
-   REAL PERFORMANCE (Unit A5, Jan-May 2026): 83.57% occupancy, ADR IDR 1.05M (~$63), 18 bookings, avg stay 7.28 nights. Revenue IDR 122.46M.
-   April 2026 payout: IDR 36.46M gross, IDR 26.29M net to owner after expenses + 15% management fee.
-   Features: Private pool, loft bedroom, workspace, soaking tub. Samba Realty management available.
-
-3. PALEM KEMBAR — Ungasan (5 min from beach)
-   Type: Twin 3BR freehold villas, 218 sqm on 150 sqm land, 3 levels, private pool, rooftop ocean views
-   Pricing: Villa 1 $299K USD / Villa 2 $329K USD. 20% deposit, balance at handover.
-   Availability: 2 villas. 85% complete, July delivery, turnkey furnished.
-   ROI: 15.7%-21.0% gross at ~$300 ADR. Near Karma Beach, Sunday Beach, Savaya.
-
-4. THE SABIT HOUSE — Berawa
-   Type: 9 boutique freehold apartments (Corporate HOA structure). Pre-construction.
-   Pricing: Type A (40 sqm) $180K | Type B (46 sqm) $180K | Type C (51 sqm) $189K | Penthouse $199K
-   Availability: 9 units. Payment: 20/30/40/10 construction-linked.
-   ROI: 60% occ = 10.3%, 70% = 12.1%, 80% = 13.8% annual. Rice paddy views, rooftop pool, sunken lounge.
-
-5. LANEHAUS — Pererenan (Ikiel personal property, NOT a KAYA project)
-   2 units available: Unit 1 (65 sqm) IDR 1.7B | Unit 3 (55 sqm) IDR 1.5B
-   Leasehold until Nov 2052, 10yr extension agreed. Turnkey, existing rental ops.
+${proj || '(no active projects)'}
 
 Standard agent commission: 5% on all KAYA projects.
 
-Samba Realty: 14 villas/apartments across Canggu, Pererenan, Seminyak.
-Agent portal: https://sambarentals.vercel.app | Commission: 10% per booking.`;
+Samba Realty rentals (live from the rentals table${n ? `, ${n} properties` : ''}):
+${rent || '(no active rentals)'}
+
+Agent portal: ${PORTAL_URL} | Commission: 10% per booking, paid by us.
+
+Never invent prices, availability, construction status or counts: use only what is above and say "let me check" for anything missing.`;
+}
+ensureLiveContext();
 
 function buildAgentContext(a) {
   const kayaStatuses = KAYA_PROJECTS.map(p => {
@@ -2779,6 +2800,9 @@ Activity score: ${a.activity_score || 0} (${a.activity_tier || 'Unknown'})${hist
 }
 
 async function callClaude(systemPrompt, userPrompt) {
+  await ensureLiveContext();
+  systemPrompt = String(systemPrompt || '').split('{{LIVE_PORTFOLIO}}').join(livePortfolioContext());
+  userPrompt = String(userPrompt || '').split('{{LIVE_PORTFOLIO}}').join(livePortfolioContext());
   const res = await fetch('/api/claude', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2835,7 +2859,7 @@ CRITICAL: If there is a RECOMMENDED NEXT ACTION in the agent context above, focu
 
 The message should:
 - Reference their current Samba status (${a.samba?.status || 'Not contacted'}) naturally
-- If not contacted before: introduce Samba Realty, mention 14 properties, 10% commission, include the portal link (sambarentals.vercel.app)
+- If not contacted before: introduce Samba Realty, mention how many rentals are in the portfolio above, 10% commission, include the portal link (sambarentals.com)
 - If contacted but no response: follow up warmly, re-mention the portal
 - If already active: check in, offer help, reference the portal
 - Feel personal, not mass-sent
@@ -2850,7 +2874,7 @@ The message should:
 - Be a catch-up / re-engagement message acknowledging the history
 - Reference which projects they have or haven't listed yet based on the pipeline above
 - If they've listed some: thank them, offer updated materials, introduce unlisted projects
-- If they refused before due to construction: note that Clay House is now 75% complete and Palem Kembar is 85% with finishing resumed
+- If they refused before due to construction: quote the current construction status from the portfolio above
 - If never contacted: introduce KAYA naturally, mention 5% commission
 - Mention all relevant projects that aren't yet listed
 - End with a simple question that's easy to reply to
@@ -2914,7 +2938,7 @@ This agent verbally agreed to list KAYA projects but never actually published an
 Your message should:
 - Reference their previous agreement naturally ("last time we spoke you were going to list...")
 - Give them an easy on-ramp: offer fresh materials, updated prices, or a specific project to start with
-- Note any relevant project updates (Clay House 75% complete July delivery, Palem Kembar 85% with finishing resumed)
+- Note any relevant project updates, taking construction status from the portfolio above
 - End with one simple ask: "Which project would you like to start with?"
 - Keep the tone warm and forward-looking, not like a chase-up`
   },
@@ -2926,7 +2950,7 @@ Your message should:
     systemAddition: `IMPORTANT CONTEXT FOR THIS MESSAGE:
 This agent has been responsive and engaged but has never formally agreed to list any KAYA projects.
 Your message should:
-- Lead with the most compelling project update (Palem Kembar 85% complete freehold, Clay House 75% July delivery)
+- Lead with the most compelling project update from the portfolio above (construction status, delivery date)
 - Make a specific ask rather than a vague "are you interested?" -- e.g. "Would you like to list Palem Kembar? We have 2 units left."
 - Mention 5% commission and that materials are ready to send
 - Keep it concise and action-oriented`
@@ -4152,10 +4176,10 @@ ${agentContext}
 CRITICAL: If there is a RECOMMENDED NEXT ACTION in the agent context above, make that the focus of the message -- do not write a generic message if a specific action is recommended.
 
 Goals:
-- If Samba status is Not contacted: introduce Samba Realty, 14 properties, 10% commission, portal link (sambarentals.vercel.app)
+- If Samba status is Not contacted: introduce Samba Realty, the rental count from the portfolio above, 10% commission, portal link (sambarentals.com)
 - If Contacted but no response: warm follow-up, re-share portal
 - If Responded/Active: check in, any clients looking?
-- Always include the portal: sambarentals.vercel.app
+- Always include the portal: sambarentals.com
 - Address them as ${firstName}`
     : `Write a WhatsApp re-engagement message to this property agent about KAYA Developments projects.
 
@@ -4167,7 +4191,7 @@ Goals:
 - If the conversation history shows a specific pending situation: address that directly and specifically
 - If they haven't listed any projects: introduce KAYA, mention commission is 5%, ask which projects interest them
 - If they've listed some: acknowledge it, offer updated materials, introduce the ones they haven't listed
-- If they refused due to construction before: note Clay House is 75% complete (July delivery) and Palem Kembar is 85% complete with finishing resumed
+- If they refused due to construction before: quote the current construction status from the portfolio above
 - End with one simple easy-to-answer question
 - Don't mention all 5 projects in one go -- keep it digestible
 - Address them as ${firstName}`;
@@ -4440,7 +4464,7 @@ async function runAutopilotCampaign() {
         const systemPrompt = 'You are writing WhatsApp outreach messages on behalf of Ikiel, co-founder of KAYA Developments and Samba Realty in Bali.\n\n' + PORTFOLIO_CONTEXT + '\n\nTone rules:\n- Conversational and warm, never corporate or stiff\n- Short sentences, natural rhythm\n- No em dashes (use -- instead if needed)\n- No emojis\n- Keep it concise and scannable\n- Sound like a real person\n- Never mention AI' + contextAddition + '\n\nWrite only the message text. No preamble or explanation.';
 
         const userPrompt = isSamba
-          ? 'Write a WhatsApp message to ' + firstName + ' about Samba Realty.\n\n' + agentContext + '\n\nIf Not contacted: introduce Samba, 14 properties, 10% commission, portal (sambarentals.vercel.app). If Contacted: warm follow-up. If Active: check in.'
+          ? 'Write a WhatsApp message to ' + firstName + ' about Samba Realty.\n\n' + agentContext + '\n\nIf Not contacted: introduce Samba, the rental count from the portfolio above, 10% commission, portal (sambarentals.com). If Contacted: warm follow-up. If Active: check in.'
           : 'Write a WhatsApp message to ' + firstName + ' about KAYA Developments.\n\n' + agentContext + '\n\nCRITICAL: If there is a RECOMMENDED NEXT ACTION or CONVERSATION HISTORY, use that as the PRIMARY guide. Otherwise introduce KAYA, 5% commission, ask which projects interest them. End with one easy question.';
 
         msg = (await callClaude(systemPrompt, userPrompt)).trim();
@@ -5483,13 +5507,13 @@ function renderMessageMedia(m) {
   return '';
 }
 
-// Match sambarentals.vercel.app links (portal home or /l/<slug>) in the
+// Match sambarentals.com links (portal home or /l/<slug>) in the
 // message body and render them as a clickable card with the listing's OG
 // preview image. No network call needed — the OG image is built from
 // listing data already.
 function renderInlineLinkPreviews(text) {
   if (!text) return '';
-  const re = /https?:\/\/(?:www\.)?sambarentals\.vercel\.app(?:\/l\/([a-z0-9-]+))?[^\s]*/gi;
+  const re = /https?:\/\/(?:www\.)?sambarentals\.(?:com|vercel\.app)(?:\/l\/([a-z0-9-]+))?[^\s]*/gi;
   const matches = [...text.matchAll(re)].slice(0, 2);
   if (!matches.length) return '';
   return matches.map(m => {
@@ -5499,7 +5523,7 @@ function renderInlineLinkPreviews(text) {
       : 'Samba Rentals — Agent Portal';
     const url = m[0];
     return `<a class="bubble-portal-card" href="${url}" target="_blank" rel="noopener">
-      <div class="bubble-portal-host">sambarentals.vercel.app</div>
+      <div class="bubble-portal-host">${url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]}</div>
       <div class="bubble-portal-title">${title.replace(/</g, '&lt;')}</div>
       <div class="bubble-portal-sub">${slug ? 'Live availability + photos' : 'Live agent portal'}</div>
     </a>`;
@@ -5581,10 +5605,10 @@ async function suggestReply(agentId) {
 // Quick reply snippets — typed `/` at the start of the textarea opens
 // the menu, or click the ⚡ button. Press 1-9 to insert, or arrow keys.
 const QUICK_REPLIES = [
-  { key: 'portal',     label: 'Send portal link',      body: 'You can check out our Agent Portal to see all available properties in real time, download photos, and share listings with your clients: https://sambarentals.vercel.app' },
+  { key: 'portal',     label: 'Send portal link',      body: 'You can check out our Agent Portal to see all available properties in real time, download photos, and share listings with your clients: https://sambarentals.com' },
   { key: 'commission', label: 'Explain commission',    body: 'The 10% agent commission is already included in the portal price. You quote the portal price to your client as-is, and earn 10% of that. If you prefer 20%, you can quote the portal price + 10% to your client — the extra 10% comes from them.' },
   { key: 'visit',      label: 'Coordinate a visit',    body: 'Happy to coordinate a visit. Let me have Ikiel reach out directly to find a time that works for you and the property.' },
-  { key: 'photos',     label: 'Direct to photos',      body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.vercel.app' },
+  { key: 'photos',     label: 'Direct to photos',      body: 'You can download all the listing photos directly from the agent portal: https://sambarentals.com' },
   { key: 'thanks',     label: 'Closing thanks',        body: 'Thanks for reaching out — let me know if anything else comes up.' },
   { key: 'agreement',  label: 'Listing agreement',     body: 'Ikiel will follow up with the listing agreement directly. Let us know if you have any specific questions about the terms in the meantime.' },
   { key: 'pause',      label: 'No rush / business hours', body: 'No rush at all — happy to share more whenever you\'re free.' },
@@ -6423,7 +6447,7 @@ function renderRentalEditor() {
       )}
       <div style="font-size:10px;color:var(--ink3);margin:12px 0 8px;line-height:1.4">Booking platforms:</div>
       ${twoCol(
-        field('Portal URL (sambarentals.vercel.app)', `<input value="${esc(r.portal_url)}" oninput="editingRental.portal_url=this.value" placeholder="https://sambarentals.vercel.app/..." style="${inputStyle}">`),
+        field('Portal URL (sambarentals.com)', `<input value="${esc(r.portal_url)}" oninput="editingRental.portal_url=this.value" placeholder="https://sambarentals.com/..." style="${inputStyle}">`),
         field('Airbnb URL', `<input value="${esc(r.airbnb_url)}" oninput="editingRental.airbnb_url=this.value" placeholder="https://airbnb.com/..." style="${inputStyle}">`)
       )}
       ${twoCol(
@@ -6493,7 +6517,7 @@ async function archiveRental(id) {
 }
 
 async function syncRentalsFromPortal() {
-  if (!confirm('Sync rentals from sambarentals.vercel.app?\n\nThis will pull the latest listing data from the portal and UPSERT each property by slug. Existing rentals you have edited locally (occupancy %, nightly rates, etc.) will be PRESERVED if those fields are blank in the portal — but core fields like name, area, rates, amenities will be overwritten with portal data.\n\nSafe to run repeatedly.')) return;
+  if (!confirm('Sync rentals from sambarentals.com?\n\nThis will pull the latest listing data from the portal and UPSERT each property by slug. Existing rentals you have edited locally (occupancy %, nightly rates, etc.) will be PRESERVED if those fields are blank in the portal — but core fields like name, area, rates, amenities will be overwritten with portal data.\n\nSafe to run repeatedly.')) return;
   const body = document.getElementById('rentalsBody');
   body.innerHTML = '<div style="text-align:center;color:var(--ink3);font-size:13px;padding:40px">Syncing from portal...</div>';
   try {
