@@ -3138,6 +3138,13 @@ async function suggest() {
     const data = await api('suggest_reply', isOwner ? { ownerId: Number(id.slice(1)) } : { agentId: id });
     if (data.error) throw new Error(data.error);
     box.value = (data.reply || '').trim();
+    // The cards and side effects Maya attached ride with the draft, as they
+    // would on a webhook draft: the chip shows them and Send sends them.
+    if (!isOwner) {
+      state.draftCards = Array.isArray(data.send_cards) ? data.send_cards : [];
+      state.draftActions = draftActions(data.draft || '');
+      const a = state.agents.find(x => x.id === id); if (a) renderBanner(a);
+    }
   } catch (e) {
     box.value = prev;
     toast('Suggest failed: ' + e.message);

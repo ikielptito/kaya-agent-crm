@@ -1,11 +1,11 @@
-import { MAYA_PERSONA, PORTFOLIO_CONTEXT as FALLBACK_PORTFOLIO, isWithinWitaHours } from '../lib/kb.js';
+import { isWithinWitaHours } from '../lib/kb.js';
 import { sendOwnerPush, buildReviewPushPayload } from '../lib/push.js';
 import { handleAssistant, handleExecuteBroadcast } from '../lib/assistant.js';
 import { syncRental } from '../lib/rental-sync.js';
 import { tierSplit, normTier } from '../lib/tiers.js';
 import { baseAgentFields, createAgentRow, sendWelcomeTemplate } from '../lib/agents.js';
 import { getPlaybook, renderPlaybookBlock, applyDecisions, runReview, buildReviewKbContext } from '../lib/maya-review.js';
-import { applyCrmUpdates, applyCrmActions, CRM_SIGNALS_INSTRUCTIONS } from '../lib/crm-apply.js';
+import { applyCrmUpdates, applyCrmActions } from '../lib/crm-apply.js';
 // Portal listings → card objects { slug, title, subtitle, image, url, badge }
 // plus the send/log machinery — shared with Maya's autoresponder and the
 // whatsapp-send 'cards' action.
@@ -15,7 +15,22 @@ import { driveConfigured, createOwnerFolder, findOwnerFolderByName, listFolderIm
 import webpush from 'web-push';
 import { handleIcsGet, sendViewingInvites } from '../lib/viewings.js';
 // Dry-run of the webhook's full agent reply pipeline (console preview).
-import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread, handleOwnerConversation, submitOwnerIntake } from './whatsapp-webhook.js';
+import { previewAgentReply, attachOwnerPhotos, generateOwnerReply, fetchOwnerThread, handleOwnerConversation, submitOwnerIntake, sendTextWithButtons, executeReplySideEffects } from './whatsapp-webhook.js';
+
+// The cards and side effects Maya attached to a reply, as the markers the
+// webhook writes on a draft ([[send-cards:…]] and [[actions:…]]): the
+// consoles strip them into a chip and /api/whatsapp-send executes them when
+// the draft is approved. One definition for suggest_reply and the catch-up.
+function draftCards(ai) { return Array.isArray(ai?.send_cards) ? ai.send_cards.filter(Boolean).slice(0, 4) : []; }
+function draftWithMarkers(ai) {
+  const reply = String(ai?.reply || '');
+  if (!reply) return '';
+  const fx = {};
+  for (const k of ['send_contact', 'notify_team', 'ask_owner', 'open_viewing', 'send_doc']) if (ai?.[k]) fx[k] = ai[k];
+  if (Array.isArray(ai?.reply_buttons) && ai.reply_buttons.length) fx.reply_buttons = ai.reply_buttons;
+  const cards = draftCards(ai);
+  return reply + (cards.length ? `\n[[send-cards:${cards.join(',')}]]` : '') + (Object.keys(fx).length ? `\n[[actions:${Buffer.from(JSON.stringify(fx)).toString('base64url')}]]` : '');
+}
 import { isOwnerCatchupCandidate, windowOpen, catchupOutcome } from '../lib/owner-catchup.js';
 import { chaseMissingListingInfo } from '../lib/listing-info.js';
 import { sweepRelays } from '../lib/relay.js';
@@ -1190,172 +1205,24 @@ export default async function handler(req, res) {
         return res.status(200).json({ reply: ai.reply || '', action: ai.action || 'auto' });
       }
 
-      // Load agent
+      // Agent thread: the canonical pipeline — the webhook's own prompt,
+      // contract, match scan and listing cards. Until 12 Sep 2026 this action
+      // kept a cut-down copy of the prompt (photo and map URLs in the rentals
+      // list, no card contract), so a console Suggest or a catch-up answered
+      // Anastasia with a Drive link where live Maya sends cards. The CRM
+      // signals Maya recognised are applied as they are live; the cards and
+      // side effects ride on the draft as the webhook's own markers.
       const aRes = await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${agentId}&select=*`, { headers });
       const agent = (await aRes.json())?.[0];
       if (!agent) return res.status(404).json({ error: 'Agent not found' });
-
-      // Load projects + rentals
-      const [pRes, rRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/projects?select=*&active=eq.true&order=display_order.asc`, { headers }),
-        fetch(`${SUPABASE_URL}/rest/v1/rentals?select=*&active=eq.true&order=display_order.asc`, { headers })
-      ]);
-      const projects = await pRes.json();
-      const rentals = await rRes.json();
-
-      // Load recent thread (both directions, oldest→newest)
-      const tRes = await fetch(`${SUPABASE_URL}/rest/v1/wa_messages?agent_id=eq.${agentId}&order=timestamp.desc&limit=30`, { headers });
-      const rows = await tRes.json();
-      const thread = Array.isArray(rows) ? rows.slice().reverse().map(m => {
-        const t = new Date(m.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Makassar' });
-        const sender = m.direction === 'outbound' ? 'KAYA Listings (Maya)' : 'Agent';
-        return `[${t}] ${sender}: ${(m.content || '').slice(0, 200)}`;
-      }).join('\n') : '';
-
-      // Build portfolio + rentals context (simplified versions, just what's needed)
-      const portfolioCtx = projects?.length > 0
-        ? `KAYA SALES PORTFOLIO (live):\n${projects.map((p,i) => `${i+1}. ${p.name} -- ${p.area || ''} -- ${p.tagline || ''} -- units: ${(p.units||[]).filter(u => !u.availability || u.availability === 'Available').length} available -- commission ${p.commission_pct || 5}%`).join('\n')}`
-        : FALLBACK_PORTFOLIO;
-      const rentalsCtx = rentals?.length > 0
-        ? `SAMBA RENTAL PORTFOLIO (live, monthly IDR only):\n${rentals.map((r,i) => {
-            const rate = r.monthly_rate_idr ? `IDR ${(r.monthly_rate_idr/1e6).toFixed(0)}M/month` : (r.yearly_rate_idr ? `IDR ${(r.yearly_rate_idr/1e6).toFixed(0)}M/year (yearly only)` : 'rate TBC');
-            const cap = [r.beds && `${r.beds}BR`, r.max_guests && `sleeps ${r.max_guests}`].filter(Boolean).join(', ');
-            const links = [r.photos_url && `photos: ${r.photos_url}`, r.maps_url && `map: ${r.maps_url}`].filter(Boolean).join(' · ');
-            return `${i+1}. ${r.name} (${r.area || '?'}) -- ${r.property_type || 'Property'}${cap ? ', ' + cap : ''} -- ${rate}${links ? ' -- ' + links : ''}`;
-          }).join('\n')}\n\nSAMBA HARD RULES: Quote MONTHLY IDR only (a yearly-only villa: quote its yearly figure, that is its rate). Never nightly USD. Never invent prices, beds, locations, types. Missing field → "let me check with Ikiel". Photos → share photos_url. Location → share maps_url.`
-        : '';
-
-      // Live availability summary from the Samba portal digest (best-effort).
-      let availabilityCtx = '';
-      try {
-        const secret = process.env.DIGEST_SHARED_SECRET;
-        if (secret) {
-          const dRes = await fetch('https://sambarentals.vercel.app/api/digest', { headers: { Authorization: `Bearer ${secret}` } });
-          if (dRes.ok) {
-            const digest = await dRes.json();
-            if (digest && Array.isArray(digest.properties) && digest.properties.length) {
-              const lines = digest.properties.map(p => {
-                const a = p.availability || {};
-                const nowState = a.availableToday ? 'available now' : 'occupied now';
-                const next = a.nextAvailableFrom ? `next free ${a.nextAvailableFrom}` : 'no free day in horizon';
-                const longw = a.nextLongWindowFrom ? `long-term stay window from ${a.nextLongWindowFrom}` : 'no long-term stay window';
-                const contactName = p.waContactName || 'Era';
-                const contactNum = p.waNumber || '6281246357778';
-                return `- ${p.name} — ${nowState}; ${next}; ${longw} | enquire with: ${contactName} (+${contactNum})`;
-              });
-              availabilityCtx = `SAMBA LIVE AVAILABILITY (real calendar data):\n${lines.join('\n')}\n\nUse this to answer availability questions directly. For a specific date range you cannot resolve from this summary, say you'll confirm the exact dates and check the portal calendar.\n\nTHE LISTED CONTACT HANDLES THE VILLA: whoever appears as "enquire with" (Era for villas our team manages, otherwise the owner/manager) arranges viewings and answers what the data can't — owner vs manager is bookkeeping only. For a viewing, take the agent's preferred time, say you're asking that contact to confirm a slot, and give their name and number; never tell the agent to "tap Contact owner" instead of helping. Facts you don't have: say you're asking the villa. Prices are quoted as listed; negotiate only if the listing's Notes for Maya give you a floor (never below it, never revealed), otherwise say you'll take it to the villa/Ikiel. Never say "we don't manage this villa".`;
-            }
-          }
-        }
-      } catch (e) { /* availability is best-effort */ }
-
-      // Cache the stable head (persona + portfolio + rentals + availability);
-      // the volatile per-agent tail stays uncached after the breakpoint.
-      const systemHead = `${MAYA_PERSONA}
-
-${portfolioCtx}
-
-${rentalsCtx}
-
-${availabilityCtx}`;
-
-      const systemRest = `This agent's context:
-Name: ${agent.name || 'unknown'}
-Agency: ${agent.agency || 'independent'}
-
-Recent message thread (oldest → newest):
-${thread || '(no prior history)'}
-
-${CRM_SIGNALS_INSTRUCTIONS}
-
-Respond with ONLY a JSON object (no markdown, no prose):
-{
-  "reply": "the WhatsApp reply to send (1-4 sentences typical), responding to the agent's most recent message",
-  "crm_updates": [
-    { "field": "contact_frequency", "value": "weekly", "reason": "agent asked for fewer messages" }
-  ],
-  "crm_actions": [
-    { "type": "create_agent", "name": "Hikam", "wa_num": "6281234567890", "reason": "referred by this agent", "service_type": "rental", "replace": false }
-  ]
-}
-Set "crm_updates" to an empty array if no clear pipeline / frequency / service-classification signals are present. Set "crm_actions" to an empty array unless the TEAM HANDOFF rules above apply. If the agent only said something brief like "Hi sure" or "Yes please", treat that as agreement to the most recent question you asked (look at the thread) and respond accordingly. NEVER invent context, budgets, properties, viewings, or anything not in the thread above.
-WHEN NOT TO REPLY — set "reply" to "" (nothing is sent; often the right move) for: stickers or emoji-only messages; automated out-of-office / auto-reply messages from a business line; bare acknowledgments ("ok", "thanks", "🙏", "siap") when your previous message already closed the loop. Never repeat a closing line you already used in this thread.
-GUEST DISTRESS — if the sender is a guest with an urgent stay problem (locked out, broken AC, complaint), reply with empathy, say you are an AI assistant alerting Era the villa manager right now, and include Era's name and number (+6281246357778) in the reply. Never promise Ikiel for guest issues.`;
-
-      const system = [
-        { type: 'text', text: systemHead, cache_control: { type: 'ephemeral' } },
-        { type: 'text', text: systemRest },
-      ];
-
-      // Evidence for the maya_updates audit log = the agent's most recent
-      // inbound message (rows are newest-first from the timestamp.desc query).
-      const lastInbound = Array.isArray(rows) ? rows.find(m => m.direction === 'inbound') : null;
-      const evidenceQuote = (lastInbound?.content || '').slice(0, 500);
-
-      try {
-        const r = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: { 'x-api-key': ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'claude-sonnet-4-6',
-            // Output is constrained to the contract object, so this is
-            // headroom. 1100 was hit once when Maya narrated her reasoning
-            // before the JSON (22 Aug 2026) — structured outputs below stops
-            // the narration; the cap just has to be safely above any reply.
-            max_tokens: 4000,
-            system,
-            messages: [{ role: 'user', content: 'Generate the reply now.' }],
-            // Constrain the turn to the reply contract — no preamble, no
-            // reasoning narration, no code fences.
-            output_config: { format: { type: 'json_schema', schema: SUGGEST_REPLY_SCHEMA } },
-          })
-        });
-        const data = await r.json();
-        if (!r.ok || data.type === 'error') {
-          return res.status(502).json({ error: 'Claude API error: ' + (data?.error?.message || `HTTP ${r.status}`) });
-        }
-        const raw = (data.content?.[0]?.text || '').trim();
-
-        // Parse Maya's JSON contract (reply + crm_updates + crm_actions). A
-        // truncated, missing, or malformed object is a generation failure:
-        // return an error (the console shows it, the catch-up cron skips the
-        // agent) rather than shipping raw text — a 700-word internal
-        // monologue once landed in an agent's draft box that way.
-        if (data.stop_reason === 'max_tokens') {
-          return res.status(502).json({ error: `Maya's output was truncated at max_tokens (${raw.length} chars) — regenerate or reply manually.` });
-        }
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          return res.status(502).json({ error: `Maya produced no JSON reply: "${raw.slice(0, 120)}${raw.length > 120 ? '…' : ''}"` });
-        }
-        let reply = '', crmUpdates = [], crmActions = [];
-        try {
-          const parsed = JSON.parse(jsonMatch[0]);
-          reply = (parsed.reply || '').trim();
-          if (Array.isArray(parsed.crm_updates)) crmUpdates = parsed.crm_updates;
-          if (Array.isArray(parsed.crm_actions)) crmActions = parsed.crm_actions;
-        } catch (e) {
-          return res.status(502).json({ error: `Maya's JSON reply would not parse (${e.message}) — regenerate or reply manually.` });
-        }
-
-        // Apply the CRM changes Maya recognised — SAME helpers the webhook uses.
-        // Before this, suggest_reply dropped them, so catch-up (resume_unanswered)
-        // and console-drafted replies could promise "I'll stop the daily updates"
-        // without ever recording the opt-out / frequency change (21 Jul 2026).
-        if (crmUpdates.length) await applyCrmUpdates(SUPABASE_URL, headers, agent, crmUpdates, evidenceQuote);
-        if (crmActions.length) await applyCrmActions(SUPABASE_URL, headers, agent, crmActions, evidenceQuote);
-
-        // Real token cost (claude-sonnet-4-6: $3/M in, $15/M out) so the cron
-        // charges actual dollars into daily_usage instead of a flat estimate.
-        const u = data.usage || {};
-        const cost_usd = (u.input_tokens || 0) * 3 / 1e6
-          + (u.output_tokens || 0) * 15 / 1e6
-          + (u.cache_read_input_tokens || 0) * 0.30 / 1e6
-          + (u.cache_creation_input_tokens || 0) * 3.75 / 1e6;
-        return res.status(200).json({ reply, cost_usd, crm_updates: crmUpdates.length, crm_actions: crmActions.length });
-      } catch (e) {
-        return res.status(500).json({ error: 'Claude call failed: ' + e.message });
-      }
+      const ai = await previewAgentReply({ SUPABASE_URL, sbHeaders: headers, ANTHROPIC_KEY, agent, mode: payload.mode || 'draft' });
+      if (!ai || ai.error) return res.status(502).json({ error: ai?.error || 'Maya produced nothing' });
+      const evidenceQuote = String(ai.inbound || '').slice(0, 200);
+      const crmUpdates = Array.isArray(ai.crm_updates) ? ai.crm_updates : [];
+      const crmActions = Array.isArray(ai.crm_actions) ? ai.crm_actions : [];
+      if (crmUpdates.length) await applyCrmUpdates(SUPABASE_URL, headers, agent, crmUpdates, evidenceQuote).catch(() => {});
+      if (crmActions.length) await applyCrmActions(SUPABASE_URL, headers, agent, crmActions, evidenceQuote).catch(() => {});
+      return res.status(200).json({ reply: ai.reply || '', draft: draftWithMarkers(ai), send_cards: draftCards(ai), action: ai.action || 'auto', model: ai.model || null, cost_usd: typeof ai.cost_usd === 'number' ? ai.cost_usd : 0.02, crm_updates: crmUpdates.length, crm_actions: crmActions.length });
 
     } else if (action === 'preview_owner_reply') {
       // DRY RUN of owner mode for one owner: the real prompt, actions and
@@ -2117,39 +1984,45 @@ Respond with ONLY a JSON array, one object per item in order: [{"i":1,"add":true
           continue;
         }
 
-        // Generate a fresh reply with the canonical Maya prompt.
-        let reply = '', cost = 0.02;
-        try {
-          const sg = await fetch(`${selfOrigin}/api/supabase`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json', ...consoleAuthHeaders() },
-            body: JSON.stringify({ action: 'suggest_reply', payload: { agentId: a.id } })
-          });
-          if (sg.ok) { const d = await sg.json(); reply = (d?.reply || '').trim(); if (typeof d?.cost_usd === 'number') cost = d.cost_usd; }
-        } catch (e) { /* skip below */ }
-        if (!reply || reply.startsWith('[')) { results.push({ agent: a.name || a.id, skipped: 'no_reply' }); continue; }
-        todaySpend += cost;
-
-        // Draft mode: save the reply for review, leave the thread unread. No send.
-        if (effMode === 'draft') {
-          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ suggested_reply: reply }) }).catch(() => {});
-          results.push({ agent: a.name || a.id, drafted: true });
+        // Generate with the canonical pipeline: the webhook's prompt,
+        // contract and listing cards — not the cut-down suggest_reply copy
+        // that answered Anastasia with a Drive link on 12 Sep 2026.
+        const full = (await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}&select=*`, { headers }).then(x => x.json()).catch(() => []))?.[0] || a;
+        let ai = null;
+        try { ai = await previewAgentReply({ SUPABASE_URL, sbHeaders: headers, ANTHROPIC_KEY, agent: full, mode: effMode }); } catch (e) { ai = { error: e.message }; }
+        if (!ai || ai.error) { results.push({ agent: a.name || a.id, skipped: 'no_reply', error: ai?.error || null }); continue; }
+        const reply = String(ai.reply || '').trim();
+        todaySpend += typeof ai.cost_usd === 'number' ? ai.cost_usd : 0.02;
+        const evidenceQuote = String(ai.inbound || last.content || '').slice(0, 200);
+        if (Array.isArray(ai.crm_updates) && ai.crm_updates.length) await applyCrmUpdates(SUPABASE_URL, headers, full, ai.crm_updates, evidenceQuote).catch(() => {});
+        if (Array.isArray(ai.crm_actions) && ai.crm_actions.length) await applyCrmActions(SUPABASE_URL, headers, full, ai.crm_actions, evidenceQuote).catch(() => {});
+        if (!reply) {
+          // Maya chose silence (a sticker, an auto-reply, a bare thanks): nobody is waiting.
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0 }) }).catch(() => {});
+          results.push({ agent: a.name || a.id, skipped: 'nothing_to_say' });
           continue;
         }
-
-        // Hybrid / autopilot: send via WhatsApp, clear unread + any stale draft.
-        const sr = await fetch(`https://graph.facebook.com/v24.0/${WA_PHONE_ID}/messages`, {
-          method: 'POST', headers: { Authorization: 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messaging_product: 'whatsapp', to: waNum, type: 'text', text: { body: reply } })
-        });
-        const sd = await sr.json().catch(() => ({}));
-        if (!sr.ok) { results.push({ agent: a.name || a.id, error: sd?.error?.message || ('HTTP ' + sr.status) }); continue; }
-        const waMessageId = sd.messages?.[0]?.id || null;
+        const draft = draftWithMarkers(ai);
+        // Draft mode, or hybrid with Maya asking for a human (a client brief, a
+        // complaint): the draft waits for review with its cards attached — what
+        // live Maya does. The old catch-up sent everything in hybrid.
+        if (effMode === 'draft' || (effMode === 'hybrid' && ai.action === 'escalate')) {
+          await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ suggested_reply: draft }) }).catch(() => {});
+          results.push({ agent: a.name || a.id, drafted: true, ...(ai.action === 'escalate' ? { why: 'escalated' } : {}) });
+          continue;
+        }
+        // Hybrid / autopilot: the text (with any quick-reply buttons), then the
+        // cards, contact card, brochure and team alerts — exactly as live.
+        const buttons = Array.isArray(ai.reply_buttons) ? ai.reply_buttons : [];
+        const waMessageId = await sendTextWithButtons(WA_PHONE_ID, WA_TOKEN, waNum, reply, buttons).catch(() => null);
+        if (!waMessageId) { results.push({ agent: a.name || a.id, error: 'WhatsApp refused the message' }); continue; }
         await fetch(`${SUPABASE_URL}/rest/v1/wa_messages`, {
           method: 'POST', headers,
-          body: JSON.stringify({ agent_id: a.id, wa_num: waNum, direction: 'outbound', content: reply, wa_message_id: waMessageId, timestamp: new Date().toISOString(), source: 'catchup', status: waMessageId ? 'sent' : null })
+          body: JSON.stringify({ agent_id: a.id, wa_num: waNum, direction: 'outbound', content: reply + (buttons.length ? `\n[Buttons: ${buttons.join(' | ')}]` : ''), wa_message_id: typeof waMessageId === 'string' ? waMessageId : null, timestamp: new Date().toISOString(), source: 'catchup', status: 'sent' })
         }).catch(() => {});
+        await executeReplySideEffects({ SUPABASE_URL, sbHeaders: headers, WA_PHONE_ID, WA_TOKEN, agent: full, toNum: waNum, actions: ai, evidence: evidenceQuote }).catch(() => {});
         await fetch(`${SUPABASE_URL}/rest/v1/agents?id=eq.${a.id}`, { method: 'PATCH', headers, body: JSON.stringify({ unread_count: 0, suggested_reply: '' }) }).catch(() => {});
-        results.push({ agent: a.name || a.id, sent: true });
+        results.push({ agent: a.name || a.id, sent: true, cards: draftCards(ai).length });
       }
 
       // Persist updated spend (mirror the webhook's daily_usage upsert).
